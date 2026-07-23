@@ -9,6 +9,7 @@ export * from "./poll";
 export * from "./redact";
 export * from "./http";
 export * from "./define";
+export * from "./auth";
 export * from "./fnHash";
 export * from "./graph";
 export * from "./params";

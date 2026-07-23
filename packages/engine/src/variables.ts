@@ -69,6 +69,8 @@ export function createRunContext(init: Partial<RunContext> = {}): RunContext {
     matrix: init.matrix ?? {},
     nodes: init.nodes ?? {},
     vars: init.vars ?? {},
+    auth: init.auth ?? {},
+    authCache: init.authCache ?? new Map(),
     signal: init.signal,
   };
 }

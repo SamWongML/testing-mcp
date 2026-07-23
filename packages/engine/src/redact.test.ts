@@ -30,6 +30,14 @@ describe("redactRequest", () => {
     );
     expect(out.body).toEqual({ password: "***", note: "pw is ***", nested: { p: "***" } });
   });
+
+  it("masks secret values in query parameters (e.g. an api-key)", () => {
+    const out = redactRequest(
+      { method: "GET", url: "https://x/y", query: { api_key: "s3cret", page: "2" } },
+      ["s3cret"],
+    );
+    expect(out.query).toEqual({ api_key: "***", page: "2" });
+  });
 });
 
 describe("redactResponse", () => {
