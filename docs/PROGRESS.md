@@ -19,7 +19,7 @@
 | P3 | Engine II — suites/DAG/auth/matrix | ✅ | 2026-07-23 | ✅ |
 | P4 | Compile + CLI + sample corpus | ✅ | 2026-07-23 | ✅ |
 | P5 | Reporting renderers | ✅ | 2026-07-23 | ✅ |
-| P6 | Store — Postgres record + queue + artifacts | ⬜ | — | — |
+| P6 | Store — Postgres record + queue + artifacts | ✅ | 2026-07-23 | ✅ |
 | P7 | MCP server — sync surface | ⬜ | — | — |
 | P8 | Worker + MCP Tasks — async lifecycle | ⬜ | — | — |
 | P9 | Prompts + Insomnia migration | ⬜ | — | — |
@@ -763,15 +763,126 @@ the only memory that crosses sessions.
     re-exported) — acceptable placement. Gate green (303 total, +2).
 
 ### P6 — Store
-- [ ] Drizzle schema + migrations (§16.1 tables + stage-1 `tasks` table)
-- [ ] `queue.ts` (enqueue/claim SKIP LOCKED/heartbeat/reaper/cancel flag)
-- [ ] `TaskStateStore` interface + `PostgresTaskStore`
-- [ ] `ArtifactStore` interface + S3 + local-fs implementations
-- [ ] `runs.ts` history writes + `list_runs` query
-- [ ] `docker-compose.dev.yml`
-- [ ] Integration tests: concurrent claim safety, reaper requeue, migrations-from-empty
+- [x] Drizzle schema + migrations (§16.1 tables + stage-1 `tasks` table)
+- [x] `queue.ts` (enqueue/claim SKIP LOCKED/heartbeat/reaper/cancel flag)
+- [x] `TaskStateStore` interface + `PostgresTaskStore`
+- [x] `ArtifactStore` interface + local-fs impl (**S3 → P11**, the AWS phase)
+- [x] `runs.ts` history writes + `list_runs` query
+- [x] `docker-compose.dev.yml`
+- [x] Integration tests: concurrent claim safety, reaper requeue, migrations-from-empty
 
-**Handoff notes:** _none yet_
+**Handoff notes:**
+- **Deps added (minimal):** `@atp/store` now depends on `drizzle-orm` (0.36.4), `pg`
+  (8.22) and `@atp/schema` (for `ExecutionResult` in `recordRun`); dev dep `@types/pg`.
+  **No `drizzle-kit`, no AWS SDK** — consistent with the codebase's dep-minimalism
+  (cf. P4 "no `glob` dep", "node:http no framework"). Drizzle is the ORM chosen in §4.3.
+- **Drizzle schema (`db/schema.ts`)** mirrors the §16.1 DDL (`manifests`,
+  `catalog_entries`, `jobs`, `runs`, `step_results`, `assertion_results`, `audit_log`)
+  plus the stage-1 `tasks` table that collapses DynamoDB's hot state into Postgres
+  (§16.2 fields, §18 "dozens" row). **Ids are `text`, not `uuid`** (deviation from the
+  §16.1 sketch): the IR types every id as `z.string()` — the engine defaults to
+  `randomUUID()` but callers pass arbitrary strings (e.g. `run-1` in tests), and a `uuid`
+  column would reject those. `text` honors the contract; app code generates uuids
+  (`node:crypto`) where it wants them (job ids), so no `pgcrypto`/`uuid-ossp` extension.
+- **Migrations are hand-authored SQL + an in-house migrator** (`db/migrations/0000_init.sql`
+  + `db/migrate.ts`), **not drizzle-kit codegen.** `migrate(pool)` tracks applied files in
+  a `_migrations` table and runs each pending file in its own transaction; re-runs are
+  no-ops. Rationale: the DDL is small and given verbatim in §16.1, and this keeps
+  "migrations apply cleanly to an empty database" fully under test with zero extra
+  tooling. The Drizzle schema is the typed query surface and is kept in sync with the SQL
+  by hand. ⚠️ **Build note for P11:** `migrate()` resolves `migrations/` relative to
+  `import.meta.url`; this works under `tsx`/`vitest` (no build step), but a `tsc` emit to
+  `dist/` won't copy `.sql` — the container build must copy the migrations dir.
+- **`queue.ts` (the §11.2 no-broker pattern):** statuses `queued|running|done|failed`.
+  `claim(db, workerId)` runs a transaction: `SELECT id … FOR UPDATE SKIP LOCKED LIMIT 1`
+  then a typed `UPDATE … RETURNING *` by that id — the row-lock is held for the txn so
+  concurrent claimers skip it (no double-claim; the concurrency test proves N jobs → N
+  distinct claims under N+4 contending claimers), and the UPDATE gives back a
+  fully-typed camelCase row (vs. a raw `db.execute` that would return snake_case). `claimed_at`
+  is set with `sql\`now()\`` (server time) so lease math is server-consistent. `heartbeat`
+  refreshes the lease (false if the worker no longer owns it); `reapExpired(leaseMs)`
+  requeues `running` jobs older than the lease (`make_interval(secs => leaseMs/1000)`);
+  `markDone` → terminal; `requestCancel(runId)`/`isCancelRequested(jobId)` are the
+  cancel-flag seam the worker polls between nodes (P8).
+- **`tasks.ts` — `TaskStateStore` interface + `PostgresTaskStore`.** Interface:
+  `put` (full upsert via `onConflictDoUpdate`), `get`, `update` (partial patch — drizzle
+  omits `undefined`, so `setProgress` touches only progress/currentNode), `setProgress`,
+  `requestCancel`, `deleteExpired`. TTL = an `expires_at` column; `deleteExpired(now?)`
+  sweeps expired rows (the DynamoDB-TTL analog). **This interface is the seam P11's
+  `DynamoTaskStore` implements** — nothing above the store changes when it swaps in.
+- **`artifacts.ts` — `ArtifactStore` interface + `LocalArtifactStore`** (`node:fs`, no
+  deps; path-traversal guarded; `presign` returns a `file://` URL in dev). `artifactKey()`
+  encodes the §16.3 `{env}/{yyyy}/{mm}/{dd}/{runId}/{name}` layout (UTC). **`S3ArtifactStore`
+  deferred to P11** (documented, and mirrors this phase's own DynamoDB deferral): there is
+  no AWS to test against here and `@aws-sdk/client-s3` + presigner are heavy untested deps —
+  they belong with the rest of the AWS wiring in P11, behind this same interface. P7 uses
+  `LocalArtifactStore` locally; S3 slots in at deploy.
+- **`runs.ts` — history + query.** `recordRun(db, result, meta?)` writes the `runs` row +
+  `step_results` + `assertion_results` in one transaction (float timings/duration rounded
+  to the int columns; an assertion with no message → `null`). `listRuns({entryId, status,
+  since, limit})` is the newest-first, flakiness-friendly history query the MCP `list_runs`
+  tool will serve (P7); `getRun(runId)` returns `{run, steps, assertions}` (used by the
+  test and available to P7).
+- **Deferred to P7 — catalog snapshot writer:** the `manifests`/`catalog_entries` tables
+  exist (schema + migration) but have **no writer yet**. `runs.manifest_hash` is a plain
+  `text` column (no FK, per §16.1), so run history doesn't need them populated. P7 loads
+  the manifest at boot and is the natural place to snapshot the catalog (`recordManifest`).
+- **Test harness (`db/test-db.ts`)** is **gated on `ATP_TEST_DATABASE_URL`**: when unset the
+  integration suites `describe.skipIf` out, so `pnpm test` (and CI without the DB) stay
+  green — the pure `artifacts`/`artifactKey` unit tests always run. `makeTestDb()` creates
+  a throwaway Postgres **schema** (namespace), points the pool's `search_path` at it,
+  migrates, and drops it on `close()` — per-suite isolation over one shared database, so the
+  concurrent-claim test uses a real connection pool. Verified against a real local
+  Postgres 16 (this env has no docker daemon, but the PG server binaries run directly).
+- **CI:** added a `postgres:16` service to `ci.yml` and set `ATP_TEST_DATABASE_URL` **only
+  on the `pnpm test` step** (typecheck/lint/compile unchanged), so the store integration
+  tests actually execute in CI rather than only when a dev remembers to start Postgres.
+  `docker-compose.dev.yml` (Postgres; MinIO/S3 → P11) is the local equivalent.
+- **Exit criteria — verified:** `pnpm --filter @atp/store test` green (26 tests) against
+  real Postgres — incl. concurrent-claim safety, reaper requeue, and migrations-from-empty
+  — and **skips cleanly with no DB**. Full gate `typecheck + lint + test` green (329 total,
+  **+26**) plus `pnpm compile`. Postgres deviation (`text` ids, hand-SQL migrations, S3/catalog
+  deferrals) all documented above.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both confirmed the
+  gate green with **no Blockers**, and traced the SKIP-LOCKED claim, migration, and
+  redaction paths as correct. Applied:
+  - **(Major, completeness) `gitSha` now persisted.** `recordRun` dropped `result.gitSha`
+    (only `manifests.git_sha` held it, and that writer is deferred to P7), so the §21
+    "every run records `manifestHash` + `gitSha`" invariant was unsatisfiable for a P6 run.
+    Added a **`git_sha` column to `runs`** (denormalized onto the run so it's self-describing
+    with no P7-ordering dependency); `recordRun` writes it and a test asserts the round-trip.
+    `schema.ts` ↔ `0000_init.sql` kept in sync.
+  - **(Major, simplicity) `recordRun` batched.** The per-step loop (up to `2n+1` sequential
+    inserts in the txn) collapsed to one batched `stepResults` insert + one `flatMap`ed
+    `assertionResults` insert (each guarded on length — Drizzle rejects an empty `.values([])`).
+  - **(Minor) `markDone` ownership guard.** Was an unconditional `UPDATE … WHERE id`; a
+    reaped-then-reassigned job could be finalized by the dead worker. Now guarded by
+    `and(id, workerId, status='running')` (symmetric with `heartbeat`) and returns a boolean;
+    the signature gained `workerId` (no consumers yet — P8 worker loop).
+  - **(Minor) `listRuns` stable order.** Added `desc(runs.id)` as a tiebreaker so equal
+    `started_at` rows (and `limit`) are deterministic.
+  - **(Nit) dropped `satisfies JobStatus`** (3 sites) — `satisfies` appears nowhere else in
+    non-test source; the exported `JobStatus` type still documents the status domain.
+  - **(coverage) +tests** for the enumerated TDD gaps: `markDone("failed")` + the
+    ownership-guard rejection, `heartbeat` on a terminal job, `requestCancel` on a running
+    job, `isCancelRequested` on an unknown job, `setProgress` without `currentNode`
+    (undefined-omission doesn't clear it), and `recordRun` with an assertion-less step + a
+    step-less run.
+  - **Kept w/ reason:** `getRun` (P8's `get_run` needs it), the `manifests`/`catalog_entries`
+    tables without a writer (P7 snapshot), the per-file test `beforeEach`/`afterEach`
+    (readable; `migrate.test` uses a different lifecycle). **Documented (not changed):**
+    `recordRun` is **not idempotent** — a duplicate `runId` hits the `runs` PK and the txn
+    rolls back (a run is recorded once; idempotency keys are P8). +2 tests (**28 store /
+    331 total**). Gate green.
+- **Exact next step (P7): stateless MCP sync surface.** Streamable-HTTP MCP server (SDK +
+  Hono) in `packages/mcp-server/src/`: `server.ts` (stateless, `/healthz`/`/readyz`,
+  fail-fast `loadConfig`), manifest load at boot, tools `list_tests`/`describe_test`/
+  `run_test`(inline, `!isLongRunning`)/`get_report`/`list_runs`, resources
+  `test://catalog`/`test://{id}`/`run://{id}/report.{md,json}`. Inline runs persist via
+  `@atp/store` (`recordRun` + `LocalArtifactStore`) and render via `@atp/reporting`. Add the
+  catalog snapshot writer (`recordManifest`) here. **Verify the installed
+  `@modelcontextprotocol/sdk` API via Context7/SDK docs, not memory** (§23). Read plan §P7 +
+  research §8.1–8.4, §8.6, ADR-002.
 
 ### P7 — MCP server (sync)
 - [ ] Stateless Streamable HTTP via Hono; `/healthz` `/readyz`; fail-fast config
@@ -851,6 +962,8 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P4 (2/n) review | P4 | Completeness + simplicity review (2 subagents), **0 Blockers, 2 Majors**. Fixed: cwd-coupled CLI tests (9-failed under `pnpm --filter`/`-r`; pin `root` + injectable `run(argv,root)`); env-dependent `manifestHash` (corpus env now a literal, only the CLI run path honors `ATP_BASE_URL`); `runById` matrix handling reuses the engine's `expandUnits` (deletes the lossy `cellCoords` parser — flagged by both reviewers). Simplicity dedups: exported `importDef`/`compileToFile` from `@atp/compile`, hoisted `isSuite` into the engine. Nits: `--flag=value`, `--env ""`. +15 coverage tests (new `cli/index.test.ts` dispatcher exit codes; compile no-default-export/`resolveGitSha`/`writeManifest`). Kept w/ reason: `canonical` undefined-strip, root `declaration:false`. **237 tests**, incl. `pnpm -r test`. Gate green. | _(this commit)_ |
 | 2026-07-23 | P5 | P5 | **P5 complete.** `@atp/reporting`: five pure renderers off one canonical `ExecutionResult` (ADR-006) — `markdown` (status/step-table/failures), `summary` (`llm_summary`: compact pass line, else likely-cause + next-action), `html` (self-contained: inline CSS, native `<details>` traces, no JS/external refs, XML-escaped — renders in Chromium), `junit` (XML; cancelled→skipped), `trace` (redacted full-fidelity JSON). Shared `diagnose` likely-cause heuristic (auth/server-error/timeout/network/schema-mismatch/assertion-failed/cancelled) backs summary **and** md/html. `renderReport` format dispatch. Golden-file tests (`toMatchFileSnapshot`) over 5 fixtures (pass/fail/retried/cancelled/long-suite) + semantic assertions. CLI `atp run <id> --report md\|html\|junit\|json\|summary [--out]`. TDD, +64 tests (301 total). All exit criteria verified. | _(this commit)_ |
 | 2026-07-23 | P5 review | P5 | Completeness + simplicity review (2 subagents): gate green, design sound; completeness 1 Major, simplicity 0 Blockers/Majors. Fixed the Major — a whole-suite `timeoutMs` breach (engine: `errored` run + `cancelled` nodes) was diagnosed `cancelled`, never `timeout`; now `classifyErrorText(result.error)` routes it to `timeout` while a caller-cancel stays `cancelled` (+2 regression tests). Simplicity: hoisted the junit↔diagnose plain-text `assertionLine` into `util.ts` (output byte-identical, no golden changed); collapsed a redundant `badgeColors` union to `Record<StepStatus,string>`. +2 tests (303 total). Gate green. | _(this commit)_ |
+| 2026-07-23 | P6 | P6 | **P6 complete.** `@atp/store`: Drizzle schema (`db/schema.ts`) mirroring §16.1 + stage-1 `tasks` table (ids `text`, not `uuid`, to honor the string-id IR); hand-authored SQL migration + in-house `migrate()` (tracks `_migrations`, per-file txn — no drizzle-kit). `queue.ts` (§11.2): `claim` via `SELECT … FOR UPDATE SKIP LOCKED` + typed UPDATE-by-id, `heartbeat`/`reapExpired`(lease)/`markDone`/`requestCancel`/`isCancelRequested`. `TaskStateStore` interface + `PostgresTaskStore` (upsert/patch/progress/cancel/TTL sweep — the seam P11's Dynamo adapter implements). `ArtifactStore` interface + `LocalArtifactStore` (`node:fs`, traversal-guarded) + `artifactKey` §16.3 layout — **S3 → P11**. `runs.ts`: `recordRun` (run+steps+assertions, one txn) + `listRuns`(entryId/status/since) + `getRun`. Harness `db/test-db.ts` gated on `ATP_TEST_DATABASE_URL` (per-schema isolation; skips w/o a DB). CI gains a `postgres:16` service on the test step; `docker-compose.dev.yml` added. Deferred: catalog-snapshot writer → P7, S3ArtifactStore → P11. TDD, +26 tests (329 total), verified vs. real Postgres 16. All exit criteria green. | _(this commit)_ |
+| 2026-07-23 | P6 review | P6 | Completeness + simplicity review (2 subagents), gate green, **no Blockers**. Fixed: **(Major)** `recordRun` now persists `gitSha` (new denormalized `runs.git_sha` column) — the §21 `manifestHash`+`gitSha` invariant was unmet for a P6 run; **(Major, simplicity)** batched `recordRun`'s per-step inserts (`2n+1` → 2 statements); **(Minor)** `markDone` gained a worker-ownership + `running` guard (a reaped-then-reassigned job can't be finalized by the dead worker) and returns bool; **(Minor)** `listRuns` tiebreaks equal `started_at` by `id`; **(Nit)** dropped `satisfies JobStatus`. +coverage: `markDone` failed/guard, heartbeat-terminal, cancel-running, `isCancelRequested`-unknown, `setProgress`-no-node, empty-assertions/step-less run. Documented `recordRun` non-idempotency (dup `runId` → PK rollback; idempotency keys are P8). +2 tests (28 store / 331 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
@@ -885,3 +998,16 @@ doing them out of order.
   bindings land in the *serializable* manifest — most likely by resolving `{{params.*}}`
   into the node's request templates at normalize time (baking), since the manifest
   carries no params builder. Settle this before the compile step hard-codes an assumption.
+- **S3ArtifactStore (from P6) → P11:** the `ArtifactStore` interface + `LocalArtifactStore`
+  landed in P6; the S3 implementation (`@aws-sdk/client-s3` put/get + presigned URLs via
+  `@aws-sdk/s3-request-presigner`) is deferred to P11 (the AWS phase), behind the same
+  interface and alongside the `DynamoTaskStore` — there's no AWS to integration-test against
+  before then, and the SDK deps are heavy. P7 uses `LocalArtifactStore` locally.
+- **Catalog snapshot writer (from P6) → P7:** the `manifests` + `catalog_entries` tables
+  exist (P6 schema + migration) but have no writer. `runs.manifest_hash` is an FK-free `text`
+  column (§16.1), so run history doesn't need them populated. P7 loads the manifest at boot —
+  the natural place to add `recordManifest(db, manifest)` snapshotting the catalog.
+- **Migrations dir must be copied on `tsc` build (from P6) → P11:** `migrate()` resolves
+  `db/migrations/*.sql` relative to `import.meta.url`, which works under `tsx`/`vitest` (no
+  build). The P11 container build (`tsc` emit to `dist/`) must copy the `migrations` dir into
+  the output, or the migrator won't find the `.sql` files at runtime.
