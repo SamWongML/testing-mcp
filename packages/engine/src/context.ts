@@ -17,8 +17,8 @@ export interface RunContext {
   vars: Record<string, unknown>;
   /** Auth providers keyed by id; a request's `authRef` selects one (research §10.3). */
   auth: Record<string, AuthProvider>;
-  /** Per-run cache for token-fetching providers (oauth2 client-credentials). */
-  authCache: Map<string, unknown>;
+  /** Per-run access-token cache for token-fetching providers (oauth2 client-credentials). */
+  authCache: Map<string, Promise<string>>;
   /** Cooperative cancellation: checked between nodes and passed to the HTTP client. */
   signal?: AbortSignal;
 }

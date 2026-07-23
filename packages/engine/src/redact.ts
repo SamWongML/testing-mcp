@@ -43,11 +43,22 @@ function redactHeaders(
   return out;
 }
 
+function redactQuery(
+  query: Record<string, string> | undefined,
+  secrets: readonly string[],
+): Record<string, string> | undefined {
+  if (!query) return query;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(query)) out[k] = maskSecrets(v, secrets);
+  return out;
+}
+
 /** Redact a request snapshot before persistence. */
 export function redactRequest(req: ResolvedRequest, secrets: readonly string[]): RequestSpec {
   return {
     ...req,
     headers: redactHeaders(req.headers, secrets),
+    query: redactQuery(req.query, secrets),
     body: req.body === undefined ? undefined : redactDeep(req.body, secrets),
   };
 }

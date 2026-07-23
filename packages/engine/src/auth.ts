@@ -16,9 +16,21 @@ import { resolveTemplates } from "./variables";
  * resolve against the run context. Redaction masks the auth header before persistence.
  */
 
-/** Merge headers onto a request without mutating the original. */
+/**
+ * Merge headers onto a request without mutating the original. Matching is
+ * case-insensitive, so an injected `authorization` replaces a pre-existing
+ * `Authorization` rather than sending both (undici would forward a duplicate).
+ */
 function withHeaders(request: RequestSpec, headers: Record<string, string>): RequestSpec {
-  return { ...request, headers: { ...(request.headers ?? {}), ...headers } };
+  const merged: Record<string, string> = { ...(request.headers ?? {}) };
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    for (const existing of Object.keys(merged)) {
+      if (existing.toLowerCase() === lower) delete merged[existing];
+    }
+    merged[name] = value;
+  }
+  return { ...request, headers: merged };
 }
 
 /** `Authorization` bearer token. */
@@ -70,9 +82,12 @@ export function oauth2ClientCredentials(opts: {
   return {
     id: opts.id,
     apply: async (request, ctx) => {
-      let pending = ctx.authCache.get(opts.id) as Promise<string> | undefined;
+      let pending = ctx.authCache.get(opts.id);
       if (!pending) {
         pending = fetchClientCredentialsToken(opts, ctx.signal);
+        // Cache only successes: a rejected fetch (transient token-endpoint failure or a
+        // cancellation) is evicted so a later node retries instead of reusing the error.
+        pending.catch(() => ctx.authCache.delete(opts.id));
         ctx.authCache.set(opts.id, pending);
       }
       const token = await pending;
@@ -118,12 +133,21 @@ export function customAuth(opts: {
   return { id: opts.id, apply: opts.apply };
 }
 
-/** Index a list of providers by id into the registry the run context carries. */
+/**
+ * Index a list of providers by id into the registry the run context carries. Ids are
+ * the `authRef` addressing keys, so a duplicate throws (mirroring `topoSort`/schema
+ * `uniqueById`) rather than silently dropping a provider.
+ */
 export function buildAuthRegistry(
   providers: AuthProvider[] | undefined,
 ): Record<string, AuthProvider> {
   const registry: Record<string, AuthProvider> = {};
-  for (const provider of providers ?? []) registry[provider.id] = provider;
+  for (const provider of providers ?? []) {
+    if (provider.id in registry) {
+      throw new Error(`duplicate auth provider id "${provider.id}"`);
+    }
+    registry[provider.id] = provider;
+  }
   return registry;
 }
 

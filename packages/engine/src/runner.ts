@@ -91,17 +91,7 @@ async function attemptStep(
       };
     }
     // An unresolved template or unknown authRef is an authoring/config error, not transient.
-    return {
-      result: {
-        id: step.id,
-        status: "errored",
-        assertions: [],
-        extracted: {},
-        attempts: 1,
-        error: errorMessage(err),
-      },
-      retryOn: [],
-    };
+    return { result: erroredStep(step.id, errorMessage(err)), retryOn: [] };
   }
 
   const redactedRequest = redactRequest(request, secretValues);
@@ -139,15 +129,7 @@ async function attemptStep(
       };
     }
     return {
-      result: {
-        id: step.id,
-        status: "errored",
-        request: redactedRequest,
-        assertions: [],
-        extracted: {},
-        attempts: 1,
-        error: errorMessage(err),
-      },
+      result: { ...erroredStep(step.id, errorMessage(err)), request: redactedRequest },
       retryOn: ["network"],
     };
   }

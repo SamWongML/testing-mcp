@@ -387,6 +387,36 @@ the only memory that crosses sessions.
     server hold the provider registry?) is P4/P7 territory — the manifest carries no
     functions, so `_shared/auth` providers are constructed at server boot and keyed by the
     same `authRef` string. Note this when P4 normalizes suites.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both confirmed the
+  gate green and no Blockers; the auth module itself carries no reuse debt. Applied fixes:
+  - **(Major) redaction of `query`:** `redactRequest` only touched `headers`/`body`, so a
+    secret-sourced api-key placed in the **query string** (`apiKeyAuth({ in: "query" })`)
+    landed in the persisted snapshot in plaintext. Added `redactQuery` (masks known secret
+    values) — the credential-at-rest contract now covers query params. (redact.ts)
+  - **(Major) oauth2 token cache poisoning:** the *rejected* fetch promise was cached, so
+    one transient token-endpoint blip made every later node re-await the same error
+    (unrecoverable, step `retry` couldn't help). Now `pending.catch(() =>
+    authCache.delete(id))` evicts failures so a later node retries; only successes stick.
+  - **(nit) duplicate provider id:** `buildAuthRegistry` silently last-wins → now **throws**
+    (matches `topoSort`/schema `uniqueById`).
+  - **(nit) header-casing collision:** `withHeaders` is now case-insensitive, so an injected
+    `authorization` **replaces** a pre-existing `Authorization` instead of sending both
+    (undici would forward a duplicate with undefined precedence).
+  - **(simplicity)** routed `attemptStep`'s two errored catches through the existing
+    `erroredStep` helper (the `StepResult` shape lives in one place again); tightened
+    `authCache` to `Map<string, Promise<string>>` (dropped a cast); hoisted the duplicated
+    `MockAgent` setup in `auth.test.ts` to a file-level `beforeEach`/`afterEach`.
+  - TDD: +5 auth tests (case-insensitive header replace, dup-id throw, no-cache-on-failure
+    retry, cancel-during-token-fetch, query-api-key redaction e2e) + 1 redact unit test.
+    118 engine / 164 total, gate green.
+  - **Deferred / documented (not fixed):** (a) a **hardcoded literal** credential value on a
+    custom-named api-key header/query still isn't auto-redacted — the supported pattern is
+    `value: "{{secrets.*}}"` (now fully covered in header *and* query); a literal secret is an
+    authoring anti-pattern, same as hardcoding one in any request field. (b) a secret whose
+    **value contains literal `{{…}}`** breaks on `applyAuth`'s re-resolution — but this is a
+    pre-existing template-engine behavior (`resolveString` recurses into resolved values),
+    not auth-specific, and would bite any `{{secrets.X}}` use. (c) a genuine auth error that
+    coincides with an abort is labeled `cancelled` — benign under cancellation precedence.
 - **Exact next step: matrix expansion + §7.2 e2e (closes P3).** (1) Matrix expansion —
   one authored file (`matrix: { region: [...], tier: [...] }`) → N discrete executable
   units (cartesian product), each a run with its `{{matrix.*}}` scope populated and the
@@ -495,6 +525,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (4/n) | P3 | `poll.untilAssertPasses`: `poll.ts` `withPoll` (abortable interval loop mirroring `retry.ts`); `attemptStep` factors send+assert into a closure routed through `withPoll` when `step.poll` set. Poll owns the assertion-retry axis (suppresses `assertion` `retryOn`); retry owns transport; each send bounded by step `timeoutMs`, loop by `maxMs`. Extracted shared `sleep` into `util.ts`. TDD, +6 tests (95 engine / 141 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P3 (4/n) review | P3 | Completeness + simplicity review (2 subagents): correct + complete, no Blockers/Majors. Added 2 runner tests (cancel-mid-poll → `cancelled`; retry `on:["assertion"]` can't restart the poll loop), tightened the `maxMs`-budget doc, one comment nit. Deferred authored-input validation (non-positive `poll.intervalMs`) to the P4 normalizer. +2 tests (97 engine / 143 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P3 (5/n) | P3 | Auth providers: `auth.ts` (`bearer`/`basic`/`api-key`/`oauth2-client-credentials` w/ per-run promise-cached token/`custom`) + `defineAuth` + `buildAuthRegistry`; `applyAuth` wired into `attemptStep` on the §10.3 seam (resolve→auth→send), re-resolving templated credentials (`{{secrets.*}}`). `RunContext` gained `auth`/`authCache`; run options gained `auth: AuthProvider[]`. Unknown-ref → errored step; cancel-during-token-fetch → cancelled. TDD, +15 tests (112 engine / 158 total). Gate green. | _(this commit)_ |
+| 2026-07-23 | P3 (5/n) review | P3 | Completeness + simplicity review (2 subagents), no Blockers. Fixed 2 Majors: `redactRequest` now redacts `query` (secret-sourced api-key in query no longer leaks at rest); oauth2 cache no longer memoizes a failed token fetch (evict on reject so a later node retries). Nits: `buildAuthRegistry` throws on duplicate id; `withHeaders` case-insensitive (injected auth replaces a pre-existing same-name header). Simplicity: reuse `erroredStep` in both `attemptStep` catches, tighten `authCache` type, hoist test `MockAgent` setup. TDD, +6 tests (118 engine / 164 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
