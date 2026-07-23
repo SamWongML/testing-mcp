@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   AuthoredStep,
+  AuthoredSuite,
   AuthoredTestCase,
   ExecutionResult,
   ExecutionStatus,
@@ -18,13 +19,15 @@ import { sendRequest } from "./http";
 import { resolveParams } from "./params";
 import { redactRequest, redactResponse } from "./redact";
 import { type Attempt, withRetry } from "./retry";
+import { type PlanNode, planSuite } from "./suite";
 import { createRunContext, resolveTemplates } from "./variables";
 
 /**
- * Single-test execution (research §10.3). A test is a one-node-at-a-time run over
- * its steps: resolve templates → send → assert → extract → publish, with per-step
- * retry and redacted snapshots. The node runner (`attemptStep`) is kept reusable so
- * P3's DAG runner can schedule the same unit across a topologically-sorted graph.
+ * Execution (research §10.3). A test is a one-node-at-a-time run over its steps;
+ * a suite (`runSuite`) is a topologically-scheduled DAG over the same node runner,
+ * with independent branches running under a bounded concurrency limit. Each node:
+ * resolve templates → send → assert → extract → publish, with per-step retry and
+ * redacted snapshots. `attemptStep`/`runStep` are shared by both drivers.
  *
  * `poll`, matrix expansion and real auth providers are out of scope here (P3).
  */
@@ -51,9 +54,9 @@ function notRunStep(id: string, status: "cancelled" | "skipped"): StepResult {
 
 async function attemptStep(
   step: AuthoredStep,
-  test: AuthoredTestCase,
   ctx: RunContext,
   secretValues: string[],
+  fallbackTimeoutMs?: number,
 ): Promise<Attempt<StepResult>> {
   let request: ResolvedRequest;
   try {
@@ -78,7 +81,7 @@ async function attemptStep(
   try {
     response = await sendRequest(request, {
       signal: ctx.signal,
-      timeoutMs: step.timeoutMs ?? test.timeoutMs,
+      timeoutMs: step.timeoutMs ?? fallbackTimeoutMs,
     });
   } catch (err) {
     if (ctx.signal?.aborted) {
@@ -136,16 +139,14 @@ async function attemptStep(
 
 async function runStep(
   step: AuthoredStep,
-  test: AuthoredTestCase,
   ctx: RunContext,
   secretValues: string[],
+  fallbackTimeoutMs?: number,
 ): Promise<StepResult> {
   const { result, attempts } = await withRetry(
     step.retry,
-    (_attempt) => attemptStep(step, test, ctx, secretValues),
-    {
-      signal: ctx.signal,
-    },
+    () => attemptStep(step, ctx, secretValues, fallbackTimeoutMs),
+    { signal: ctx.signal },
   );
   return { ...result, attempts };
 }
@@ -213,7 +214,7 @@ export async function runTest(
       steps.push(notRunStep(step.id, "cancelled"));
       continue;
     }
-    const result = await runStep(step, test, ctx, secretValues);
+    const result = await runStep(step, ctx, secretValues, test.timeoutMs);
     steps.push(result);
     if (result.status === "cancelled") {
       for (let j = i + 1; j < test.steps.length; j++)
@@ -234,7 +235,7 @@ export async function runTest(
 function finalize(input: {
   runId: string;
   entryId: string;
-  kind: "test";
+  kind: "test" | "suite";
   status: ExecutionStatus;
   steps: StepResult[];
   params?: Record<string, unknown>;
@@ -260,5 +261,142 @@ function finalize(input: {
     manifestHash: input.manifestHash,
     gitSha: input.gitSha,
     error: input.error,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Suite execution — DAG scheduling over the shared node runner (research §12).
+// ---------------------------------------------------------------------------
+
+export interface RunSuiteOptions {
+  env?: Record<string, unknown>;
+  secrets?: Record<string, string>;
+  signal?: AbortSignal;
+  runId?: string;
+  /** Env name recorded on the result (the resolved env values come from `env`). */
+  envName?: string;
+  manifestHash?: string;
+  gitSha?: string;
+  /** Max nodes executing at once; independent branches run in parallel up to this. */
+  concurrency?: number;
+}
+
+const DEFAULT_CONCURRENCY = 8;
+
+/**
+ * Schedule an ordered plan as a DAG: a node runs once all its `needs` have settled and
+ * passed, with up to `concurrency` nodes in flight. A node whose dependency did not pass
+ * is `skipped`; once `signal` aborts, every not-yet-started node is `cancelled`. Each
+ * node gets its own `params` scope while sharing the suite-wide `nodes`/`vars` bags, so
+ * `{{nodes.X.var}}` resolves across branches. Returns results keyed by node id.
+ */
+function scheduleNodes(
+  plan: PlanNode[],
+  baseCtx: RunContext,
+  secretValues: string[],
+  concurrency: number,
+): Promise<Map<string, StepResult>> {
+  const results = new Map<string, StepResult>();
+  // Started but maybe not settled — a node in flight must not look "settled" to its
+  // dependents, so readiness keys off `results` while `started` guards against relaunch.
+  const started = new Set<string>();
+
+  const depsSettled = (node: PlanNode): boolean => node.needs.every((d) => results.has(d));
+  const depsPassed = (node: PlanNode): boolean =>
+    node.needs.every((d) => results.get(d)?.status === "passed");
+
+  return new Promise((resolve) => {
+    let active = 0;
+
+    const pump = (): void => {
+      for (const node of plan) {
+        if (started.has(node.id) || !depsSettled(node)) continue;
+        // Aborting (caller cancel or run-timeout) short-circuits every remaining node.
+        if (baseCtx.signal?.aborted) {
+          started.add(node.id);
+          results.set(node.id, notRunStep(node.id, "cancelled"));
+          continue;
+        }
+        if (!depsPassed(node)) {
+          started.add(node.id);
+          results.set(node.id, notRunStep(node.id, "skipped"));
+          continue;
+        }
+        if (active >= concurrency) continue;
+        started.add(node.id);
+        active++;
+        const nodeCtx: RunContext = { ...baseCtx, params: node.params };
+        void runStep(node.step, nodeCtx, secretValues).then((result) => {
+          results.set(node.id, result);
+          active--;
+          pump();
+        });
+      }
+      if (active === 0 && results.size === plan.length) resolve(results);
+    };
+
+    pump();
+  });
+}
+
+/** Run an authored suite as a DAG and return a validated `ExecutionResult`. */
+export async function runSuite(
+  suite: AuthoredSuite,
+  opts: RunSuiteOptions = {},
+): Promise<ExecutionResult> {
+  const runId = opts.runId ?? randomUUID();
+  const startedAt = new Date();
+  const base = {
+    runId,
+    entryId: suite.id,
+    kind: "suite" as const,
+    env: opts.envName,
+    manifestHash: opts.manifestHash,
+    gitSha: opts.gitSha,
+  };
+
+  let plan: PlanNode[];
+  try {
+    plan = planSuite(suite);
+  } catch (err) {
+    // Structural errors (cycles, unknown/duplicate ids) surface as an errored run,
+    // mirroring how the single-test runner reports invalid params rather than throwing.
+    return finalize({ ...base, status: "errored", steps: [], error: errorMessage(err), startedAt });
+  }
+
+  // A suite-level `timeoutMs` is a whole-run budget: an abort signal combined with the
+  // caller's cancel signal. When it alone fires the run is `errored` (timed out); when
+  // the caller aborts the run is `cancelled` (computed from the cancelled nodes).
+  const signals: AbortSignal[] = [];
+  if (opts.signal) signals.push(opts.signal);
+  let timeoutSignal: AbortSignal | undefined;
+  if (suite.timeoutMs) {
+    timeoutSignal = AbortSignal.timeout(suite.timeoutMs);
+    signals.push(timeoutSignal);
+  }
+  const signal = signals.length > 0 ? AbortSignal.any(signals) : undefined;
+
+  const baseCtx = createRunContext({
+    env: opts.env ?? suite.env ?? {},
+    secrets: opts.secrets ?? {},
+    signal,
+  });
+  const secretValues = Object.values(opts.secrets ?? {}).filter((v) => v.length > 0);
+
+  const resultMap = await scheduleNodes(
+    plan,
+    baseCtx,
+    secretValues,
+    opts.concurrency ?? DEFAULT_CONCURRENCY,
+  );
+  const steps = plan.map((n) => resultMap.get(n.id) as StepResult);
+
+  const timedOut = timeoutSignal?.aborted === true && opts.signal?.aborted !== true;
+  return finalize({
+    ...base,
+    status: timedOut ? "errored" : computeStatus(steps),
+    steps,
+    error: timedOut ? `suite "${suite.id}" exceeded timeoutMs (${suite.timeoutMs}ms)` : undefined,
+    startedAt,
   });
 }
