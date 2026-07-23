@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | P0 | Monorepo foundation | ✅ | 2026-07-23 | ✅ |
 | P1 | Schema package (`@atp/schema`) | ✅ | 2026-07-23 | ✅ |
-| P2 | Engine I — single-test execution | ⬜ | — | — |
+| P2 | Engine I — single-test execution | ✅ | 2026-07-23 | ✅ |
 | P3 | Engine II — suites/DAG/auth/matrix | ⬜ | — | — |
 | P4 | Compile + CLI + sample corpus | ⬜ | — | — |
 | P5 | Reporting renderers | ⬜ | — | — |
@@ -136,15 +136,84 @@ the only memory that crosses sessions.
   redaction. Read plan §P2 and research §10 + §7.1.
 
 ### P2 — Engine I
-- [ ] `define.ts` (`defineTest`, `defineEnv`)
-- [ ] `variables.ts` (env/params/secrets/matrix scopes; nodes-bag designed)
-- [ ] `http.ts` (undici: timing, timeout, AbortSignal, redirects)
-- [ ] `assertions.ts` (all declarative ops + `fn`)
-- [ ] `extract.ts` · [ ] `retry.ts` · [ ] `redact.ts`
-- [ ] `runner.ts` (single test = one-node DAG)
-- [ ] MockAgent test suite (happy, ops, retry, timeout, redact, cancel)
+- [x] `define.ts` (`defineTest`, `defineEnv`)
+- [x] `variables.ts` (env/params/secrets/matrix scopes; nodes-bag designed)
+- [x] `http.ts` (undici: timing, timeout, AbortSignal, redirects)
+- [x] `assertions.ts` (all declarative ops + `fn`)
+- [x] `extract.ts` · [x] `retry.ts` · [x] `redact.ts`
+- [x] `runner.ts` (single test = one-node DAG)
+- [x] MockAgent test suite (happy, ops, retry, timeout, redact, cancel)
 
-**Handoff notes:** _none yet_
+**Handoff notes:**
+- **Deps added:** `@atp/engine` now depends on `@atp/schema` (workspace), `undici@^7`
+  (resolved 7.28), and `zod@^4`. `undici`'s `request` uses the **global dispatcher**,
+  so tests intercept with `MockAgent` + `setGlobalDispatcher` — no live network.
+- **RunContext (`context.ts`)** is the single scoped var bag: `env/params/secrets/`
+  `matrix/vars/nodes`. `nodes[id][var]` holds a node's published extracts — the P3
+  DAG runner reuses this exact shape for `{{nodes.X.var}}`. `createRunContext`
+  defaults every scope so lookups never crash. `EngineResponse = {status,headers,body,
+  timingMs}` is what assertions/extracts/`fn` address; `ResolvedRequest = RequestSpec`.
+- **Templating (`variables.ts`):** two modes — *whole-value* (`"{{params.count}}"`
+  → raw typed value, preserving number/bool/object) and *interpolation*
+  (`"{{env.baseUrl}}/x"` → stringified in place). Resolution is **recursive** (bounded
+  depth 16), so a param default of `"{{secrets.QA_PASSWORD}}"` resolves through to the
+  secret. Unknown scope / unresolved var **throw** (surfaces authoring bugs); the
+  runner treats a throw during request resolution as a non-retryable `errored` step.
+- **Assertions (`assertions.ts`):** all ops implemented — `eq/neq` (deepEqual),
+  `gt/lt` (numeric coercion), `contains` (string substr / array membership),
+  `matches` (regex), `isString/isNumber`, `jsonSchema` (minimal validator in
+  `jsonschema.ts`: type/properties/required/items/enum/const), `jsonpath` (minimal
+  child+index evaluator in `jsonpath.ts`: `$.a.b`, `$.a[0]`, `$['a']` — no
+  wildcards/descent/filters yet). `fn` escape hatch runs the real predicate against
+  the response; a throw → failed assertion. Results carry `op/path/expected/actual`
+  for the P5 likely-cause heuristic (absent for `fn`).
+- **Retry (`retry.ts`):** `withRetry(policy, run, {signal})` — `run` reports which
+  `RetryOn` conditions it hit; retries while `attempt <= max` and a hit is in
+  `policy.on`, honoring `backoffMs` (abortable sleep) and stopping on `signal.aborted`.
+  `attempts` counts total tries (1 + retries).
+- **Redaction (`redact.ts`):** masks sensitive header **keys** wholesale
+  (authorization, cookie, set-cookie, x-api-key, proxy-authorization) and any secret
+  **value** (from `ctx.secrets`) wherever it appears in headers or the string-walked
+  body. Applied to both request and response snapshots before they enter a StepResult.
+- **HTTP (`http.ts`):** JSON body auto-serialized (+`content-type` if unset), query
+  appended via `URL`, timing via `performance.now()`. Timeout = `AbortSignal.timeout`
+  combined with the caller signal via `AbortSignal.any`. **Redirect policy + connection
+  pooling are undici-v7 dispatcher concerns** (the `redirect` interceptor / a `Pool`),
+  not per-request options — deferred until a real dispatcher is wired (note: the P2
+  checklist line said "redirects" but v7 moved this off `request`).
+- **Runner (`runner.ts`):** `runTest(test, {params,env,secrets,signal,runId,envName,`
+  `manifestHash,gitSha})` → validated `ExecutionResult`. Steps run **sequentially**
+  (single test = one-node-at-a-time); each publishes extracts to `ctx.nodes[id]` +
+  `ctx.vars`. On a `failed`/`errored` step the remaining steps are marked `skipped`
+  (they'd reference unpublished vars); on cancellation the rest are `cancelled`
+  (`attempts: 0`, honestly not-run). Run status precedence: cancelled > errored >
+  failed > passed. `attemptStep` is the **reusable node runner** for P3's DAG.
+  `resolveParams` runs the authored `params` builder (`test.params(z).parse`) so
+  defaults apply; invalid params → `errored` result (not a throw).
+- **fn-hashing (`fnHash.ts`):** `hashFn(fn)` = `sha256:<hex of fn.toString()>` — the
+  engine owns this; the P4 normalizer will call it to turn authored `fn` predicates
+  into the manifest's `fnHash` markers. Not needed by the runner (it holds the real fn).
+- **Exit criteria:** `pnpm --filter @atp/engine test` green (54 tests); full gate
+  `typecheck + lint + test` green (100 tests total). The §7.1 login demo runs on
+  MockAgent and produces an `ExecutionResult` that `executionResultSchema` parses.
+- **Post-review hardening (completeness + simplicity pass):** added tests for the
+  previously-unexercised runtime paths — retry on `network`/`4xx`/`assertion` (not just
+  `5xx`), **in-flight** AbortSignal cancellation (abort after the request starts, vs the
+  pre-abort case), abortable retry backoff, response-side sensitive-header redaction,
+  and the `matches` invalid-regex / `gt`/`lt` non-numeric branches. Simplifications:
+  extracted one shared deep-string walker `mapDeepStrings` in `util.ts` (was duplicated
+  as `resolveValue` in `variables.ts` + `redactDeep` in `redact.ts`), dropped a trivial
+  `redactString` wrapper, narrowed `applyOp` to `Exclude<AssertionOp,"jsonpath">` (the
+  jsonpath case is handled upstream), and flattened the scope→bag ternary in
+  `variables.ts` to an allow-list `Set`.
+- **Explicitly deferred to P3 (schema exists, engine support pending):** `poll`
+  (`step.poll` is ignored today), suites/DAG parallelism, matrix expansion, real auth
+  providers (`authRef`/`applyAuth` — no auth applied yet), matrix-derived `env`.
+- **Exact next step (P3):** implement `@atp/engine` composition — `defineSuite`/
+  `useTest`/`useStep`/`defineAuth`, `graph.ts` (topo sort + cycle detection), the DAG
+  runner (reuse `attemptStep`; bounded parallelism; cancel between nodes),
+  `poll.untilAssertPasses`, auth providers, and matrix expansion. Read plan §P3 and
+  research §12, §7.2–7.3, §10.2–10.3.
 
 ### P3 — Engine II
 - [ ] `defineSuite` / `useTest` / `useStep` / `defineAuth`
@@ -248,10 +317,16 @@ Append one row per session. Newest at the bottom.
 | 2026-07-22 | planning | — | Plan + tracker created | _(this commit)_ |
 | 2026-07-23 | P0 | P0 | Monorepo foundation: workspace, 7 package stubs, strict tsconfig, Vitest (1 test), ESLint+Prettier, CI, AGENTS.md. Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P1 | P1 | `@atp/schema`: test/suite/result/manifest/params/config schemas (Zod 4) + authored-vs-normalized split, fnHash marker, matrix, `z.toJSONSchema` params derivation, `SCHEMA_VERSION`. TDD, 40 tests. Exit criteria green. | _(this commit)_ |
+| 2026-07-23 | P2 | P2 | `@atp/engine` single-test execution: define/variables/http(undici)/assertions(all ops + fn)/extract/retry/redact/runner + fnHash. RunContext var bag + reusable node runner designed for P3. TDD, 46 engine tests (92 total). Exit criteria green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
 Items found mid-session that belong to a later phase — park them here instead of
 doing them out of order.
 
-- _none yet_
+- **Redirect policy + connection pooling (from P2):** undici v7 moved redirect
+  following off `request` options onto a dispatcher `redirect` interceptor, and
+  pooling onto a `Pool`. `http.ts` uses the global dispatcher today (fine for
+  MockAgent + most SUT calls). Wire an explicit dispatcher with the `redirect`
+  interceptor + pooling when a real deployment needs it (P10/P11 territory, or
+  sooner if a test SUT requires following redirects).
