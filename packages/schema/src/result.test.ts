@@ -63,6 +63,11 @@ describe("stepResultSchema", () => {
     expect(parsed.response?.status).toBe(200);
     expect(parsed.request?.headers?.authorization).toBe("***");
   });
+
+  it("allows attempts: 0 for a skipped step (never dispatched)", () => {
+    const parsed = stepResultSchema.parse({ id: "verify", status: "skipped", attempts: 0 });
+    expect(parsed.attempts).toBe(0);
+  });
 });
 
 describe("executionResultSchema", () => {
@@ -83,6 +88,18 @@ describe("executionResultSchema", () => {
     expect(parsed.status).toBe("passed");
     expect(parsed.metrics.passedSteps).toBe(1);
     expect(parsed.manifestHash).toBe("sha256:manifest");
+  });
+
+  it("accepts timezone-offset ISO timestamps (e.g. Postgres timestamptz)", () => {
+    const parsed = executionResultSchema.parse({
+      runId: "r1",
+      entryId: "identity.login",
+      status: "passed",
+      startedAt: "2026-07-23T02:00:00+02:00",
+      finishedAt: "2026-07-23T00:00:01Z",
+      metrics: { totalSteps: 0, passedSteps: 0, failedSteps: 0 },
+    });
+    expect(parsed.startedAt).toBe("2026-07-23T02:00:00+02:00");
   });
 
   it("rejects a non-ISO startedAt", () => {

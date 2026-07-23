@@ -3,6 +3,7 @@ import { z } from "zod";
 import { jsonSchemaSchema } from "./params";
 import { suiteNodeSchema } from "./suite";
 import { matrixSchema } from "./test";
+import { uniqueById } from "./util";
 
 /**
  * The normalized manifest — the catalog the server actually loads (research §7.4).
@@ -31,7 +32,7 @@ export const manifestEntrySchema = z.object({
   paramsSchema: jsonSchemaSchema.optional(),
   matrix: matrixSchema.optional(),
   /** Normalized DAG: ids, needs, request templates, assertions (incl. fnHash), extracts. */
-  nodes: z.array(suiteNodeSchema).min(1),
+  nodes: z.array(suiteNodeSchema).min(1).refine(uniqueById, "node ids must be unique"),
   sourcePath: z.string(),
 });
 export type ManifestEntry = z.infer<typeof manifestEntrySchema>;
@@ -40,6 +41,6 @@ export const manifestSchema = z.object({
   schemaVersion: z.string().default(SCHEMA_VERSION),
   gitSha: z.string(),
   manifestHash: z.string(),
-  entries: z.array(manifestEntrySchema),
+  entries: z.array(manifestEntrySchema).refine(uniqueById, "entry ids must be unique"),
 });
 export type Manifest = z.infer<typeof manifestSchema>;

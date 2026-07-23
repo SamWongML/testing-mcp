@@ -62,4 +62,14 @@ describe("manifestSchema", () => {
   it("requires gitSha and manifestHash", () => {
     expect(() => manifestSchema.parse({ entries: [] })).toThrow();
   });
+
+  it("rejects duplicate entry ids", () => {
+    expect(() =>
+      manifestSchema.parse({
+        gitSha: "s",
+        manifestHash: "h",
+        entries: [loginEntry, loginEntry],
+      }),
+    ).toThrow();
+  });
 });

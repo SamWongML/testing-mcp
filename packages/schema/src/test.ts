@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { uniqueById } from "./util";
+
 /**
  * Normalized (serializable) test IR. See research §7.1 / §10.1.
  *
@@ -117,7 +119,7 @@ export const testCaseSchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
   env: z.record(z.string(), z.unknown()).optional(),
   matrix: matrixSchema.optional(),
-  steps: z.array(stepSchema).min(1),
+  steps: z.array(stepSchema).min(1).refine(uniqueById, "step ids must be unique"),
 });
 export type TestCase = z.infer<typeof testCaseSchema>;
 
@@ -158,5 +160,7 @@ export interface AuthoredTestCase {
   env?: Record<string, unknown>;
   params?: ParamsBuilder;
   matrix?: Record<string, unknown[]>;
+  /** Force Task augmentation (P8). If omitted, the normalizer infers from timeoutMs. */
+  isLongRunning?: boolean;
   steps: AuthoredStep[];
 }

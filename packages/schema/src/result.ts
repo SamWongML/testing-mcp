@@ -46,7 +46,7 @@ export const stepResultSchema = z.object({
   assertions: z.array(assertionResultSchema).default([]),
   extracted: z.record(z.string(), z.unknown()).default({}),
   timingMs: z.number().nonnegative().optional(),
-  attempts: z.number().int().positive().default(1),
+  attempts: z.number().int().nonnegative().default(1),
   /** Populated for `errored`/`failed` steps — feeds the likely-cause heuristic. */
   error: z.string().optional(),
 });
@@ -69,8 +69,8 @@ export const executionResultSchema = z.object({
   params: z.record(z.string(), z.unknown()).optional(),
   env: z.string().optional(),
   steps: z.array(stepResultSchema).default([]),
-  startedAt: z.iso.datetime(),
-  finishedAt: z.iso.datetime().optional(),
+  startedAt: z.iso.datetime({ offset: true }),
+  finishedAt: z.iso.datetime({ offset: true }).optional(),
   durationMs: z.number().nonnegative().optional(),
   metrics: runMetricsSchema,
   /** Reproducibility: every run records the manifest + commit it ran against (§21). */

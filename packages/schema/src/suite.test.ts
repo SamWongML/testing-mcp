@@ -58,4 +58,17 @@ describe("suiteSchema", () => {
   it("requires at least one node", () => {
     expect(() => suiteSchema.parse({ id: "x", version: 1, nodes: [] })).toThrow();
   });
+
+  it("rejects duplicate node ids (they key needs edges and {{nodes.X}})", () => {
+    expect(() =>
+      suiteSchema.parse({
+        id: "x",
+        version: 1,
+        nodes: [
+          { id: "auth", request: { method: "POST", url: "/login" } },
+          { id: "auth", request: { method: "POST", url: "/login2" } },
+        ],
+      }),
+    ).toThrow();
+  });
 });

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { AuthoredStep } from "./test";
 import { matrixSchema, stepSchema } from "./test";
+import { uniqueById } from "./util";
 
 /**
  * Suites compose tests/steps into a DAG (research §7.2 / §12).
@@ -25,7 +26,7 @@ export const suiteSchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
   env: z.record(z.string(), z.unknown()).optional(),
   matrix: matrixSchema.optional(),
-  nodes: z.array(suiteNodeSchema).min(1),
+  nodes: z.array(suiteNodeSchema).min(1).refine(uniqueById, "node ids must be unique"),
 });
 export type Suite = z.infer<typeof suiteSchema>;
 
@@ -65,6 +66,8 @@ export interface AuthoredSuite {
   timeoutMs?: number;
   env?: Record<string, unknown>;
   matrix?: Record<string, unknown[]>;
+  /** Force Task augmentation (P8). If omitted, the normalizer infers from timeoutMs. */
+  isLongRunning?: boolean;
   /** Authored nodes are keyed by node id. */
   nodes: Record<string, AuthoredSuiteNode>;
 }

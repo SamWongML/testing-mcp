@@ -19,7 +19,13 @@ export function zodToJsonSchema(schema: z.ZodType): JsonSchema {
   return z.toJSONSchema(schema) as JsonSchema;
 }
 
-/** Run an authored params builder and derive its JSON Schema. */
+/**
+ * Run an authored params builder and derive its JSON Schema.
+ *
+ * Uses `io: "input"` so a param with a `.default()` is optional in the derived
+ * schema — an MCP client may omit it and let the engine supply the default. This is
+ * the tool *input* schema `describe_test` (P7) advertises.
+ */
 export function deriveParamsSchema(builder: ParamsBuilder): JsonSchema {
-  return zodToJsonSchema(builder(z));
+  return z.toJSONSchema(builder(z), { io: "input" }) as JsonSchema;
 }

@@ -80,9 +80,22 @@ the only memory that crosses sessions.
 
 **Handoff notes:**
 - **Zod version:** `zod@^4` (resolved 4.4.3). Native `z.toJSONSchema()` is used for
-  the `params` → JSON Schema derivation — no `zod-to-json-schema` dep needed. ISO
-  timestamps use `z.iso.datetime()` (Zod-4 form, not the deprecated
-  `z.string().datetime()`).
+  the `params` → JSON Schema derivation — no `zod-to-json-schema` dep needed.
+  `deriveParamsSchema` passes `io: "input"` so a param with a `.default()` is **optional**
+  in the derived tool-input schema (the client may omit it) — that's the schema
+  `describe_test` advertises. ISO timestamps use `z.iso.datetime({ offset: true })`
+  (Zod-4 form; `offset:true` accepts `+02:00`-style stamps, e.g. Postgres `timestamptz`,
+  as well as `Z`).
+- **IR integrity refinements:** `testCaseSchema.steps`, `suiteSchema.nodes`,
+  `manifestEntrySchema.nodes`, and `manifestSchema.entries` all `.refine(uniqueById, …)`
+  (helper in `util.ts`) — ids are the addressing keys for `needs` edges,
+  `{{nodes.X.*}}` templates, and manifest lookup, so duplicates are rejected at parse
+  time rather than silently mis-binding downstream.
+- **`attempts` bound:** `stepResultSchema.attempts` is `nonnegative` (default 1) so a
+  `skipped` step can honestly record `attempts: 0` instead of a fabricated 1.
+- **`isLongRunning`:** authored `AuthoredTestCase`/`AuthoredSuite` expose an optional
+  `isLongRunning?: boolean` so the P4 normalizer has an explicit source for the manifest
+  field (else it infers from `timeoutMs`).
 - **Authored vs normalized (ADR-003 split):** the exported Zod schemas describe the
   **normalized/serializable** IR (what lands in the manifest). Authored, function-
   carrying forms are TypeScript-only types alongside them: `AuthoredTestCase`/

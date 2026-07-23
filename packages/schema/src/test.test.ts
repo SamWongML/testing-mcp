@@ -127,6 +127,19 @@ describe("testCaseSchema", () => {
     expect(() => testCaseSchema.parse({ id: "x", version: 1, steps: [] })).toThrow();
   });
 
+  it("rejects duplicate step ids", () => {
+    expect(() =>
+      testCaseSchema.parse({
+        id: "x",
+        version: 1,
+        steps: [
+          { id: "s", request: { method: "GET", url: "/a" } },
+          { id: "s", request: { method: "GET", url: "/b" } },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("rejects a non-positive version", () => {
     expect(() =>
       testCaseSchema.parse({
