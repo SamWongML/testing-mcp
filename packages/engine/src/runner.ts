@@ -32,8 +32,8 @@ import { createRunContext, resolveTemplates } from "./variables";
  * `poll`, matrix expansion and real auth providers are out of scope here (P3).
  */
 
-export interface RunTestOptions {
-  params?: Record<string, unknown>;
+/** Options common to both drivers (single test and suite). */
+export interface RunOptionsBase {
   env?: Record<string, unknown>;
   secrets?: Record<string, string>;
   signal?: AbortSignal;
@@ -44,8 +44,21 @@ export interface RunTestOptions {
   gitSha?: string;
 }
 
+export interface RunTestOptions extends RunOptionsBase {
+  params?: Record<string, unknown>;
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Non-empty secret values, for redaction — an empty string would over-redact. */
+function collectSecretValues(secrets: Record<string, string> | undefined): string[] {
+  return Object.values(secrets ?? {}).filter((v) => v.length > 0);
+}
+
+function erroredStep(id: string, message: string): StepResult {
+  return { id, status: "errored", assertions: [], extracted: {}, attempts: 1, error: message };
 }
 
 function notRunStep(id: string, status: "cancelled" | "skipped"): StepResult {
@@ -205,7 +218,7 @@ export async function runTest(
     secrets: opts.secrets ?? {},
     signal: opts.signal,
   });
-  const secretValues = Object.values(opts.secrets ?? {}).filter((v) => v.length > 0);
+  const secretValues = collectSecretValues(opts.secrets);
 
   const steps: StepResult[] = [];
   for (let i = 0; i < test.steps.length; i++) {
@@ -268,16 +281,9 @@ function finalize(input: {
 // Suite execution — DAG scheduling over the shared node runner (research §12).
 // ---------------------------------------------------------------------------
 
-export interface RunSuiteOptions {
-  env?: Record<string, unknown>;
-  secrets?: Record<string, string>;
-  signal?: AbortSignal;
-  runId?: string;
-  /** Env name recorded on the result (the resolved env values come from `env`). */
-  envName?: string;
-  manifestHash?: string;
-  gitSha?: string;
-  /** Max nodes executing at once; independent branches run in parallel up to this. */
+export interface RunSuiteOptions extends RunOptionsBase {
+  /** Max nodes executing at once; independent branches run in parallel up to this.
+   *  Non-positive or invalid values fall back to the default (never 0, which would hang). */
   concurrency?: number;
 }
 
@@ -288,7 +294,10 @@ const DEFAULT_CONCURRENCY = 8;
  * passed, with up to `concurrency` nodes in flight. A node whose dependency did not pass
  * is `skipped`; once `signal` aborts, every not-yet-started node is `cancelled`. Each
  * node gets its own `params` scope while sharing the suite-wide `nodes`/`vars` bags, so
- * `{{nodes.X.var}}` resolves across branches. Returns results keyed by node id.
+ * `{{nodes.X.var}}` resolves across branches — that namespaced form is the deterministic
+ * cross-node addressing. (The flat `{{vars.*}}` bag is last-writer-wins across parallel
+ * branches, so it is only reliable within a single dependency chain.) Returns results
+ * keyed by node id.
  */
 function scheduleNodes(
   plan: PlanNode[],
@@ -326,11 +335,16 @@ function scheduleNodes(
         started.add(node.id);
         active++;
         const nodeCtx: RunContext = { ...baseCtx, params: node.params };
-        void runStep(node.step, nodeCtx, secretValues).then((result) => {
+        const finish = (result: StepResult): void => {
           results.set(node.id, result);
           active--;
           pump();
-        });
+        };
+        // `runStep` catches its own failures, but guard against a future throw slipping
+        // through — an unsettled node here would hang the run and desync `active`.
+        void runStep(node.step, nodeCtx, secretValues).then(finish, (err) =>
+          finish(erroredStep(node.id, errorMessage(err))),
+        );
       }
       if (active === 0 && results.size === plan.length) resolve(results);
     };
@@ -381,14 +395,12 @@ export async function runSuite(
     secrets: opts.secrets ?? {},
     signal,
   });
-  const secretValues = Object.values(opts.secrets ?? {}).filter((v) => v.length > 0);
+  const secretValues = collectSecretValues(opts.secrets);
 
-  const resultMap = await scheduleNodes(
-    plan,
-    baseCtx,
-    secretValues,
-    opts.concurrency ?? DEFAULT_CONCURRENCY,
-  );
+  // `?? DEFAULT` doesn't guard 0 (a valid number): a 0 limit launches nothing and hangs.
+  const concurrency =
+    opts.concurrency && opts.concurrency > 0 ? Math.floor(opts.concurrency) : DEFAULT_CONCURRENCY;
+  const resultMap = await scheduleNodes(plan, baseCtx, secretValues, concurrency);
   const steps = plan.map((n) => resultMap.get(n.id) as StepResult);
 
   const timedOut = timeoutSignal?.aborted === true && opts.signal?.aborted !== true;

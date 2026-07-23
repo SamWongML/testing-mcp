@@ -263,3 +263,103 @@ describe("runSuite — cancellation & timeout", () => {
     expect(result.error).toMatch(/timeoutMs|exceeded/i);
   });
 });
+
+describe("runSuite — concurrency, skip cascade & redaction", () => {
+  it("falls back to the default (does not hang) when concurrency is 0", async () => {
+    agent
+      .get("https://api.example.com")
+      .intercept({ path: "/a", method: "GET" })
+      .reply(200, { ok: true }, JSON_HEADERS);
+
+    const suite = defineSuite({
+      id: "zero-concurrency",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      nodes: { a: { request: { method: "GET", url: "{{env.baseUrl}}/a" } } },
+    });
+
+    // A 0 limit must not deadlock the scheduler — it runs to completion.
+    const result = await runSuite(suite, { concurrency: 0 });
+    expect(result.status).toBe("passed");
+    expect(result.steps.map((s) => s.status)).toEqual(["passed"]);
+  });
+
+  it("honors the concurrency limit — concurrency:1 serializes independent branches", async () => {
+    const pool = agent.get("https://api.example.com");
+    for (const path of ["/x", "/y", "/z"]) {
+      pool.intercept({ path, method: "GET" }).reply(200, { ok: true }, JSON_HEADERS).delay(40);
+    }
+
+    const suite = defineSuite({
+      id: "serial",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      nodes: {
+        x: { request: { method: "GET", url: "{{env.baseUrl}}/x" } },
+        y: { request: { method: "GET", url: "{{env.baseUrl}}/y" } },
+        z: { request: { method: "GET", url: "{{env.baseUrl}}/z" } },
+      },
+    });
+
+    const started = performance.now();
+    const result = await runSuite(suite, { concurrency: 1 });
+    const elapsed = performance.now() - started;
+
+    expect(result.status).toBe("passed");
+    // Three 40ms nodes run one at a time ⇒ ≥ ~120ms. Parallel would finish in ~40ms, so a
+    // comfortably-below-serial bound proves the limit is honored (load only slows it more).
+    expect(elapsed).toBeGreaterThan(100);
+  });
+
+  it("skips a node when only some of its multiple needs passed", async () => {
+    const pool = agent.get("https://api.example.com");
+    pool.intercept({ path: "/ok", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
+    pool.intercept({ path: "/bad", method: "GET" }).reply(500, "boom");
+    // No intercept for /m — it depends on a failed node and must never be requested.
+
+    const suite = defineSuite({
+      id: "partial-needs",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      nodes: {
+        ok: { request: { method: "GET", url: "{{env.baseUrl}}/ok" } },
+        bad: {
+          request: { method: "GET", url: "{{env.baseUrl}}/bad" },
+          assert: [{ path: "status", op: "eq", value: 200 }],
+        },
+        m: { needs: ["ok", "bad"], request: { method: "GET", url: "{{env.baseUrl}}/m" } },
+      },
+    });
+
+    const result = await runSuite(suite);
+    expect(result.status).toBe("failed");
+    const byId = Object.fromEntries(result.steps.map((s) => [s.id, s.status]));
+    expect(byId).toEqual({ ok: "passed", bad: "failed", m: "skipped" });
+  });
+
+  it("redacts suite-level secret values in persisted request snapshots", async () => {
+    agent
+      .get("https://api.example.com")
+      .intercept({ path: "/login", method: "POST" })
+      .reply(200, { ok: true }, JSON_HEADERS);
+
+    const suite = defineSuite({
+      id: "redact-suite",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      nodes: {
+        login: {
+          request: {
+            method: "POST",
+            url: "{{env.baseUrl}}/login",
+            body: { password: "{{secrets.PW}}" },
+          },
+        },
+      },
+    });
+
+    const result = await runSuite(suite, { secrets: { PW: "s3cret" } });
+    expect(result.status).toBe("passed");
+    expect(result.steps[0]?.request?.body).toEqual({ password: "***" });
+  });
+});

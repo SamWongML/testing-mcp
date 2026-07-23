@@ -294,9 +294,25 @@ the only memory that crosses sessions.
     passes nothing. `finalize` generalized to `kind: "test" | "suite"`. Both runners stay
     in `runner.ts` so the private node runner isn't re-exported; only `runSuite` is added
     to the public surface (via `export * from "./runner"`).
-  - 7 tests in `suiteRunner.test.ts` (85 engine / 131 total): §7.2 refund chain, diamond
+  - 11 tests in `suiteRunner.test.ts` (89 engine / 135 total): §7.2 refund chain, diamond
     DAG (parallel branches + merge), failed-dep skip + independent branch, cyclic→errored
-    (no throw), pre-abort cancel, mid-flight cancel, run-timeout→errored.
+    (no throw), pre-abort cancel, mid-flight cancel, run-timeout→errored, plus the
+    review-pass adds: `concurrency:0` no-hang, `concurrency:1` serialization (timing lower
+    bound), multi-`need` partial-skip cascade, and suite-level secret redaction.
+- **Post-review hardening (completeness + simplicity pass, 2 subagents):** both confirmed
+  the gate green and the design sound (no Blockers). Applied fixes: **(Major)** clamped
+  `concurrency` — `opts.concurrency ?? DEFAULT` didn't guard `0` (a valid number), and a
+  `0` limit launched nothing so the run **hung forever**; now `> 0 ? floor : DEFAULT`.
+  **(robustness)** added a rejection handler to the `runStep().then()` in `scheduleNodes`
+  (records a synthetic `errored` node instead of hanging + desyncing `active`) — latent
+  today since `attemptStep` catches its own throws, but the asymmetry with `runTest`
+  (which awaits/propagates) made it a future foot-gun. **(simplicity)** extracted
+  `collectSecretValues` (was byte-duplicated in both runners; the empty-string filter is
+  load-bearing for redaction) and folded the shared options into `RunOptionsBase` (both
+  `RunTestOptions`/`RunSuiteOptions` extend it). **Documented (not changed):** flat
+  `{{vars.*}}` is last-writer-wins across parallel branches — `{{nodes.X.var}}` is the
+  deterministic cross-node addressing (comment in `scheduleNodes`); a node with no
+  `step.timeoutMs` and a suite with no `timeoutMs` relies on the server responding.
 - **Exact next step: `poll.untilAssertPasses`.** Add polling for eventual-consistency
   endpoints (research §10.2–10.3): a step's `poll: { intervalMs, maxMs }` (already in the
   schema, currently **ignored** by `attemptStep`) re-sends and re-evaluates that step's
@@ -402,6 +418,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (1/n) | P3 | `graph.ts`: `topoSort` (Kahn, deterministic) with cycle + unknown-`needs` + duplicate-id validation — the §12 compile-time DAG check. TDD, 7 tests (61 engine / 107 total). P3 in progress. | _(this commit)_ |
 | 2026-07-23 | P3 (2/n) | P3 | `defineSuite`/`useTest`/`useStep` (by-reference composition) + `planSuite` normalizer (authored node map → ordered `PlanNode[]`, per-node params scope). Schema-first: `UseTestNode`/`UseStepNode` carry the object; `InlineNode` id optional. Extracted shared `resolveParams`. TDD, 10 tests (71 engine / 117 total). | _(this commit)_ |
 | 2026-07-23 | P3 (3/n) | P3 | DAG runner `runSuite`: `scheduleNodes` topo-schedules `PlanNode[]` with bounded parallelism (default 8), per-node `params` sharing suite-wide `nodes`/`vars` for cross-branch `{{nodes.X.var}}`, failed-dep→`skipped` cascade, cooperative cancel→`cancelled`, whole-run `timeoutMs` budget→`errored`. Refactored `attemptStep`/`runStep` off `test` (fallback-timeout param); `finalize` generalized to test\|suite. TDD, 7 tests (85 engine / 131 total). | _(this commit)_ |
+| 2026-07-23 | P3 (3/n) review | P3 | Completeness + simplicity review (2 subagents). Fixed a `concurrency:0` infinite-hang (clamp to default), added a `runStep` rejection guard, extracted `collectSecretValues` + `RunOptionsBase`. +4 tests (89 engine / 135 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
