@@ -41,6 +41,14 @@ describe("manifestEntrySchema", () => {
     void _omit;
     expect(() => manifestEntrySchema.parse(withoutSource)).toThrow();
   });
+
+  it("carries a resolved env when one is baked in (matrix cells resolve env per unit)", () => {
+    const parsed = manifestEntrySchema.parse({
+      ...loginEntry,
+      env: { baseUrl: "https://us.example.com" },
+    });
+    expect(parsed.env).toEqual({ baseUrl: "https://us.example.com" });
+  });
 });
 
 describe("manifestSchema", () => {

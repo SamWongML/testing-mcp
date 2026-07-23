@@ -31,6 +31,10 @@ export const manifestEntrySchema = z.object({
   /** JSON Schema derived from the authored `params` Zod builder. */
   paramsSchema: jsonSchemaSchema.optional(),
   matrix: matrixSchema.optional(),
+  /** Resolved env baked in at compile time (a matrix cell resolves its `env` builder
+   *  per unit; a plain entry carries its static env). Templates like `{{secrets.*}}`
+   *  stay literal here — they resolve in the engine at run time, so no secret leaks. */
+  env: z.record(z.string(), z.unknown()).optional(),
   /** Normalized DAG: ids, needs, request templates, assertions (incl. fnHash), extracts. */
   nodes: z.array(suiteNodeSchema).min(1).refine(uniqueById, "node ids must be unique"),
   sourcePath: z.string(),
