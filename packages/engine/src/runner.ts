@@ -10,12 +10,12 @@ import type {
   StepResult,
 } from "@atp/schema";
 import { executionResultSchema } from "@atp/schema";
-import { z } from "zod";
 
 import { evaluateAssertions } from "./assertions";
 import type { EngineResponse, ResolvedRequest, RunContext } from "./context";
 import { extract } from "./extract";
 import { sendRequest } from "./http";
+import { resolveParams } from "./params";
 import { redactRequest, redactResponse } from "./redact";
 import { type Attempt, withRetry } from "./retry";
 import { createRunContext, resolveTemplates } from "./variables";
@@ -47,14 +47,6 @@ function errorMessage(err: unknown): string {
 
 function notRunStep(id: string, status: "cancelled" | "skipped"): StepResult {
   return { id, status, assertions: [], extracted: {}, attempts: 0 };
-}
-
-function resolveParams(
-  test: AuthoredTestCase,
-  input: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  if (!test.params) return { ...(input ?? {}) };
-  return test.params(z).parse(input ?? {}) as Record<string, unknown>;
 }
 
 async function attemptStep(

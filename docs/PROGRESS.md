@@ -16,7 +16,7 @@
 | P0 | Monorepo foundation | ✅ | 2026-07-23 | ✅ |
 | P1 | Schema package (`@atp/schema`) | ✅ | 2026-07-23 | ✅ |
 | P2 | Engine I — single-test execution | ✅ | 2026-07-23 | ✅ |
-| P3 | Engine II — suites/DAG/auth/matrix | ⬜ | — | — |
+| P3 | Engine II — suites/DAG/auth/matrix | 🔄 | 2026-07-23 | — |
 | P4 | Compile + CLI + sample corpus | ⬜ | — | — |
 | P5 | Reporting renderers | ⬜ | — | — |
 | P6 | Store — Postgres record + queue + artifacts | ⬜ | — | — |
@@ -217,14 +217,66 @@ the only memory that crosses sessions.
 
 ### P3 — Engine II
 - [ ] `defineSuite` / `useTest` / `useStep` / `defineAuth`
-- [ ] `graph.ts` (topo sort, cycle detection)
+- [x] `graph.ts` (topo sort, cycle detection)
 - [ ] DAG runner (parallel branches, `{{nodes.X.var}}`, run timeout, cancel between nodes)
 - [ ] `poll.untilAssertPasses`
 - [ ] Auth providers: bearer, basic, api-key, oauth2-cc (cached), custom
 - [ ] Matrix expansion → discrete executable units
 - [ ] Tests incl. §7.2-style e2e suite on MockAgent
 
-**Handoff notes:** _none yet_
+**Handoff notes:**
+- **`graph.ts` (done):** `topoSort(nodes: {id, needs?}[]) → string[]` (Kahn's algorithm,
+  ties broken by authored order → deterministic). Validates the graph as it sorts and
+  **throws** on: duplicate node ids, a `needs` edge pointing at an unknown node, and
+  cycles (error names the nodes still in the cycle). A missing `needs` is treated as no
+  deps. This is the compile-time cycle/edge check §12 promises (P4's compile step will
+  call it; the DAG runner also uses it to order execution). Pure + framework-free — takes
+  the minimal `GraphNode` shape (`id` + optional `needs`), not the full `Step`, so it works
+  on authored *or* normalized nodes. 7 tests in `graph.test.ts`.
+- **`defineSuite`/`useTest`/`useStep` + suite normalizer (done):** authoring helpers in
+  `define.ts` (typed identity + cheap guards, mirroring `defineTest`). `useTest(test,
+  {params, needs})` / `useStep(step, {with, needs})` embed **by reference** (§12) — they
+  carry the actual object, not an id.
+  - **Schema change (schema-first):** `schema/src/suite.ts` `UseTestNode` now carries
+    `test: AuthoredTestCase` (was `testId: string`), `UseStepNode` carries
+    `step: AuthoredStep` (was `stepId`), and `InlineNode = Omit<AuthoredStep,"id"> &
+    {id?}` (the `nodes` map key supplies the id, so inline nodes omit it). Only schema
+    self-referenced these types — no other consumers broke.
+  - **`suite.ts` `planSuite(suite) → PlanNode[]`:** flattens `AuthoredSuite.nodes`
+    (`Record<id, AuthoredSuiteNode>`) into an ordered executable plan. Each `PlanNode` =
+    `{ id, needs, step: AuthoredStep, params }`: map key → `id` (and re-keys the step's
+    id to it), `needs` carry over, and `params` is the node's **own** `{{params.*}}`
+    scope — a `useTest` node resolves its reused test's params (defaults applied via the
+    shared `resolveParams`), a `useStep` node exposes its `with` bag, an inline node gets
+    `{}`. Ordering + cycle/edge validation delegate to `topoSort`. **Limitation:** a
+    `useTest` of a *multi-step* test throws for now (single-step tests — the documented
+    `login` pattern — only). 10 tests in `suite.test.ts`.
+  - **`params.ts` (extracted):** `resolveParams(test, input)` moved out of `runner.ts`
+    (which now imports it) so the suite normalizer shares it. No behavior change.
+  - **Post-review hardening (completeness + simplicity pass, 2 subagents):** both agents
+    confirmed the gate green and found no blockers/majors. Applied: (a) `toPlanNode` now
+    throws a clear `unknown node kind` error instead of silently treating any non-`test`
+    `use` value as a step (was a request-less-step fallthrough on untyped/JS input);
+    (b) `useTest` param failures are wrapped as `node "<id>": invalid params: …` (was a
+    raw ZodError, unlike the runner's friendly message); (c) hoisted the repeated
+    `needs` local in `toPlanNode`. Added 7 tests for previously-uncovered paths: inline
+    `needs` default `[]`, `useStep` with no opts, a **template param default surviving to
+    run time** (load-bearing), authored-order tie-break with 3+ independents, unknown-`needs`
+    via `planSuite`, the unknown-kind guard, and the wrapped param error. Nits left as-is
+    (cycle error may name downstream nodes; duplicate `needs` on one node is benign).
+- **Exact next step: the DAG runner.** Add `runSuite(suite, opts) → ExecutionResult`
+  (kind: "suite"). Call `planSuite` to get ordered `PlanNode[]`, then schedule via
+  `topoSort`/`needs` with **bounded parallelism** for independent branches. Reuse the
+  existing `attemptStep`/`runStep` node runner from `runner.ts` — but each node needs its
+  **own** `RunContext.params` (from `PlanNode.params`) while sharing suite-wide `env`/
+  `secrets`/`nodes`/`vars`; the `nodes` bag accumulates extracts so `{{nodes.X.var}}`
+  resolves across branches. Check `ctx.signal` between nodes (cooperative cancel →
+  remaining nodes `cancelled`), honor a per-run `timeoutMs` (suite-level), and mark a
+  failed node's unrun dependents `skipped`. Then `poll.untilAssertPasses`. Read plan §P3,
+  research §10.3 + §12 + §7.2. **Watch:** `attemptStep`/`runStep` currently take
+  `(step, test, ctx, secretValues)` and read `test.timeoutMs`; generalize the per-step
+  timeout source (pass a fallback timeout) so the suite runner can reuse them without a
+  fake `test`.
 
 ### P4 — Compile + CLI + corpus
 - [ ] `tools/compile`: discovery → normalize → `dist/manifest.json` (+gitSha, manifestHash)
@@ -318,6 +370,8 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P0 | P0 | Monorepo foundation: workspace, 7 package stubs, strict tsconfig, Vitest (1 test), ESLint+Prettier, CI, AGENTS.md. Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P1 | P1 | `@atp/schema`: test/suite/result/manifest/params/config schemas (Zod 4) + authored-vs-normalized split, fnHash marker, matrix, `z.toJSONSchema` params derivation, `SCHEMA_VERSION`. TDD, 40 tests. Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P2 | P2 | `@atp/engine` single-test execution: define/variables/http(undici)/assertions(all ops + fn)/extract/retry/redact/runner + fnHash. RunContext var bag + reusable node runner designed for P3. TDD, 46 engine tests (92 total). Exit criteria green. | _(this commit)_ |
+| 2026-07-23 | P3 (1/n) | P3 | `graph.ts`: `topoSort` (Kahn, deterministic) with cycle + unknown-`needs` + duplicate-id validation — the §12 compile-time DAG check. TDD, 7 tests (61 engine / 107 total). P3 in progress. | _(this commit)_ |
+| 2026-07-23 | P3 (2/n) | P3 | `defineSuite`/`useTest`/`useStep` (by-reference composition) + `planSuite` normalizer (authored node map → ordered `PlanNode[]`, per-node params scope). Schema-first: `UseTestNode`/`UseStepNode` carry the object; `InlineNode` id optional. Extracted shared `resolveParams`. TDD, 10 tests (71 engine / 117 total). | _(this commit)_ |
 
 ## Deferred / discovered work
 
@@ -330,3 +384,11 @@ doing them out of order.
   MockAgent + most SUT calls). Wire an explicit dispatcher with the `redirect`
   interceptor + pooling when a real deployment needs it (P10/P11 territory, or
   sooner if a test SUT requires following redirects).
+- **Per-node params representation for P4 (from P3 review):** the engine's runtime
+  `PlanNode` carries a per-node `params` bag, but the normalized `suiteNodeSchema`
+  (= `stepSchema`) has no `params` field and `AuthoredSuite` has no `params` builder.
+  So (a) `run_suite {params}` (research §8.2) has no wiring into individual nodes yet,
+  and (b) P4's compile step must decide how each node's resolved `params`/`with`
+  bindings land in the *serializable* manifest — most likely by resolving `{{params.*}}`
+  into the node's request templates at normalize time (baking), since the manifest
+  carries no params builder. Settle this before the compile step hard-codes an assumption.
