@@ -253,6 +253,17 @@ the only memory that crosses sessions.
     `login` pattern — only). 10 tests in `suite.test.ts`.
   - **`params.ts` (extracted):** `resolveParams(test, input)` moved out of `runner.ts`
     (which now imports it) so the suite normalizer shares it. No behavior change.
+  - **Post-review hardening (completeness + simplicity pass, 2 subagents):** both agents
+    confirmed the gate green and found no blockers/majors. Applied: (a) `toPlanNode` now
+    throws a clear `unknown node kind` error instead of silently treating any non-`test`
+    `use` value as a step (was a request-less-step fallthrough on untyped/JS input);
+    (b) `useTest` param failures are wrapped as `node "<id>": invalid params: …` (was a
+    raw ZodError, unlike the runner's friendly message); (c) hoisted the repeated
+    `needs` local in `toPlanNode`. Added 7 tests for previously-uncovered paths: inline
+    `needs` default `[]`, `useStep` with no opts, a **template param default surviving to
+    run time** (load-bearing), authored-order tie-break with 3+ independents, unknown-`needs`
+    via `planSuite`, the unknown-kind guard, and the wrapped param error. Nits left as-is
+    (cycle error may name downstream nodes; duplicate `needs` on one node is benign).
 - **Exact next step: the DAG runner.** Add `runSuite(suite, opts) → ExecutionResult`
   (kind: "suite"). Call `planSuite` to get ordered `PlanNode[]`, then schedule via
   `topoSort`/`needs` with **bounded parallelism** for independent branches. Reuse the
@@ -373,3 +384,11 @@ doing them out of order.
   MockAgent + most SUT calls). Wire an explicit dispatcher with the `redirect`
   interceptor + pooling when a real deployment needs it (P10/P11 territory, or
   sooner if a test SUT requires following redirects).
+- **Per-node params representation for P4 (from P3 review):** the engine's runtime
+  `PlanNode` carries a per-node `params` bag, but the normalized `suiteNodeSchema`
+  (= `stepSchema`) has no `params` field and `AuthoredSuite` has no `params` builder.
+  So (a) `run_suite {params}` (research §8.2) has no wiring into individual nodes yet,
+  and (b) P4's compile step must decide how each node's resolved `params`/`with`
+  bindings land in the *serializable* manifest — most likely by resolving `{{params.*}}`
+  into the node's request templates at normalize time (baking), since the manifest
+  carries no params builder. Settle this before the compile step hard-codes an assumption.

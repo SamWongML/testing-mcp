@@ -1,4 +1,9 @@
-import type { AuthoredStep, AuthoredSuite, AuthoredSuiteNode } from "@atp/schema";
+import type {
+  AuthoredStep,
+  AuthoredSuite,
+  AuthoredSuiteNode,
+  AuthoredTestCase,
+} from "@atp/schema";
 
 import { topoSort } from "./graph";
 import { resolveParams } from "./params";
@@ -24,7 +29,23 @@ export interface PlanNode {
   params: Record<string, unknown>;
 }
 
+/** Resolve a `useTest` node's params, wrapping Zod failures with the node context
+ *  (mirrors the single-test runner's friendly `invalid params:` message). */
+function resolveNodeParams(
+  id: string,
+  test: AuthoredTestCase,
+  params: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  try {
+    return resolveParams(test, params);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`useTest("${test.id}") in node "${id}": invalid params: ${reason}`);
+  }
+}
+
 function toPlanNode(id: string, node: AuthoredSuiteNode): PlanNode {
+  const needs = node.needs ?? [];
   if ("use" in node) {
     if (node.use === "test") {
       const { test } = node;
@@ -34,21 +55,14 @@ function toPlanNode(id: string, node: AuthoredSuiteNode): PlanNode {
         );
       }
       const step = test.steps[0] as AuthoredStep;
-      return {
-        id,
-        needs: node.needs ?? [],
-        step: { ...step, id },
-        params: resolveParams(test, node.params),
-      };
+      return { id, needs, step: { ...step, id }, params: resolveNodeParams(id, test, node.params) };
     }
-    return {
-      id,
-      needs: node.needs ?? [],
-      step: { ...node.step, id },
-      params: { ...(node.with ?? {}) },
-    };
+    if (node.use === "step") {
+      return { id, needs, step: { ...node.step, id }, params: { ...(node.with ?? {}) } };
+    }
+    throw new Error(`suite node "${id}": unknown node kind "${String((node as { use?: unknown }).use)}"`);
   }
-  return { id, needs: node.needs ?? [], step: { ...node, id }, params: {} };
+  return { id, needs, step: { ...node, id }, params: {} };
 }
 
 /** Flatten an authored suite into its executable plan, in topological order. */

@@ -125,6 +125,88 @@ describe("planSuite", () => {
     expect(() => planSuite(suite)).toThrow(/cycle/i);
   });
 
+  it("defaults an inline node's needs to an empty array (a root node)", () => {
+    const suite = defineSuite({
+      id: "s",
+      version: 1,
+      nodes: { root: { request: { method: "GET", url: "/a" } } },
+    });
+    expect(planSuite(suite)[0]?.needs).toEqual([]);
+  });
+
+  it("gives a useStep node with no opts empty params and no needs", () => {
+    const suite = defineSuite({
+      id: "s",
+      version: 1,
+      nodes: { order: useStep(createOrder) },
+    });
+    const [node] = planSuite(suite);
+    expect(node?.params).toEqual({});
+    expect(node?.needs).toEqual([]);
+  });
+
+  it("preserves a param default that is itself a template (resolved at run time)", () => {
+    const withSecretDefault: AuthoredTestCase = {
+      id: "identity.login-secret",
+      version: 1,
+      params: (z) => z.object({ password: z.string().default("{{secrets.QA_PASSWORD}}") }),
+      steps: [{ id: "post", request: { method: "POST", url: "/login" } }],
+    };
+    const suite = defineSuite({
+      id: "s",
+      version: 1,
+      nodes: { auth: useTest(withSecretDefault) },
+    });
+    // resolveParams keeps the template string verbatim; the runner resolves it later.
+    expect(planSuite(suite)[0]?.params).toEqual({ password: "{{secrets.QA_PASSWORD}}" });
+  });
+
+  it("keeps independent nodes in authored order (tie-break)", () => {
+    const suite = defineSuite({
+      id: "s",
+      version: 1,
+      nodes: {
+        c: { request: { method: "GET", url: "/c" } },
+        a: { request: { method: "GET", url: "/a" } },
+        b: { request: { method: "GET", url: "/b" } },
+      },
+    });
+    expect(planSuite(suite).map((n) => n.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("rejects a `needs` edge that points at an unknown node", () => {
+    const suite = defineSuite({
+      id: "s",
+      version: 1,
+      nodes: { a: { needs: ["ghost"], request: { method: "GET", url: "/a" } } },
+    });
+    expect(() => planSuite(suite)).toThrow(/ghost/);
+  });
+
+  it("throws a clear error on an unknown node kind (untyped input)", () => {
+    const suite = {
+      id: "s",
+      version: 1,
+      nodes: { x: { use: "bogus", request: { method: "GET", url: "/x" } } },
+    } as unknown as Parameters<typeof planSuite>[0];
+    expect(() => planSuite(suite)).toThrow(/unknown node kind/i);
+  });
+
+  it("wraps a reused test's param validation failure with the node context", () => {
+    const requiresEmail: AuthoredTestCase = {
+      id: "needs-email",
+      version: 1,
+      params: (z) => z.object({ email: z.string() }),
+      steps: [{ id: "post", request: { method: "POST", url: "/login" } }],
+    };
+    const suite = defineSuite({
+      id: "s",
+      version: 1,
+      nodes: { auth: useTest(requiresEmail) },
+    });
+    expect(() => planSuite(suite)).toThrow(/node "auth": invalid params/i);
+  });
+
   it("rejects composing a multi-step test via useTest (unsupported for now)", () => {
     const multi: AuthoredTestCase = {
       id: "multi",
