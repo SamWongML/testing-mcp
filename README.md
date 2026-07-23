@@ -7,7 +7,7 @@ and executed by a pure in-house DAG engine.
 - **Architecture:** [docs/research.md](./docs/research.md)
 - **Implementation plan:** [docs/implementation-plan.md](./docs/implementation-plan.md)
 - **Live status:** [docs/PROGRESS.md](./docs/PROGRESS.md)
-- **Agent contract:** [AGENTS.md](./AGENTS.md)
+- **Agent guide:** [CLAUDE.md](./CLAUDE.md)
 
 ## Package map
 
