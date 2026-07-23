@@ -218,7 +218,7 @@ the only memory that crosses sessions.
 ### P3 — Engine II
 - [ ] `defineSuite` / `useTest` / `useStep` / `defineAuth`
 - [x] `graph.ts` (topo sort, cycle detection)
-- [ ] DAG runner (parallel branches, `{{nodes.X.var}}`, run timeout, cancel between nodes)
+- [x] DAG runner (parallel branches, `{{nodes.X.var}}`, run timeout, cancel between nodes)
 - [ ] `poll.untilAssertPasses`
 - [ ] Auth providers: bearer, basic, api-key, oauth2-cc (cached), custom
 - [ ] Matrix expansion → discrete executable units
@@ -264,19 +264,64 @@ the only memory that crosses sessions.
     run time** (load-bearing), authored-order tie-break with 3+ independents, unknown-`needs`
     via `planSuite`, the unknown-kind guard, and the wrapped param error. Nits left as-is
     (cycle error may name downstream nodes; duplicate `needs` on one node is benign).
-- **Exact next step: the DAG runner.** Add `runSuite(suite, opts) → ExecutionResult`
-  (kind: "suite"). Call `planSuite` to get ordered `PlanNode[]`, then schedule via
-  `topoSort`/`needs` with **bounded parallelism** for independent branches. Reuse the
-  existing `attemptStep`/`runStep` node runner from `runner.ts` — but each node needs its
-  **own** `RunContext.params` (from `PlanNode.params`) while sharing suite-wide `env`/
-  `secrets`/`nodes`/`vars`; the `nodes` bag accumulates extracts so `{{nodes.X.var}}`
-  resolves across branches. Check `ctx.signal` between nodes (cooperative cancel →
-  remaining nodes `cancelled`), honor a per-run `timeoutMs` (suite-level), and mark a
-  failed node's unrun dependents `skipped`. Then `poll.untilAssertPasses`. Read plan §P3,
-  research §10.3 + §12 + §7.2. **Watch:** `attemptStep`/`runStep` currently take
-  `(step, test, ctx, secretValues)` and read `test.timeoutMs`; generalize the per-step
-  timeout source (pass a fallback timeout) so the suite runner can reuse them without a
-  fake `test`.
+- **DAG runner (`runSuite`, done):** `runSuite(suite, opts) → ExecutionResult`
+  (kind: "suite") in `runner.ts`. Flattens via `planSuite`, then `scheduleNodes` runs the
+  topo-ordered `PlanNode[]` as a DAG: a node fires once all its `needs` have **settled and
+  passed**, with up to `opts.concurrency` (default 8) nodes in flight — independent
+  branches run in parallel. Readiness keys off a `results` map (completed) while a separate
+  `started` set guards relaunch, so an **in-flight node never looks "settled"** to its
+  dependents (else they'd prematurely skip). Each node gets its **own** `RunContext.params`
+  (from `PlanNode.params`) via a shallow `{ ...baseCtx, params }` spread that **shares**
+  the suite-wide `env`/`secrets`/`nodes`/`vars` references — so extracts published to
+  `ctx.nodes[id]` accumulate across parallel branches and `{{nodes.X.var}}` resolves
+  everywhere (the diamond test proves it by asserting merge's resolved request body).
+  - **Failed-dep cascade:** a node whose dependency didn't pass is `skipped` (never
+    requested — the skip test omits the `/d` intercept to prove that); `depsPassed`
+    cascades so a skipped node's own dependents skip too.
+  - **Cancellation:** once `baseCtx.signal` aborts (caller cancel *or* run-timeout), every
+    not-yet-started node is `cancelled`; an in-flight node aborts via the existing
+    request-abort path (`attempts: 1`), pre-started nodes get `attempts: 0`. Run status
+    then computes to `cancelled` (precedence).
+  - **Per-run `timeoutMs` (suite-level = whole-run budget):** `AbortSignal.timeout(ms)`
+    combined with the caller signal via `AbortSignal.any`. If the timeout signal **alone**
+    fired the run is forced to `errored` with an "exceeded timeoutMs" message (its nodes
+    still read as `cancelled`); a caller-cancel takes precedence and stays `cancelled`.
+    NOTE: this is the whole-run budget, **not** a per-step fallback — suite nodes use their
+    own `step.timeoutMs` (or none); runStep is called with `fallbackTimeoutMs` undefined.
+  - **Refactor (the P3 (2/n) "Watch"):** `attemptStep`/`runStep` no longer take a `test`;
+    they take `(step, ctx, secretValues, fallbackTimeoutMs?)` and read
+    `step.timeoutMs ?? fallbackTimeoutMs`. `runTest` passes `test.timeoutMs`; `runSuite`
+    passes nothing. `finalize` generalized to `kind: "test" | "suite"`. Both runners stay
+    in `runner.ts` so the private node runner isn't re-exported; only `runSuite` is added
+    to the public surface (via `export * from "./runner"`).
+  - 11 tests in `suiteRunner.test.ts` (89 engine / 135 total): §7.2 refund chain, diamond
+    DAG (parallel branches + merge), failed-dep skip + independent branch, cyclic→errored
+    (no throw), pre-abort cancel, mid-flight cancel, run-timeout→errored, plus the
+    review-pass adds: `concurrency:0` no-hang, `concurrency:1` serialization (timing lower
+    bound), multi-`need` partial-skip cascade, and suite-level secret redaction.
+- **Post-review hardening (completeness + simplicity pass, 2 subagents):** both confirmed
+  the gate green and the design sound (no Blockers). Applied fixes: **(Major)** clamped
+  `concurrency` — `opts.concurrency ?? DEFAULT` didn't guard `0` (a valid number), and a
+  `0` limit launched nothing so the run **hung forever**; now `> 0 ? floor : DEFAULT`.
+  **(robustness)** added a rejection handler to the `runStep().then()` in `scheduleNodes`
+  (records a synthetic `errored` node instead of hanging + desyncing `active`) — latent
+  today since `attemptStep` catches its own throws, but the asymmetry with `runTest`
+  (which awaits/propagates) made it a future foot-gun. **(simplicity)** extracted
+  `collectSecretValues` (was byte-duplicated in both runners; the empty-string filter is
+  load-bearing for redaction) and folded the shared options into `RunOptionsBase` (both
+  `RunTestOptions`/`RunSuiteOptions` extend it). **Documented (not changed):** flat
+  `{{vars.*}}` is last-writer-wins across parallel branches — `{{nodes.X.var}}` is the
+  deterministic cross-node addressing (comment in `scheduleNodes`); a node with no
+  `step.timeoutMs` and a suite with no `timeoutMs` relies on the server responding.
+- **Exact next step: `poll.untilAssertPasses`.** Add polling for eventual-consistency
+  endpoints (research §10.2–10.3): a step's `poll: { intervalMs, maxMs }` (already in the
+  schema, currently **ignored** by `attemptStep`) re-sends and re-evaluates that step's
+  assertions until they pass or the budget elapses — abortable sleep like `retry.ts`,
+  honoring `ctx.signal`. Decide the retry×poll interaction (poll wraps the assert loop for
+  a single logical attempt; retry still owns transport/5xx re-tries) and where the poll
+  budget sits vs. the step/suite timeout. After that: auth providers (`defineAuth` +
+  bearer/basic/api-key/oauth2-cc-cached/custom) and matrix expansion → discrete units.
+  Read plan §P3 and research §10.2–10.3, §12, §7.3.
 
 ### P4 — Compile + CLI + corpus
 - [ ] `tools/compile`: discovery → normalize → `dist/manifest.json` (+gitSha, manifestHash)
@@ -372,6 +417,8 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P2 | P2 | `@atp/engine` single-test execution: define/variables/http(undici)/assertions(all ops + fn)/extract/retry/redact/runner + fnHash. RunContext var bag + reusable node runner designed for P3. TDD, 46 engine tests (92 total). Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P3 (1/n) | P3 | `graph.ts`: `topoSort` (Kahn, deterministic) with cycle + unknown-`needs` + duplicate-id validation — the §12 compile-time DAG check. TDD, 7 tests (61 engine / 107 total). P3 in progress. | _(this commit)_ |
 | 2026-07-23 | P3 (2/n) | P3 | `defineSuite`/`useTest`/`useStep` (by-reference composition) + `planSuite` normalizer (authored node map → ordered `PlanNode[]`, per-node params scope). Schema-first: `UseTestNode`/`UseStepNode` carry the object; `InlineNode` id optional. Extracted shared `resolveParams`. TDD, 10 tests (71 engine / 117 total). | _(this commit)_ |
+| 2026-07-23 | P3 (3/n) | P3 | DAG runner `runSuite`: `scheduleNodes` topo-schedules `PlanNode[]` with bounded parallelism (default 8), per-node `params` sharing suite-wide `nodes`/`vars` for cross-branch `{{nodes.X.var}}`, failed-dep→`skipped` cascade, cooperative cancel→`cancelled`, whole-run `timeoutMs` budget→`errored`. Refactored `attemptStep`/`runStep` off `test` (fallback-timeout param); `finalize` generalized to test\|suite. TDD, 7 tests (85 engine / 131 total). | _(this commit)_ |
+| 2026-07-23 | P3 (3/n) review | P3 | Completeness + simplicity review (2 subagents). Fixed a `concurrency:0` infinite-hang (clamp to default), added a `runStep` rejection guard, extracted `collectSecretValues` + `RunOptionsBase`. +4 tests (89 engine / 135 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
