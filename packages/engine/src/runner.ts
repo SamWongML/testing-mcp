@@ -18,6 +18,7 @@ import { applyAuth, buildAuthRegistry } from "./auth";
 import type { AuthProvider, EngineResponse, ResolvedRequest, RunContext } from "./context";
 import { extract } from "./extract";
 import { sendRequest } from "./http";
+import { resolveEnv } from "./matrix";
 import { resolveParams } from "./params";
 import { type PollAttempt, withPoll } from "./poll";
 import { redactRequest, redactResponse } from "./redact";
@@ -33,7 +34,8 @@ import { createRunContext, resolveTemplates } from "./variables";
  * retry, eventual-consistency polling, and redacted snapshots. `attemptStep`/`runStep`
  * are shared by both drivers.
  *
- * Matrix expansion is still out of scope here (P3).
+ * Matrix *expansion* stays plan-time (`expandUnits` in `matrix.ts`); the runner executes
+ * a single cell — `opts.matrix` populates `{{matrix.*}}` and selects the per-cell env.
  */
 
 /** Options common to both drivers (single test and suite). */
@@ -42,8 +44,16 @@ export interface RunOptionsBase {
   secrets?: Record<string, string>;
   /** Auth providers a step's `request.authRef` may select (research §10.3). */
   auth?: AuthProvider[];
+  /** Matrix-cell coordinates for this run — populates the `{{matrix.*}}` scope and, when
+   *  `env` isn't passed explicitly, is fed to a matrix-derived `env` builder (§7.3).
+   *  Use `expandUnits` to enumerate a matrixed definition's cells. */
+  matrix?: Record<string, unknown>;
   signal?: AbortSignal;
   runId?: string;
+  /** The executable-unit id recorded as the result's `entryId` (defaults to the
+   *  test/suite id). For a matrix cell, pass the cell-addressed id, e.g.
+   *  `identity.login.matrix#region=us,tier=free`. */
+  entryId?: string;
   /** Env name recorded on the result (the resolved env values come from `env`). */
   envName?: string;
   manifestHash?: string;
@@ -202,7 +212,7 @@ export async function runTest(
 
   const base = {
     runId,
-    entryId: test.id,
+    entryId: opts.entryId ?? test.id,
     kind: "test" as const,
     env: opts.envName,
     manifestHash: opts.manifestHash,
@@ -223,10 +233,14 @@ export async function runTest(
     });
   }
 
+  // A matrix run populates `{{matrix.*}}`; env may be a per-cell builder (§7.3), so when
+  // the caller doesn't pass a resolved `env` we call the authored builder with the coords.
+  const matrix = opts.matrix ?? {};
   const ctx = createRunContext({
-    env: opts.env ?? test.env ?? {},
+    env: opts.env ?? resolveEnv(test.env, matrix) ?? {},
     params,
     secrets: opts.secrets ?? {},
+    matrix,
     auth: buildAuthRegistry(opts.auth),
     signal: opts.signal,
   });
@@ -374,7 +388,7 @@ export async function runSuite(
   const startedAt = new Date();
   const base = {
     runId,
-    entryId: suite.id,
+    entryId: opts.entryId ?? suite.id,
     kind: "suite" as const,
     env: opts.envName,
     manifestHash: opts.manifestHash,
@@ -402,9 +416,11 @@ export async function runSuite(
   }
   const signal = signals.length > 0 ? AbortSignal.any(signals) : undefined;
 
+  const matrix = opts.matrix ?? {};
   const baseCtx = createRunContext({
-    env: opts.env ?? suite.env ?? {},
+    env: opts.env ?? resolveEnv(suite.env, matrix) ?? {},
     secrets: opts.secrets ?? {},
+    matrix,
     auth: buildAuthRegistry(opts.auth),
     signal,
   });

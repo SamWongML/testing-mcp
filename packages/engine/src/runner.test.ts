@@ -5,6 +5,7 @@ import { executionResultSchema } from "@atp/schema";
 
 import type { EngineResponse } from "./context";
 import { defineTest } from "./define";
+import { expandUnits } from "./matrix";
 import { runTest } from "./runner";
 
 const JSON_HEADERS = { headers: { "content-type": "application/json" } };
@@ -448,5 +449,64 @@ describe("runTest — cancellation", () => {
     expect(result.steps[0]?.status).toBe("cancelled");
     // The request was actually sent before the abort — distinct from the pre-abort path.
     expect(result.steps[0]?.attempts).toBe(1);
+  });
+});
+
+describe("runTest — matrix cell execution (§7.3)", () => {
+  it("runs one cell with {{matrix.*}} populated and the per-cell env applied", async () => {
+    agent
+      .get("https://us.api.example.com")
+      .intercept({ path: "/ping/us", method: "GET" })
+      .reply(200, { region: "us" }, JSON_HEADERS);
+
+    const test = defineTest({
+      id: "identity.login.matrix",
+      version: 1,
+      matrix: { region: ["us", "eu"], tier: ["free", "pro"] },
+      env: (m) => ({ baseUrl: `https://${String(m.region)}.api.example.com` }),
+      steps: [
+        {
+          id: "ping",
+          request: { method: "GET", url: "{{env.baseUrl}}/ping/{{matrix.region}}" },
+          assert: [
+            { path: "status", op: "eq", value: 200 },
+            { path: "body.region", op: "eq", value: "us" },
+          ],
+        },
+      ],
+    });
+
+    const [cell] = expandUnits(test);
+    const result = await runTest(test, {
+      entryId: cell?.id,
+      matrix: cell?.matrix,
+      env: cell?.env,
+    });
+
+    expect(result.status).toBe("passed");
+    // The result records the discrete, cell-addressed unit id — not just the base id.
+    expect(result.entryId).toBe("identity.login.matrix#region=us,tier=free");
+    // Both the per-cell {{env.baseUrl}} and the {{matrix.region}} coord resolved.
+    expect(result.steps[0]?.request?.url).toBe("https://us.api.example.com/ping/us");
+  });
+
+  it("resolves a matrix-derived env fn from opts.matrix when env is not passed in", async () => {
+    agent
+      .get("https://eu.api.example.com")
+      .intercept({ path: "/ping", method: "GET" })
+      .reply(200, { ok: true }, JSON_HEADERS);
+
+    const test = defineTest({
+      id: "m",
+      version: 1,
+      matrix: { region: ["us", "eu"] },
+      env: (m) => ({ baseUrl: `https://${String(m.region)}.api.example.com` }),
+      steps: [{ id: "ping", request: { method: "GET", url: "{{env.baseUrl}}/ping" } }],
+    });
+
+    // Only the coords are passed; the runner calls the authored env builder with them.
+    const result = await runTest(test, { matrix: { region: "eu" } });
+    expect(result.status).toBe("passed");
+    expect(result.steps[0]?.request?.url).toBe("https://eu.api.example.com/ping");
   });
 });

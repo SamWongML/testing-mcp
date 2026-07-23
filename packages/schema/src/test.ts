@@ -131,6 +131,15 @@ export type TestCase = z.infer<typeof testCaseSchema>;
 /** A `params` schema is authored as a builder so tests get a typed Zod object. */
 export type ParamsBuilder = (zod: typeof z) => z.ZodType;
 
+/**
+ * Authored env source (research §7.3). Either a static object, or — for a matrixed
+ * test/suite — a builder called once per cell with that cell's `{{matrix.*}}`
+ * coordinates, so env can vary by region/tier. The engine (P3) resolves the builder
+ * per cell; the normalized manifest carries only the resolved object per unit.
+ */
+export type AuthoredEnv =
+  Record<string, unknown> | ((matrix: Record<string, unknown>) => Record<string, unknown>);
+
 /** An authored fn assertion carries the real predicate, later hashed to `fnHash`. */
 export interface AuthoredFnAssertion {
   fn: (response: unknown) => boolean;
@@ -157,7 +166,7 @@ export interface AuthoredTestCase {
   tags?: string[];
   owner?: string;
   timeoutMs?: number;
-  env?: Record<string, unknown>;
+  env?: AuthoredEnv;
   params?: ParamsBuilder;
   matrix?: Record<string, unknown[]>;
   /** Force Task augmentation (P8). If omitted, the normalizer infers from timeoutMs. */
