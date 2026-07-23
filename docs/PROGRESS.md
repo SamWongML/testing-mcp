@@ -13,7 +13,7 @@
 
 | Phase | Title | Status | Session(s) | Exit criteria verified |
 |---|---|---|---|---|
-| P0 | Monorepo foundation | ⬜ | — | — |
+| P0 | Monorepo foundation | ✅ | 2026-07-23 | ✅ |
 | P1 | Schema package (`@atp/schema`) | ⬜ | — | — |
 | P2 | Engine I — single-test execution | ⬜ | — | — |
 | P3 | Engine II — suites/DAG/auth/matrix | ⬜ | — | — |
@@ -35,16 +35,38 @@ deviations from the plan, known gaps, exact next step. Keep them current — the
 the only memory that crosses sessions.
 
 ### P0 — Monorepo foundation
-- [ ] pnpm workspace + root scripts (`build` `typecheck` `lint` `test` `compile`)
-- [ ] `tsconfig.base.json` (strict) + per-package pattern
-- [ ] Package stubs: schema, engine, reporting, store, mcp-server, cli, tools/compile
-- [ ] Vitest wired; one passing test
-- [ ] ESLint + Prettier
-- [ ] CI workflow (install → typecheck → lint → test)
-- [ ] `AGENTS.md` skeleton; README package map
-- [ ] Exit criteria pass: `pnpm install && pnpm typecheck && pnpm lint && pnpm test`
+- [x] pnpm workspace + root scripts (`build` `typecheck` `lint` `test` `compile`)
+- [x] `tsconfig.base.json` (strict) + per-package pattern
+- [x] Package stubs: schema, engine, reporting, store, mcp-server, cli, tools/compile
+- [x] Vitest wired; one passing test
+- [x] ESLint + Prettier
+- [x] CI workflow (install → typecheck → lint → test)
+- [x] `AGENTS.md` skeleton; README package map
+- [x] Exit criteria pass: `pnpm install && pnpm typecheck && pnpm lint && pnpm test`
 
-**Handoff notes:** _none yet_
+**Handoff notes:**
+- **Typecheck strategy:** one root `tsconfig.json` drives `pnpm typecheck` (`tsc --noEmit`
+  over `packages/*/src` + `tools/*/src`). Per-package `tsconfig.json` extends
+  `tsconfig.base.json` for editors/future builds but isn't the authoritative check. This
+  avoids adding `typescript` as a dep to every package. Base uses `moduleResolution:
+  "Bundler"`, `verbatimModuleSyntax`, `isolatedModules`, `strict`,
+  `noUncheckedIndexedAccess` — so use `import type` for type-only imports.
+- **Cross-package imports:** internal packages expose `exports` → `./src/index.ts`, so no
+  build is needed in dev/test. When P1's `@atp/engine` (or others) import `@atp/schema`,
+  add `"@atp/schema": "workspace:*"` to that package's `dependencies` and run
+  `pnpm install` to link it.
+- **Vitest scope:** `vitest.config.ts` include is `packages/**/src/**/*.test.ts` +
+  `tools/**/src/**/*.test.ts`. The future `tests/` corpus is also `*.test.ts` but is
+  intentionally NOT matched — keep platform unit tests under `src/`.
+- **Prettier ignores `**/*.md`** (authored docs). CI (`.github/workflows/ci.yml`) runs
+  install → typecheck → lint → test; `format:check` is a local convenience, not in CI.
+- **Toolchain:** Node 22, pnpm 10.33 pinned via `packageManager`. `zod` is NOT installed
+  yet — P1 adds `zod@^4` to `@atp/schema`. pnpm ignores esbuild's build script (warning is
+  benign; `tsx`/`vitest` work).
+- **Exact next step (P1):** implement `@atp/schema` — `test.ts`, `suite.ts`, `result.ts`,
+  `manifest.ts`, `config.ts` with the authored-vs-normalized split and `fnHash` modeled;
+  add `zod@^4`; write valid/invalid fixture tests + the Zod→JSON-Schema derivation for
+  `params`. Read plan §P1 and research §7 + §14.
 
 ### P1 — Schema package
 - [ ] `test.ts` (TestCase/Step/Request/Assertion/Extractor/Retry/Poll)
@@ -169,6 +191,7 @@ Append one row per session. Newest at the bottom.
 | Date | Session | Phase(s) touched | Outcome | Commit(s) |
 |---|---|---|---|---|
 | 2026-07-22 | planning | — | Plan + tracker created | _(this commit)_ |
+| 2026-07-23 | P0 | P0 | Monorepo foundation: workspace, 7 package stubs, strict tsconfig, Vitest (1 test), ESLint+Prettier, CI, AGENTS.md. Exit criteria green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
