@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { AuthoredStep } from "./test";
+import type { AuthoredStep, AuthoredTestCase } from "./test";
 import { matrixSchema, stepSchema } from "./test";
 import { uniqueById } from "./util";
 
@@ -36,8 +36,8 @@ export type Suite = z.infer<typeof suiteSchema>;
 
 export interface UseTestNode {
   use: "test";
-  /** Stable id of the reused test. */
-  testId: string;
+  /** The reused test, embedded by reference (research §12: reference, never copy). */
+  test: AuthoredTestCase;
   /** Override the reused test's params. */
   params?: Record<string, unknown>;
   needs?: string[];
@@ -45,15 +45,16 @@ export interface UseTestNode {
 
 export interface UseStepNode {
   use: "step";
-  /** Stable id of the reused shared step. */
-  stepId: string;
-  /** Bind the reused step's inputs (e.g. `{ token: "{{nodes.auth.authToken}}" }`). */
+  /** The reused shared step, embedded by reference. */
+  step: AuthoredStep;
+  /** Bind the reused step's inputs, exposed to it as `{{params.*}}`
+   *  (e.g. `{ token: "{{nodes.auth.authToken}}" }`). */
   with?: Record<string, unknown>;
   needs?: string[];
 }
 
-/** An inline node is just an authored step. */
-export type InlineNode = AuthoredStep;
+/** An inline node is an authored step; its map key in `nodes` supplies the id. */
+export type InlineNode = Omit<AuthoredStep, "id"> & { id?: string };
 
 export type AuthoredSuiteNode = UseTestNode | UseStepNode | InlineNode;
 

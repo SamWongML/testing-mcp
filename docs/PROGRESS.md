@@ -233,17 +233,39 @@ the only memory that crosses sessions.
   call it; the DAG runner also uses it to order execution). Pure + framework-free — takes
   the minimal `GraphNode` shape (`id` + optional `needs`), not the full `Step`, so it works
   on authored *or* normalized nodes. 7 tests in `graph.test.ts`.
-- **Exact next step:** the suite **normalizer + `defineSuite`/`useTest`/`useStep`**. Turn
-  the authored `AuthoredSuite.nodes` (a `Record<id, AuthoredSuiteNode>` where a node is
-  `UseTestNode | UseStepNode | InlineNode` — see `schema/src/suite.ts`) into the normalized
-  **array of `SuiteNode`** (= `stepSchema`) that the DAG runner consumes. `useTest(login,
-  {params})` inlines the reused test's step(s) with param overrides applied; `useStep(step,
-  {with})` inlines a shared step binding its inputs; inline nodes pass through. Each authored
-  node's map key becomes the node `id` and its `needs` carry over. Keep `defineSuite` a typed
-  identity + cheap structural guards (mirror `defineTest`). Then the **DAG runner** reuses
-  `topoSort` for scheduling and the existing `attemptStep`/`runStep` node runner from
-  `runner.ts` (already written to be graph-agnostic), publishing extracts to `ctx.nodes[id]`
-  for `{{nodes.X.var}}`. Read plan §P3, research §12 + §7.2.
+- **`defineSuite`/`useTest`/`useStep` + suite normalizer (done):** authoring helpers in
+  `define.ts` (typed identity + cheap guards, mirroring `defineTest`). `useTest(test,
+  {params, needs})` / `useStep(step, {with, needs})` embed **by reference** (§12) — they
+  carry the actual object, not an id.
+  - **Schema change (schema-first):** `schema/src/suite.ts` `UseTestNode` now carries
+    `test: AuthoredTestCase` (was `testId: string`), `UseStepNode` carries
+    `step: AuthoredStep` (was `stepId`), and `InlineNode = Omit<AuthoredStep,"id"> &
+    {id?}` (the `nodes` map key supplies the id, so inline nodes omit it). Only schema
+    self-referenced these types — no other consumers broke.
+  - **`suite.ts` `planSuite(suite) → PlanNode[]`:** flattens `AuthoredSuite.nodes`
+    (`Record<id, AuthoredSuiteNode>`) into an ordered executable plan. Each `PlanNode` =
+    `{ id, needs, step: AuthoredStep, params }`: map key → `id` (and re-keys the step's
+    id to it), `needs` carry over, and `params` is the node's **own** `{{params.*}}`
+    scope — a `useTest` node resolves its reused test's params (defaults applied via the
+    shared `resolveParams`), a `useStep` node exposes its `with` bag, an inline node gets
+    `{}`. Ordering + cycle/edge validation delegate to `topoSort`. **Limitation:** a
+    `useTest` of a *multi-step* test throws for now (single-step tests — the documented
+    `login` pattern — only). 10 tests in `suite.test.ts`.
+  - **`params.ts` (extracted):** `resolveParams(test, input)` moved out of `runner.ts`
+    (which now imports it) so the suite normalizer shares it. No behavior change.
+- **Exact next step: the DAG runner.** Add `runSuite(suite, opts) → ExecutionResult`
+  (kind: "suite"). Call `planSuite` to get ordered `PlanNode[]`, then schedule via
+  `topoSort`/`needs` with **bounded parallelism** for independent branches. Reuse the
+  existing `attemptStep`/`runStep` node runner from `runner.ts` — but each node needs its
+  **own** `RunContext.params` (from `PlanNode.params`) while sharing suite-wide `env`/
+  `secrets`/`nodes`/`vars`; the `nodes` bag accumulates extracts so `{{nodes.X.var}}`
+  resolves across branches. Check `ctx.signal` between nodes (cooperative cancel →
+  remaining nodes `cancelled`), honor a per-run `timeoutMs` (suite-level), and mark a
+  failed node's unrun dependents `skipped`. Then `poll.untilAssertPasses`. Read plan §P3,
+  research §10.3 + §12 + §7.2. **Watch:** `attemptStep`/`runStep` currently take
+  `(step, test, ctx, secretValues)` and read `test.timeoutMs`; generalize the per-step
+  timeout source (pass a fallback timeout) so the suite runner can reuse them without a
+  fake `test`.
 
 ### P4 — Compile + CLI + corpus
 - [ ] `tools/compile`: discovery → normalize → `dist/manifest.json` (+gitSha, manifestHash)
@@ -338,6 +360,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P1 | P1 | `@atp/schema`: test/suite/result/manifest/params/config schemas (Zod 4) + authored-vs-normalized split, fnHash marker, matrix, `z.toJSONSchema` params derivation, `SCHEMA_VERSION`. TDD, 40 tests. Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P2 | P2 | `@atp/engine` single-test execution: define/variables/http(undici)/assertions(all ops + fn)/extract/retry/redact/runner + fnHash. RunContext var bag + reusable node runner designed for P3. TDD, 46 engine tests (92 total). Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P3 (1/n) | P3 | `graph.ts`: `topoSort` (Kahn, deterministic) with cycle + unknown-`needs` + duplicate-id validation — the §12 compile-time DAG check. TDD, 7 tests (61 engine / 107 total). P3 in progress. | _(this commit)_ |
+| 2026-07-23 | P3 (2/n) | P3 | `defineSuite`/`useTest`/`useStep` (by-reference composition) + `planSuite` normalizer (authored node map → ordered `PlanNode[]`, per-node params scope). Schema-first: `UseTestNode`/`UseStepNode` carry the object; `InlineNode` id optional. Extracted shared `resolveParams`. TDD, 10 tests (71 engine / 117 total). | _(this commit)_ |
 
 ## Deferred / discovered work
 

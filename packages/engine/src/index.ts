@@ -10,4 +10,6 @@ export * from "./http";
 export * from "./define";
 export * from "./fnHash";
 export * from "./graph";
+export * from "./params";
+export * from "./suite";
 export * from "./runner";
