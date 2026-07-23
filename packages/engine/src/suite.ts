@@ -1,9 +1,4 @@
-import type {
-  AuthoredStep,
-  AuthoredSuite,
-  AuthoredSuiteNode,
-  AuthoredTestCase,
-} from "@atp/schema";
+import type { AuthoredStep, AuthoredSuite, AuthoredSuiteNode, AuthoredTestCase } from "@atp/schema";
 
 import { topoSort } from "./graph";
 import { resolveParams } from "./params";
@@ -27,6 +22,13 @@ export interface PlanNode {
   step: AuthoredStep;
   /** Per-node `{{params.*}}` scope (reused-test params or bound `with` inputs). */
   params: Record<string, unknown>;
+}
+
+/** Discriminate an authored definition: a suite has a `nodes` map, a test has `steps`.
+ *  This authored-vs-suite fork is the core mental model (CLAUDE.md); it lives here as the
+ *  one canonical guard the normalizer and downstream consumers (e.g. the CLI) share. */
+export function isSuite(def: AuthoredTestCase | AuthoredSuite): def is AuthoredSuite {
+  return "nodes" in def;
 }
 
 /** Resolve a `useTest` node's params, wrapping Zod failures with the node context
@@ -60,7 +62,9 @@ function toPlanNode(id: string, node: AuthoredSuiteNode): PlanNode {
     if (node.use === "step") {
       return { id, needs, step: { ...node.step, id }, params: { ...(node.with ?? {}) } };
     }
-    throw new Error(`suite node "${id}": unknown node kind "${String((node as { use?: unknown }).use)}"`);
+    throw new Error(
+      `suite node "${id}": unknown node kind "${String((node as { use?: unknown }).use)}"`,
+    );
   }
   return { id, needs, step: { ...node, id }, params: {} };
 }

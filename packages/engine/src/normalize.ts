@@ -15,7 +15,7 @@ import {
 
 import { hashFn } from "./fnHash";
 import { expandUnits } from "./matrix";
-import { planSuite } from "./suite";
+import { isSuite, planSuite } from "./suite";
 
 /**
  * Normalize an authored test/suite into serializable manifest entries (research §7.4,
@@ -32,10 +32,6 @@ import { planSuite } from "./suite";
 const LONG_RUNNING_TIMEOUT_MS = 30_000;
 
 type AuthoredDef = AuthoredTestCase | AuthoredSuite;
-
-function isSuite(def: AuthoredDef): def is AuthoredSuite {
-  return "nodes" in def;
-}
 
 /** Replace an authored `fn` predicate with its content-hash marker; declarative
  *  assertions are already serializable and pass through unchanged. */

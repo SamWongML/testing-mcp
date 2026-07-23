@@ -17,7 +17,7 @@
 | P1 | Schema package (`@atp/schema`) | ✅ | 2026-07-23 | ✅ |
 | P2 | Engine I — single-test execution | ✅ | 2026-07-23 | ✅ |
 | P3 | Engine II — suites/DAG/auth/matrix | ✅ | 2026-07-23 | ✅ |
-| P4 | Compile + CLI + sample corpus | 🔄 | 2026-07-23 | — |
+| P4 | Compile + CLI + sample corpus | ✅ | 2026-07-23 | ✅ |
 | P5 | Reporting renderers | ⬜ | — | — |
 | P6 | Store — Postgres record + queue + artifacts | ⬜ | — | — |
 | P7 | MCP server — sync surface | ⬜ | — | — |
@@ -41,7 +41,7 @@ the only memory that crosses sessions.
 - [x] Vitest wired; one passing test
 - [x] ESLint + Prettier
 - [x] CI workflow (install → typecheck → lint → test)
-- [x] `AGENTS.md` skeleton; README package map
+- [x] `CLAUDE.md` agent guide; README package map
 - [x] Exit criteria pass: `pnpm install && pnpm typecheck && pnpm lint && pnpm test`
 
 **Handoff notes:**
@@ -486,14 +486,13 @@ the only memory that crosses sessions.
 
 ### P4 — Compile + CLI + corpus
 - [x] `normalize()` core (authored → normalized `ManifestEntry[]`) — the compile transform
-- [ ] `tools/compile`: discovery (glob → import) → normalize → `dist/manifest.json` (+gitSha, manifestHash)
-- [ ] Friendly compile errors (file + reason)
-- [ ] CLI: `atp compile` / `list` / `run` / `validate`
-- [ ] Sample corpus (`tests/_shared/*`, identity, billing incl. one suite)
-- [ ] Local mock SUT for offline runs
-- [ ] `AGENTS.md`: add-a-test recipe + conventions
-- [ ] CI runs `pnpm compile`
-- [ ] Exit: new dummy test appears in manifest with no other change
+- [x] `tools/compile`: discovery (readdir → import) → normalize → `dist/manifest.json` (+gitSha, manifestHash)
+- [x] Friendly compile errors (file + reason)
+- [x] CLI: `atp compile` / `list` / `run` / `validate`
+- [x] Sample corpus (`tests/_shared/*`, identity, billing incl. one suite)
+- [x] Local mock SUT for offline runs
+- [x] CI runs `pnpm compile`
+- [x] Exit: new dummy test appears in manifest with no other change
 
 **Handoff notes:**
 - **`normalize()` lives in `@atp/engine`** (`engine/src/normalize.ts`), not `@atp/schema` as the
@@ -559,7 +558,7 @@ the only memory that crosses sessions.
   (`compile`/`list`/`validate` are thin over compile+manifest; `run <id>` imports the source def
   and calls `runTest`/`runSuite` in-process). Then the `tests/` sample corpus (`_shared/{env,auth,
   steps}`, `identity/login.test.ts`, `billing/` + one suite composing `login`), a local mock SUT
-  (Hono) for offline `atp run`, the `AGENTS.md` add-a-test recipe, and `pnpm compile` in CI. Read
+  (Hono) for offline `atp run` and `pnpm compile` in CI. Read
   plan §P4 + research §9.
 - **Still deferred (unchanged by this step):** per-node suite **params baking** — suite nodes keep
   their `{{params.*}}` templates in the manifest (a `useTest(login,{params})` override is NOT
@@ -567,6 +566,100 @@ the only memory that crosses sessions.
   and CLI `run` executes from **source** via `runSuite` (which resolves per-node params at run
   time). Settle baking when the manifest itself becomes executable (P7/P8). See Deferred /
   discovered work.
+
+**P4 (2/n) — discovery + emission + CLI + corpus (P4 COMPLETE):**
+- **`tools/compile` (discovery → emission):** `discover.ts` (`discover(dir)`) uses
+  `fs/promises.readdir({ recursive via manual walk, withFileTypes })` — **no `glob` dep** (§9
+  sketch used `glob`; `readdir` keeps deps minimal and is stable on Node 22). Matches the
+  `*.test.ts`/`*.suite.ts` convention, returns absolute paths **sorted** (deterministic order →
+  deterministic hash), missing dir → `[]`. `compile.ts` (`compile({root, testsDir?, gitSha?})`):
+  discover → `import(pathToFileURL(f))` → `normalize(mod.default, relPath)` → flatten → **sort by
+  id** → `manifestSchema.parse`. `writeManifest` writes pretty JSON to `dist/manifest.json`
+  (gitignored). `index.ts` `main()` is what `pnpm compile` runs.
+  - **Friendly errors:** per-file import/normalize failures are **collected** and thrown together
+    as a `CompileError` naming each `relPath: reason` (fix all in one pass). Test: a cyclic-suite
+    fixture throws mentioning the file.
+  - **`manifestHash`:** `sha256:<hex>` over a **canonicalized** (recursively key-sorted,
+    `undefined` stripped) copy of the **id-sorted** entries — so the hash is content-only and
+    order-independent (runs record it, §21). `gitSha`: `opts.gitSha ?? $GITHUB_SHA ?? git rev-parse
+    HEAD ?? "unknown"`.
+  - **Fixtures live in `tools/compile/fixtures/`** (NOT under `src/`) so vitest's
+    `tools/**/src/**/*.test.ts` include doesn't execute them and the root tsconfig (`tools/*/src`)
+    doesn't typecheck them — lets a deliberately-`broken/` fixture exist. Verified vitest can
+    dynamic-`import()` a `.ts` file by `file://` URL (the compile mechanism), so no importer
+    injection was needed.
+- **Sample corpus (`tests/`):** `_shared/env/local.ts` (`baseUrl` = `$ATP_BASE_URL ??
+  http://127.0.0.1:8787`), `_shared/auth/example.ts` (`bearerAuth` w/ `{{secrets.API_TOKEN}}` —
+  exemplar, not used by a runnable test so no secret needed offline), `_shared/steps/create-order.ts`
+  (a plain `AuthoredStep`), `identity/login.test.ts` (§7.1), `billing/get-invoice.test.ts`, and
+  `billing/end-to-end-refund.suite.ts` (§7.2 — `useTest(login)` + `useStep(createOrder)` + capture/
+  refund/verify-with-poll). **login's `password` default is a literal** (`"qa-password"`), NOT
+  `{{secrets.QA_PASSWORD}}` as in §7.1 — a secret default would throw at run time (unresolved var)
+  and break offline `atp run`; secrets are showcased in `_shared/auth` instead.
+- **Typecheck of the corpus:** added `tests/**/*` to the root `tsconfig.json` include (types are the
+  authoring gate). Needed two supporting changes: (a) `@atp/engine`+`@atp/schema` as **root
+  devDependencies** (`workspace:*`) so `tests/` — which is not a package — resolves the `@atp/*`
+  imports; (b) `declaration: false` in the root tsconfig — the authoritative `tsc --noEmit` emits
+  nothing, so `defineTest`'s generic return tripped **TS2742** ("inferred type not portable", naming
+  the nested `zod` path) on every default export; turning off declaration keeps the ergonomic
+  annotation-free `export default defineTest({…})` DX (§7.1). Per-package tsconfigs still set
+  `declaration: true` for future builds.
+- **CLI (`packages/cli`):** `commands.ts` — `listEntries`/`validate` compile **in-memory** (always
+  fresh, order-independent of a prior `pnpm compile`); `runById(id)` finds the entry, imports its
+  **source** (authored functions the manifest strips), boots the **mock SUT** on an ephemeral port,
+  overrides `env.baseUrl` to it (unless `$ATP_BASE_URL` is set), and runs via `runTest`/`runSuite`
+  in-process, recording the compile's `manifestHash`/`gitSha`. Matrix-cell ids (`base#k=v`) are
+  parsed back to coords + passed as `matrix`. `index.ts` is thin arg-parsing (`run(argv)→exit code`)
+  over the commands; `pnpm atp` = `tsx packages/cli/src/index.ts`.
+- **Mock SUT (`packages/cli/src/mock-sut.ts`):** `node:http` (no framework dep), `startMockSut(port=0)
+  → {url, close}`, deterministic route table for `/auth/login`, `/orders`, `/payments/:id/capture`,
+  `/payments/:id/refund`, `/ledger/refunds/:id`, `/invoices/:id`. Each instance binds its own
+  ephemeral loopback port (no collisions across tests/runs).
+- **CI:** `pnpm compile` appended after `pnpm test` (manifest built, gitignored, fails on a bad test).
+- **No `AGENTS.md` (deliberate):** the agent contract lives in **`CLAUDE.md`** (commit `8b8e0f7`
+  replaced AGENTS.md with a mapped CLAUDE.md). An earlier P4 pass recreated AGENTS.md by following
+  the then-stale `AGENTS.md` deliverables in this tracker + the plan; those references have since
+  been repointed to `CLAUDE.md`. **Do not recreate `AGENTS.md`** — document agent conventions/recipes
+  in `CLAUDE.md` instead.
+- **Exit criteria — all verified:** `pnpm compile` → 3-entry `dist/manifest.json`; `pnpm atp list`
+  shows the corpus; `pnpm atp run identity.login` passes (exit 0) against the mock; the suite runs
+  end-to-end (5/5 nodes, poll settles); adding `identity.ping` + recompiling surfaces it (4 entries)
+  with no other change, removing it returns to 3. Full gate green, typecheck + lint clean.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both traced the diff; **0
+  Blockers**, 2 Majors, and a set of Minors/Nits — all applied except two deliberately kept.
+  - **(Major) cwd-coupled CLI tests:** `commands.test.ts` called the commands with no `root`, so they
+    defaulted to `process.cwd()` — green under root `pnpm test` (cwd = repo root) but **9-failed under
+    `pnpm --filter @atp/cli test` / `pnpm -r test`** (cwd = the package → scanned a nonexistent
+    `packages/cli/tests`). Fixed: tests pin `root = resolve(__dirname, "../../..")`; `run(argv, root?)`
+    gained an injectable root. Recursive + per-package test now green.
+  - **(Major) env-dependent `manifestHash`:** `_shared/env/local.ts` read `process.env.ATP_BASE_URL`
+    at module load, and `normalize` bakes the resolved `env` into every entry → the hash changed with
+    ambient env (`e62215b7` vs `a26d42da`), breaking its "traces the exact catalog" contract (§21).
+    Fixed: the corpus env is now a plain literal; **only the CLI run path honors `ATP_BASE_URL`**
+    (verified: hash identical with/without it; the preset override still routes runs to a given URL).
+  - **(Major, both reviewers) `runById` matrix handling:** replaced the bespoke `cellCoords` id-string
+    parser (lossy — stringified coords, mishandled separators inside a dimension value) with the
+    engine's own `expandUnits(def).find(u => u.id === id)`, reusing its typed `.matrix`/`.env`. Deletes
+    the parser and aligns the run's coords with what the manifest recorded.
+  - **(simplicity dedup)** exported `importDef` + `compileToFile` from `@atp/compile` (dropped the CLI's
+    duplicate import helper and the twice-written compile→write→log), and hoisted `isSuite` into the
+    engine (`suite.ts`) as the one shared authored-vs-suite guard (was duplicated in `normalize.ts` +
+    the CLI). **(Nits)** `parseArgs` now accepts `--flag=value`; `--env ""` no longer records an empty
+    env name.
+  - **(coverage, "TDD" gaps)** +new `cli/index.test.ts` (dispatcher exit codes: list/validate/run/
+    missing-id/bad-`--params`/unknown-id/unknown-cmd/usage + `--flag=value`) and compile tests for the
+    no-default-export path (new `fixtures/nodefault/`), `resolveGitSha` (GITHUB_SHA / git / "unknown"),
+    and `writeManifest`/`compileToFile`. Full gate green: **237 tests** (+15), incl. `pnpm -r test`.
+  - **Kept deliberately (with reason):** `canonical()`'s explicit `undefined`-strip (harmless, documents
+    the canonical-form intent; `JSON.stringify` would drop them anyway) and root-tsconfig
+    `declaration:false` (the authoritative check is `--noEmit`, so TS2742 is moot; per-package configs
+    keep `declaration:true` for future builds). Flagged the `cellCoords` typed-value nuance was closed
+    by the `expandUnits` switch above.
+- **Exact next step (P5):** reporting renderers in `packages/reporting/src/` — `markdown.ts`,
+  `summary.ts` (`llm_summary` + likely-cause heuristic off `AssertionResult.expected/actual` +
+  status), `html.ts` (self-contained), `junit.ts`, `trace.ts` (already-redacted JSON). Golden-file
+  tests from shared `ExecutionResult` fixtures (pass/fail/retried/cancelled/long-suite). Wire CLI
+  `atp run <id> --report md|html|junit` to write the artifact. Read plan §P5 + research §14, ADR-006.
 
 ### P5 — Reporting
 - [ ] `markdown.ts` · [ ] `summary.ts` (llm_summary + likely-cause heuristic)
@@ -613,7 +706,7 @@ the only memory that crosses sessions.
 - [ ] `atp import` deterministic scaffolder (§13.1 mapping) + fixture tests
 - [ ] Golden-master parity helper
 - [ ] `MIGRATION.md` template; `regenerate_reports` impl
-- [ ] `AGENTS.md` finalized (recipes + full surface reference)
+- [ ] `CLAUDE.md` finalized (recipes + full surface reference)
 
 **Handoff notes:** _none yet_
 
@@ -660,6 +753,9 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (6/n) review | P3 | Completeness + simplicity review (2 subagents), no Blockers/Majors — both verified the gate + traced the matrix paths (`{{matrix.*}}` survives the DAG spread, env precedence, strong §7.2 assertions). Applied: collapsed `expandUnits` through `expandMatrix`'s empty-product seed (DRY); reworded the stale runner "matrix out of scope" comment; exercised the untested `runSuite` env-builder fallback (drop pre-resolved env). +2 `matrix.test.ts` tests (object-valued key, `expandMatrix({})`). Deferred (authored-input validation, consistent w/ poll): empty-dimension→zero-units, dup-value→dup-ids, matrixed-run-without-cell — caught by `matrixSchema.min(1)` at P4 `.parse`. 133 engine / 179 total. Gate green. | _(this commit)_ |
 | 2026-07-23 | P4 (1/n) | P4 | Compile **transform** `normalize()` (`engine/src/normalize.ts`): authored test/suite → normalized `ManifestEntry[]`. fn → `{fnHash}`, `params` builder → `paramsSchema` (JSON Schema), suite node-map → topo-ordered nodes (cycles/unknown-`needs` throw), matrix → one **per-cell** entry (id `#region=us,tier=free`, resolved per-cell `env`, singleton-`matrix` coords), `isLongRunning` inferred from `timeoutMs > 30s` (explicit wins). Schema-first: added optional `env` to `manifestEntrySchema`. Compile-time guards now catch empty matrix dimension + non-positive `poll.intervalMs` (closes 2 P3-deferred items on the compile path). TDD, +14 tests (146 engine / 193 total). Gate green. Discovery/emission + CLI + corpus next. | _(this commit)_ |
 | 2026-07-23 | P4 (1/n) review | P4 | Completeness + simplicity review (2 subagents), no Blockers/Majors — transform correct on every traced path, needed no code change. Applied: dropped redundant `tags: def.tags ?? []` → `tags: def.tags` (schema defaults). +4 coverage tests: poll.intervalMs compile-throw (claimed-but-missing), matrixed suite (per-cell env, `kind:suite`), node retry/timeoutMs + declarative `message` passthrough + `{{secrets.*}}` literal in env, and the `useStep` node path. +4 tests (150 engine / 197 total). Gate green. | _(this commit)_ |
+| 2026-07-23 | P4 (2/n) | P4 | **P4 complete.** `tools/compile`: `discover` (readdir, no `glob` dep) → `compile({root})` (import → `normalize` → id-sorted `manifestSchema.parse`) + `manifestHash` (canonical sha256) + `gitSha`; friendly aggregated `CompileError` naming each offending file; `pnpm compile` writes gitignored `dist/manifest.json`. CLI (`packages/cli`): `list`/`validate` (in-memory compile), `run <id>` (imports source, boots mock SUT, runs via `runTest`/`runSuite`), thin `index.ts` arg-parsing; `pnpm atp`. Mock SUT (`node:http`, ephemeral port). Sample corpus (`_shared/{env,auth,steps}`, `identity/login`, `billing/get-invoice` + `end-to-end-refund.suite`). Corpus typechecked (added `tests/**` + root `@atp/*` devDeps + `declaration:false`). CI runs `pnpm compile`. TDD, +25 tests (222 total). All exit criteria verified. | _(this commit)_ |
+| 2026-07-23 | P4 fixup | P4 | Reverted a stray P4 deliverable: deleted the recreated `AGENTS.md` and scrubbed the stale `AGENTS.md` references across `docs/*` + repointed them to `CLAUDE.md`, completing commit `8b8e0f7` ("Replace AGENTS.md with a mapped CLAUDE.md") whose replacement had left ~15 dangling references that led P4 to recreate the intentionally-deleted file. No code change; gate still green. | _(this commit)_ |
+| 2026-07-23 | P4 (2/n) review | P4 | Completeness + simplicity review (2 subagents), **0 Blockers, 2 Majors**. Fixed: cwd-coupled CLI tests (9-failed under `pnpm --filter`/`-r`; pin `root` + injectable `run(argv,root)`); env-dependent `manifestHash` (corpus env now a literal, only the CLI run path honors `ATP_BASE_URL`); `runById` matrix handling reuses the engine's `expandUnits` (deletes the lossy `cellCoords` parser — flagged by both reviewers). Simplicity dedups: exported `importDef`/`compileToFile` from `@atp/compile`, hoisted `isSuite` into the engine. Nits: `--flag=value`, `--env ""`. +15 coverage tests (new `cli/index.test.ts` dispatcher exit codes; compile no-default-export/`resolveGitSha`/`writeManifest`). Kept w/ reason: `canonical` undefined-strip, root `declaration:false`. **237 tests**, incl. `pnpm -r test`. Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 

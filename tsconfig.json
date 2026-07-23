@@ -1,7 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    // The authoritative check emits nothing, so declaration-portability (TS2742) is moot.
+    // Turning it off lets corpus files use the ergonomic `export default defineTest({…})`
+    // without a per-file type annotation to name the nested `zod` path (research §7.1 DX).
+    "declaration": false
   },
-  "include": ["packages/*/src/**/*", "tools/*/src/**/*", "vitest.config.ts"]
+  "include": ["packages/*/src/**/*", "tools/*/src/**/*", "tests/**/*", "vitest.config.ts"]
 }

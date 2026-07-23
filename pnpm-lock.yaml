@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@atp/engine':
+        specifier: workspace:*
+        version: link:packages/engine
+      '@atp/schema':
+        specifier: workspace:*
+        version: link:packages/schema
       '@eslint/js':
         specifier: ^9.17.0
         version: 9.39.5
@@ -33,7 +39,17 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.1)(tsx@4.23.1)
 
-  packages/cli: {}
+  packages/cli:
+    dependencies:
+      '@atp/compile':
+        specifier: workspace:*
+        version: link:../../tools/compile
+      '@atp/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@atp/schema':
+        specifier: workspace:*
+        version: link:../schema
 
   packages/engine:
     dependencies:
@@ -59,7 +75,14 @@ importers:
 
   packages/store: {}
 
-  tools/compile: {}
+  tools/compile:
+    dependencies:
+      '@atp/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+      '@atp/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
 
 packages:
 

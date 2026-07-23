@@ -291,7 +291,7 @@ Design goals: agents can add/refactor tests trivially; the tree stays clean at t
 
 ```
 api-testing-platform/
-├─ AGENTS.md                     # ← the contract for coding agents (read this first)
+├─ CLAUDE.md                     # ← the contract for coding agents (read this first)
 ├─ README.md
 ├─ pnpm-workspace.yaml
 ├─ turbo.json                    # (optional) task caching
@@ -374,7 +374,7 @@ api-testing-platform/
 - **Folder = tag = ownership.** New domains are new folders with a `CODEOWNERS` entry. The manifest partitions by namespace, so `list_tests` filters cheaply.
 - **Reuse is structural.** Shared env/auth/steps/fixtures live in `tests/_shared`; suites import them. Duplication has nowhere to hide.
 - **One convention.** Every executable test is `*.test.ts`; every composition is `*.suite.ts`. Discovery never guesses.
-- **`AGENTS.md` is the contract.** It documents the conventions, the `defineTest` API, the "add a test" recipe, and the migration recipe — this is what makes agents productive with minimal prompting.
+- **`CLAUDE.md` is the contract.** It documents the conventions, the `defineTest` API, the "add a test" recipe, and the migration recipe — this is what makes agents productive with minimal prompting.
 
 ---
 
@@ -801,7 +801,7 @@ Result: adding a suite is "pick existing tests, declare the edges, add the 1–2
 
 ## 13. Coding‑agent workflow
 
-The repository is optimized for autonomous agents. The two artifacts that make this work are **`AGENTS.md`** (conventions + recipes) and the MCP **prompts** (reusable procedures).
+The repository is optimized for autonomous agents. The two artifacts that make this work are **`CLAUDE.md`** (conventions + recipes) and the MCP **prompts** (reusable procedures).
 
 ### 13.1 Import an Insomnia collection
 
@@ -812,7 +812,7 @@ sequenceDiagram
   participant FS as Repo (files)
   participant CI as compile + tsc
 
-  Ag->>FS: read AGENTS.md (conventions, defineTest API, mapping table)
+  Ag->>FS: read CLAUDE.md (conventions, defineTest API, mapping table)
   Ag->>FS: read insomnia/*.yaml (requests, groups, envs, auth, chained refs)
   Ag->>FS: write tests/<domain>/<name>.test.ts (defineTest)
   Ag->>FS: write tests/<domain>/<name>.suite.ts for request groups (defineSuite)
