@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { executionResultSchema } from "@atp/schema";
 
-import { defineSuite, defineTest, useTest } from "./define";
+import { defineSuite, defineTest, useStep, useTest } from "./define";
+import { expandUnits } from "./matrix";
 import { runSuite } from "./runner";
 
 const JSON_HEADERS = { headers: { "content-type": "application/json" } };
@@ -21,25 +22,30 @@ afterEach(async () => {
 });
 
 describe("runSuite — §7.2 billing.e2e-refund (adapted to MockAgent)", () => {
-  it("runs a multi-node suite end-to-end, chaining via {{nodes.X.var}}", async () => {
+  it("runs the full login→order→capture→refund→verify chain, composing by reference", async () => {
     const pool = agent.get("https://api.example.com");
     pool
       .intercept({ path: "/auth/login", method: "POST" })
       .reply(200, { token: "tok-1" }, JSON_HEADERS);
+    // Only matches when the token from `auth` flowed through useStep's `with` → {{params.token}}.
     pool
       .intercept({ path: "/orders", method: "POST", headers: { authorization: "Bearer tok-1" } })
-      .reply(201, { orderId: "o-9" }, JSON_HEADERS);
+      .reply(201, { paymentId: "pay-1" }, JSON_HEADERS);
     pool
-      .intercept({
-        path: "/orders/o-9/refund",
-        method: "POST",
-        headers: { authorization: "Bearer tok-1" },
-      })
-      .reply(200, { refundId: "r-5" }, JSON_HEADERS);
+      .intercept({ path: "/payments/pay-1/capture", method: "POST" })
+      .reply(200, { ok: true }, JSON_HEADERS);
     pool
-      .intercept({ path: "/refunds/r-5", method: "GET" })
-      .reply(200, { status: "refunded" }, JSON_HEADERS);
+      .intercept({ path: "/payments/pay-1/refund", method: "POST" })
+      .reply(202, { id: "ref-1" }, JSON_HEADERS);
+    // Eventual consistency: the ledger settles only on the second read — verify must poll.
+    pool
+      .intercept({ path: "/ledger/refunds/ref-1", method: "GET" })
+      .reply(200, { status: "pending" }, JSON_HEADERS);
+    pool
+      .intercept({ path: "/ledger/refunds/ref-1", method: "GET" })
+      .reply(200, { status: "settled" }, JSON_HEADERS);
 
+    // A reused test (independently runnable) — the suite overrides its `email` param.
     const login = defineTest({
       id: "identity.login",
       version: 1,
@@ -47,40 +53,65 @@ describe("runSuite — §7.2 billing.e2e-refund (adapted to MockAgent)", () => {
       steps: [
         {
           id: "post",
-          request: { method: "POST", url: "{{env.baseUrl}}/auth/login" },
+          request: {
+            method: "POST",
+            url: "{{env.baseUrl}}/auth/login",
+            body: { email: "{{params.email}}" },
+          },
           extract: [{ as: "authToken", from: "body.token" }],
         },
       ],
     });
 
+    // A reusable shared step — bound inputs arrive as {{params.*}} (research §7.2 / §13.1).
+    const createOrder = {
+      id: "create-order",
+      request: {
+        method: "POST" as const,
+        url: "{{env.baseUrl}}/orders",
+        headers: { authorization: "Bearer {{params.token}}" },
+      },
+      extract: [{ as: "paymentId", from: "body.paymentId" }],
+    };
+
     const suite = defineSuite({
       id: "billing.e2e-refund",
-      version: 1,
+      version: 3,
+      title: "Create order → capture → refund → verify ledger",
+      tags: ["billing", "e2e"],
+      timeoutMs: 120_000,
       env: { baseUrl: "https://api.example.com" },
       nodes: {
-        auth: useTest(login),
-        order: {
+        auth: useTest(login, { params: { email: "billing-bot@example.com" } }),
+        order: useStep(createOrder, {
           needs: ["auth"],
-          request: {
-            method: "POST",
-            url: "{{env.baseUrl}}/orders",
-            headers: { authorization: "Bearer {{nodes.auth.authToken}}" },
-          },
-          extract: [{ as: "orderId", from: "body.orderId" }],
-        },
-        refund: {
+          with: { token: "{{nodes.auth.authToken}}" },
+        }),
+        capture: {
           needs: ["order"],
           request: {
             method: "POST",
-            url: "{{env.baseUrl}}/orders/{{nodes.order.orderId}}/refund",
-            headers: { authorization: "Bearer {{nodes.auth.authToken}}" },
+            url: "{{env.baseUrl}}/payments/{{nodes.order.paymentId}}/capture",
           },
-          extract: [{ as: "refundId", from: "body.refundId" }],
+          assert: [{ path: "status", op: "eq", value: 200 }],
+        },
+        refund: {
+          needs: ["capture"],
+          request: {
+            method: "POST",
+            url: "{{env.baseUrl}}/payments/{{nodes.order.paymentId}}/refund",
+          },
+          assert: [{ path: "status", op: "eq", value: 202 }],
+          extract: [{ as: "refundId", from: "body.id" }],
         },
         verify: {
           needs: ["refund"],
-          request: { method: "GET", url: "{{env.baseUrl}}/refunds/{{nodes.refund.refundId}}" },
-          assert: [{ path: "body.status", op: "eq", value: "refunded" }],
+          request: {
+            method: "GET",
+            url: "{{env.baseUrl}}/ledger/refunds/{{nodes.refund.refundId}}",
+          },
+          assert: [{ path: "body.status", op: "eq", value: "settled" }],
+          poll: { untilAssertPasses: true, intervalMs: 10, maxMs: 1000 },
         },
       },
     });
@@ -90,9 +121,23 @@ describe("runSuite — §7.2 billing.e2e-refund (adapted to MockAgent)", () => {
     expect(result.status).toBe("passed");
     expect(result.kind).toBe("suite");
     expect(result.entryId).toBe("billing.e2e-refund");
-    expect(result.steps.map((s) => s.id)).toEqual(["auth", "order", "refund", "verify"]);
+    // Topologically ordered, single dependency chain.
+    expect(result.steps.map((s) => s.id)).toEqual(["auth", "order", "capture", "refund", "verify"]);
     expect(result.steps.every((s) => s.status === "passed")).toBe(true);
-    expect(result.metrics.totalSteps).toBe(4);
+    expect(result.metrics.totalSteps).toBe(5);
+    // Param override on the reused `login` reached the request body.
+    expect(result.steps.find((s) => s.id === "auth")?.request?.body).toEqual({
+      email: "billing-bot@example.com",
+    });
+    // useStep bound the chained token into the shared step's {{params.token}}: the /orders
+    // mock only matched `Bearer tok-1`, so a passing `order` proves the token flowed —
+    // while the persisted snapshot is redacted to `***` (credential-at-rest, §21).
+    expect(result.steps.find((s) => s.id === "order")?.status).toBe("passed");
+    expect(result.steps.find((s) => s.id === "order")?.request?.headers?.authorization).toBe("***");
+    // Poll re-read the ledger until it settled (first read was `pending`).
+    expect(
+      (result.steps.find((s) => s.id === "verify")?.response?.body as { status: string }).status,
+    ).toBe("settled");
     // Validate the contract downstream renderers depend on.
     expect(() => executionResultSchema.parse(result)).not.toThrow();
   });
@@ -361,5 +406,38 @@ describe("runSuite — concurrency, skip cascade & redaction", () => {
     const result = await runSuite(suite, { secrets: { PW: "s3cret" } });
     expect(result.status).toBe("passed");
     expect(result.steps[0]?.request?.body).toEqual({ password: "***" });
+  });
+});
+
+describe("runSuite — matrix cell execution (§7.3)", () => {
+  it("populates {{matrix.*}} across suite nodes and applies the per-cell env", async () => {
+    agent
+      .get("https://eu.api.example.com")
+      .intercept({ path: "/ping/eu", method: "GET" })
+      .reply(200, { ok: true }, JSON_HEADERS);
+
+    const suite = defineSuite({
+      id: "region.smoke",
+      version: 1,
+      matrix: { region: ["us", "eu"] },
+      env: (m) => ({ baseUrl: `https://${String(m.region)}.api.example.com` }),
+      nodes: {
+        ping: {
+          request: { method: "GET", url: "{{env.baseUrl}}/ping/{{matrix.region}}" },
+          assert: [{ path: "status", op: "eq", value: 200 }],
+        },
+      },
+    });
+
+    const euCell = expandUnits(suite).find((u) => u.matrix.region === "eu");
+    const result = await runSuite(suite, {
+      entryId: euCell?.id,
+      matrix: euCell?.matrix,
+      env: euCell?.env,
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.entryId).toBe("region.smoke#region=eu");
+    expect(result.steps[0]?.request?.url).toBe("https://eu.api.example.com/ping/eu");
   });
 });

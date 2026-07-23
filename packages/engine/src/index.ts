@@ -12,6 +12,7 @@ export * from "./define";
 export * from "./auth";
 export * from "./fnHash";
 export * from "./graph";
+export * from "./matrix";
 export * from "./params";
 export * from "./suite";
 export * from "./runner";

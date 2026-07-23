@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { AuthoredStep, AuthoredTestCase } from "./test";
+import type { AuthoredEnv, AuthoredStep, AuthoredTestCase } from "./test";
 import { matrixSchema, stepSchema } from "./test";
 import { uniqueById } from "./util";
 
@@ -65,7 +65,7 @@ export interface AuthoredSuite {
   tags?: string[];
   owner?: string;
   timeoutMs?: number;
-  env?: Record<string, unknown>;
+  env?: AuthoredEnv;
   matrix?: Record<string, unknown[]>;
   /** Force Task augmentation (P8). If omitted, the normalizer infers from timeoutMs. */
   isLongRunning?: boolean;
