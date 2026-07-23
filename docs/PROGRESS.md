@@ -18,7 +18,7 @@
 | P2 | Engine I — single-test execution | ✅ | 2026-07-23 | ✅ |
 | P3 | Engine II — suites/DAG/auth/matrix | ✅ | 2026-07-23 | ✅ |
 | P4 | Compile + CLI + sample corpus | ✅ | 2026-07-23 | ✅ |
-| P5 | Reporting renderers | ⬜ | — | — |
+| P5 | Reporting renderers | ✅ | 2026-07-23 | ✅ |
 | P6 | Store — Postgres record + queue + artifacts | ⬜ | — | — |
 | P7 | MCP server — sync surface | ⬜ | — | — |
 | P8 | Worker + MCP Tasks — async lifecycle | ⬜ | — | — |
@@ -662,12 +662,105 @@ the only memory that crosses sessions.
   `atp run <id> --report md|html|junit` to write the artifact. Read plan §P5 + research §14, ADR-006.
 
 ### P5 — Reporting
-- [ ] `markdown.ts` · [ ] `summary.ts` (llm_summary + likely-cause heuristic)
-- [ ] `html.ts` (self-contained) · [ ] `junit.ts` · [ ] `trace.ts`
-- [ ] Golden-file tests (pass/fail/retried/cancelled/long-suite fixtures)
-- [ ] CLI `--report md|html|junit`
+- [x] `markdown.ts` · [x] `summary.ts` (llm_summary + likely-cause heuristic)
+- [x] `html.ts` (self-contained) · [x] `junit.ts` · [x] `trace.ts`
+- [x] Golden-file tests (pass/fail/retried/cancelled/long-suite fixtures)
+- [x] CLI `--report md|html|junit`
 
-**Handoff notes:** _none yet_
+**Handoff notes:**
+- **All renderers live in `@atp/reporting`** (`packages/reporting/src/`), each a pure
+  `(result: ExecutionResult) => string` — no engine/MCP/fs imports, so the package stays a
+  leaf that P7's `get_report` can call directly. Deps: only `@atp/schema` (types). Public
+  surface via `index.ts`: `renderMarkdown` / `renderSummary` / `renderHtml` / `renderJUnit`
+  / `renderTrace`, the `diagnose` heuristic, and the `renderReport`/`reportExtension`/
+  `isReportFormat`/`REPORT_FORMATS` dispatch. `fixtures.ts` is **test-only** (not re-exported).
+- **One canonical `ExecutionResult` → many renderers (ADR-006):** every renderer reads the
+  same typed value; the golden-file suites iterate the *same* five fixtures across all
+  formats, so a shape change surfaces in every golden at once (no format drift).
+- **`diagnose.ts` is the single likely-cause classifier**, shared by `summary` (the
+  `llm_summary` "likely cause / next action") **and** the markdown/html failure sections —
+  the diagnosis can't drift between formats. It scans for the first non-passing step and
+  classifies: `auth` (401/403) → `server-error` (5xx) → `schema-mismatch` (failed
+  `jsonSchema` assertion) → `assertion-failed` (with expected/actual), plus `timeout`/
+  `network` (regex over an errored step's `.error`) and `cancelled`. Returns `undefined`
+  for a passed run. Each cause carries a fixed `nextAction`. **Precedence is
+  response-status-first** (most actionable) then assertions — a step that 401s *and* fails
+  an assertion is diagnosed as `auth`.
+- **Renderer specifics:**
+  - `markdown.ts` — status header + metadata list, a per-step table (glyph/status/attempts/
+    time), then (only when failing) a "Likely cause" block and a "Failures" section with
+    request line, response status, error, and failed-assertion detail. Passing runs omit
+    both trailing sections (asserted).
+  - `summary.ts` — a **single line** for a pass; a failure adds `not passed: …`, `likely
+    cause: …`, `next action: …`. Token-efficient by design (§14).
+  - `html.ts` — a **self-contained** document: `<!DOCTYPE html>` + inlined `<style>`, **no
+    external `<link>`/`<script src>`/CDN** (asserted). Expandable request/response traces
+    use native `<details>`/`<summary>` — **no JS at all**. Timeline bars are inline-`style`
+    width %. Every dynamic value passes `escapeXml` (an injected `<script>` in a step id
+    renders as `&lt;script&gt;…`, asserted). Verified it renders headlessly in the
+    pre-installed Chromium (title/badge/step-id present in the dumped DOM).
+  - `junit.ts` — `<testsuites>/<testsuite>` with per-step counts; `failed`→`<failure>`,
+    `errored`→`<error>`, `skipped`/`cancelled`→`<skipped>` (JUnit has no cancelled state;
+    cancelled gets `message="cancelled"`). `time=` is `timingMs/1000`. XML-escaped.
+  - `trace.ts` — `JSON.stringify(result, null, 2)`; the result is already redacted before
+    a renderer sees it (§21), so it's a straight full-fidelity dump. Round-trips through
+    `executionResultSchema` (test compares against the schema's **canonical** form, since a
+    persisted result has defaults like `response.headers: {}` applied).
+- **`util.ts`** holds the shared `escapeXml` (covers `& < > " '` — one escaper for both
+  XML and HTML so there's a single place a raw value can reach markup), `ms`/`secs`
+  formatters, and `fmtValue` (JSON-compact assertion values).
+- **Fixtures (`fixtures.ts`)** are hand-authored **canonical** `ExecutionResult`s (a
+  `fixtures.test.ts` parses each to prove it) covering the five required scenarios:
+  `passingTest`, `failingSuite` (assertion mismatch + skipped dependent), `retriedTest`
+  (`attempts: 3`), `cancelledRun`, `longSuite`. `makeResult`/`makeStep` factories back the
+  focused `diagnose` cases (auth/5xx/timeout/network/schema).
+- **Golden files** live in `packages/reporting/src/__snapshots__/` via vitest
+  `toMatchFileSnapshot` (`<fixture>.<format>` — real reviewable artifacts, regenerate with
+  `vitest -u`). Each renderer suite pairs semantic assertions (written test-first) with the
+  full-output golden as a regression lock.
+- **CLI wiring:** `atp run <id> --report md|html|junit|json|summary [--out path]`. New
+  `writeReport(result, format, out?)` in `commands.ts` renders via `renderReport` and writes
+  `<sanitizedEntryId>.<ext>` (matrix ids' `#`/`=`/`,` sanitized) unless `--out` given; the
+  dispatcher validates the format via `isReportFormat` (unknown → exit 1 before running).
+  `@atp/reporting` added to `@atp/cli` deps.
+- **Exit criteria — verified:** `pnpm --filter @atp/reporting test` green (61 tests); full
+  gate `typecheck + lint + test` green (301 total, +64) incl. `pnpm -r test` and
+  `pnpm compile`; `atp run identity.login --report html` writes a standalone file that
+  renders in Chromium.
+- **Left for P7 (not P5):** the reporting package is pure/offline; wiring reports as MCP
+  resources (`run://{id}/report.md`, `.../trace.json`) and `get_report` (md/json inline,
+  html via artifact-store presign) routes through the same `renderReport` dispatch — no
+  renderer changes needed, just call sites. Artifact **persistence** is P6/P7.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both confirmed the
+  full gate green and the design sound; completeness found **1 Major**, simplicity **0
+  Blockers/Majors**. Fixed:
+  - **(Major) suite-timeout misdiagnosed.** The engine records a whole-suite `timeoutMs`
+    breach as an **`errored` run** (`error: 'suite "…" exceeded timeoutMs (…ms)'`) whose
+    in-flight/pending nodes read as **`cancelled`** (runner.ts:435-440, 128-139). `diagnose`
+    matched the first cancelled step → `cause:"cancelled"` with a misleading "re-run"
+    next-action — never `timeout`, one of the four classes §14 requires. Fix: classify
+    `result.error` (a new `classifyErrorText` applying the timeout/network regexes) in the
+    run-level and cancelled-step branches, so a suite-budget timeout is `timeout`; a plain
+    caller-cancel (`"run cancelled by caller"`, no timeout signal) stays `cancelled`. Also
+    dedup: the errored-step branch now shares `classifyErrorText`. +2 regression tests
+    (in-flight-cancelled timeout; timeout-after-all-passed). Per-step timeouts were already
+    correct (errored step whose abort message matches the regex).
+  - **(simplicity M1) junit↔diagnose plain-text duplication:** the byte-identical
+    `assertion <op> at <path> failed: expected X, actual Y` builder lived in both
+    `junit.ts` and `diagnose.ts`. Lifted to `util.ts` `assertionLine` (shared by both;
+    md/html keep their own backtick/`<code>` variants — legitimate per-format divergence).
+    Output byte-identical → **no golden changed**.
+  - **(simplicity M2) redundant type union:** `badgeColors` was `Record<StepStatus |
+    "passed" | … , string>` — every literal already ∈ `StepStatus`; collapsed to
+    `Record<StepStatus, string>`.
+  - **Deferred / noted (not changed):** cross-step precedence picks the *first* non-passing
+    step (the DAG root cause; a later 401 stays behind an earlier assertion failure) —
+    defensible, "response-status-first" holds *within* a step. A `failed` run with zero/only-
+    skipped steps would label `errored`/"Run failed." — unreachable from the current engine
+    (`computeStatus` only yields `failed` when a failed step exists). `.badge-skipped` CSS
+    is emitted but `result.status` (ExecutionStatus) is never `skipped` — harmless dead CSS,
+    keeping the map total over `StepStatus`. `fixtures.ts` under `src/` (test-only, not
+    re-exported) — acceptable placement. Gate green (303 total, +2).
 
 ### P6 — Store
 - [ ] Drizzle schema + migrations (§16.1 tables + stage-1 `tasks` table)
@@ -756,6 +849,8 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P4 (2/n) | P4 | **P4 complete.** `tools/compile`: `discover` (readdir, no `glob` dep) → `compile({root})` (import → `normalize` → id-sorted `manifestSchema.parse`) + `manifestHash` (canonical sha256) + `gitSha`; friendly aggregated `CompileError` naming each offending file; `pnpm compile` writes gitignored `dist/manifest.json`. CLI (`packages/cli`): `list`/`validate` (in-memory compile), `run <id>` (imports source, boots mock SUT, runs via `runTest`/`runSuite`), thin `index.ts` arg-parsing; `pnpm atp`. Mock SUT (`node:http`, ephemeral port). Sample corpus (`_shared/{env,auth,steps}`, `identity/login`, `billing/get-invoice` + `end-to-end-refund.suite`). Corpus typechecked (added `tests/**` + root `@atp/*` devDeps + `declaration:false`). CI runs `pnpm compile`. TDD, +25 tests (222 total). All exit criteria verified. | _(this commit)_ |
 | 2026-07-23 | P4 fixup | P4 | Reverted a stray P4 deliverable: deleted the recreated `AGENTS.md` and scrubbed the stale `AGENTS.md` references across `docs/*` + repointed them to `CLAUDE.md`, completing commit `8b8e0f7` ("Replace AGENTS.md with a mapped CLAUDE.md") whose replacement had left ~15 dangling references that led P4 to recreate the intentionally-deleted file. No code change; gate still green. | _(this commit)_ |
 | 2026-07-23 | P4 (2/n) review | P4 | Completeness + simplicity review (2 subagents), **0 Blockers, 2 Majors**. Fixed: cwd-coupled CLI tests (9-failed under `pnpm --filter`/`-r`; pin `root` + injectable `run(argv,root)`); env-dependent `manifestHash` (corpus env now a literal, only the CLI run path honors `ATP_BASE_URL`); `runById` matrix handling reuses the engine's `expandUnits` (deletes the lossy `cellCoords` parser — flagged by both reviewers). Simplicity dedups: exported `importDef`/`compileToFile` from `@atp/compile`, hoisted `isSuite` into the engine. Nits: `--flag=value`, `--env ""`. +15 coverage tests (new `cli/index.test.ts` dispatcher exit codes; compile no-default-export/`resolveGitSha`/`writeManifest`). Kept w/ reason: `canonical` undefined-strip, root `declaration:false`. **237 tests**, incl. `pnpm -r test`. Gate green. | _(this commit)_ |
+| 2026-07-23 | P5 | P5 | **P5 complete.** `@atp/reporting`: five pure renderers off one canonical `ExecutionResult` (ADR-006) — `markdown` (status/step-table/failures), `summary` (`llm_summary`: compact pass line, else likely-cause + next-action), `html` (self-contained: inline CSS, native `<details>` traces, no JS/external refs, XML-escaped — renders in Chromium), `junit` (XML; cancelled→skipped), `trace` (redacted full-fidelity JSON). Shared `diagnose` likely-cause heuristic (auth/server-error/timeout/network/schema-mismatch/assertion-failed/cancelled) backs summary **and** md/html. `renderReport` format dispatch. Golden-file tests (`toMatchFileSnapshot`) over 5 fixtures (pass/fail/retried/cancelled/long-suite) + semantic assertions. CLI `atp run <id> --report md\|html\|junit\|json\|summary [--out]`. TDD, +64 tests (301 total). All exit criteria verified. | _(this commit)_ |
+| 2026-07-23 | P5 review | P5 | Completeness + simplicity review (2 subagents): gate green, design sound; completeness 1 Major, simplicity 0 Blockers/Majors. Fixed the Major — a whole-suite `timeoutMs` breach (engine: `errored` run + `cancelled` nodes) was diagnosed `cancelled`, never `timeout`; now `classifyErrorText(result.error)` routes it to `timeout` while a caller-cancel stays `cancelled` (+2 regression tests). Simplicity: hoisted the junit↔diagnose plain-text `assertionLine` into `util.ts` (output byte-identical, no golden changed); collapsed a redundant `badgeColors` union to `Record<StepStatus,string>`. +2 tests (303 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 

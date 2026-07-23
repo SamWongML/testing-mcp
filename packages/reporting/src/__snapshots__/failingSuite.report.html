@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report — billing.e2e-refund</title>
+<style>:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 1.5rem; line-height: 1.5; }
+h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+h2 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; border-bottom: 1px solid #8883; padding-bottom: .25rem; }
+h4 { margin: .75rem 0 .25rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; opacity: .7; }
+.badge { display: inline-block; padding: .1rem .6rem; border-radius: 1rem; color: #fff; font-size: .8rem; font-weight: 600; }
+.badge-passed { background: #137333; }
+.badge-failed { background: #b3261e; }
+.badge-errored { background: #8a1f11; }
+.badge-skipped { background: #5f6368; }
+.badge-cancelled { background: #946200; }
+.meta { display: flex; flex-wrap: wrap; gap: .25rem 1.5rem; margin: .75rem 0 0; }
+.meta div { display: flex; gap: .4rem; }
+.meta dt { font-weight: 600; opacity: .7; margin: 0; }
+.meta dd { margin: 0; }
+.run-error { color: #b3261e; font-weight: 600; }
+.diagnosis { background: #fbe9e7aa; border-left: 4px solid #b3261e; padding: .5rem 1rem; border-radius: 4px; }
+.diagnosis .next { font-style: italic; opacity: .85; }
+.steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .5rem; }
+.step { border: 1px solid #8883; border-radius: 6px; padding: .5rem .75rem; }
+.step-head { display: flex; align-items: baseline; gap: .75rem; }
+.step-id { font-weight: 600; font-family: ui-monospace, monospace; }
+.step-status { font-size: .8rem; text-transform: uppercase; opacity: .7; }
+.step-time { margin-left: auto; font-size: .8rem; opacity: .7; }
+.step-failed { border-color: #b3261e; }
+.step-errored { border-color: #8a1f11; }
+.bar { height: 4px; background: #8882; border-radius: 2px; margin: .4rem 0; overflow: hidden; }
+.bar-fill { height: 100%; background: #1a73e8; }
+.step-failed .bar-fill, .step-errored .bar-fill { background: #b3261e; }
+pre { background: #8881; padding: .5rem; border-radius: 4px; overflow-x: auto; font-size: .8rem; }
+.assertions { margin: 0; padding-left: 1.2rem; font-size: .85rem; }
+.assertions .fail { color: #b3261e; }
+.err { color: #b3261e; white-space: pre-wrap; }
+code { font-family: ui-monospace, monospace; }</style>
+</head>
+<body>
+<header><h1>billing.e2e-refund</h1><span class="badge badge-failed">failed</span><dl class="meta"><div><dt>Run</dt><dd>run-fail-suite</dd></div><div><dt>Kind</dt><dd>suite</dd></div><div><dt>Env</dt><dd>local</dd></div><div><dt>Steps</dt><dd>2/4 passed</dd></div><div><dt>Assertions</dt><dd>2/3 passed</dd></div><div><dt>Duration</dt><dd>210ms</dd></div><div><dt>Manifest</dt><dd>sha256:def456</dd></div><div><dt>Git SHA</dt><dd>cafef00d</dd></div></dl></header>
+<section class="diagnosis"><h2>Likely cause</h2><p><strong>assertion-failed</strong> — Step &quot;verify&quot; assertion eq at $.state failed: expected &quot;settled&quot;, actual &quot;pending&quot;.</p><p class="next">Next action: Compare expected vs actual — update the assertion or fix the SUT.</p></section>
+<section class="timeline"><h2>Timeline</h2><ul class="steps"><li class="step step-passed"><div class="step-head"><span class="step-id">login</span><span class="step-status">passed</span><span class="step-time">30ms · 1 attempt(s)</span></div><div class="bar"><div class="bar-fill" style="width:25%"></div></div><details><summary>Request / Response</summary><div class="trace"><h4>Request</h4><pre>{
+  &quot;method&quot;: &quot;POST&quot;,
+  &quot;url&quot;: &quot;http://sut.local/auth/login&quot;
+}</pre><h4>Response</h4><pre>{
+  &quot;status&quot;: 200,
+  &quot;headers&quot;: {},
+  &quot;body&quot;: {
+    &quot;token&quot;: &quot;***&quot;
+  },
+  &quot;timingMs&quot;: 30
+}</pre><h4>Assertions</h4><ul class="assertions"><li class="ok">✓ <code>eq</code> at <code>$.status</code></li></ul></div></details></li><li class="step step-passed"><div class="step-head"><span class="step-id">refund</span><span class="step-status">passed</span><span class="step-time">55ms · 1 attempt(s)</span></div><div class="bar"><div class="bar-fill" style="width:46%"></div></div><details><summary>Request / Response</summary><div class="trace"><h4>Request</h4><pre>{
+  &quot;method&quot;: &quot;POST&quot;,
+  &quot;url&quot;: &quot;http://sut.local/payments/pay_1/refund&quot;,
+  &quot;headers&quot;: {
+    &quot;authorization&quot;: &quot;***&quot;
+  }
+}</pre><h4>Response</h4><pre>{
+  &quot;status&quot;: 201,
+  &quot;headers&quot;: {},
+  &quot;body&quot;: {
+    &quot;refundId&quot;: &quot;rf_1&quot;
+  },
+  &quot;timingMs&quot;: 55
+}</pre><h4>Assertions</h4><ul class="assertions"><li class="ok">✓ <code>eq</code> at <code>$.status</code></li></ul></div></details></li><li class="step step-failed"><div class="step-head"><span class="step-id">verify</span><span class="step-status">failed</span><span class="step-time">120ms · 1 attempt(s)</span></div><div class="bar"><div class="bar-fill" style="width:100%"></div></div><details><summary>Request / Response</summary><div class="trace"><h4>Request</h4><pre>{
+  &quot;method&quot;: &quot;GET&quot;,
+  &quot;url&quot;: &quot;http://sut.local/ledger/refunds/rf_1&quot;
+}</pre><h4>Response</h4><pre>{
+  &quot;status&quot;: 200,
+  &quot;headers&quot;: {},
+  &quot;body&quot;: {
+    &quot;state&quot;: &quot;pending&quot;
+  },
+  &quot;timingMs&quot;: 120
+}</pre><h4>Assertions</h4><ul class="assertions"><li class="fail">✗ <code>eq</code> at <code>$.state</code> — expected <code>&quot;settled&quot;</code>, actual <code>&quot;pending&quot;</code> — ledger not yet settled</li></ul></div></details></li><li class="step step-skipped"><div class="step-head"><span class="step-id">notify</span><span class="step-status">skipped</span><span class="step-time">— · 0 attempt(s)</span></div><div class="bar"><div class="bar-fill" style="width:0%"></div></div><details><summary>Request / Response</summary><div class="trace"></div></details></li></ul></section>
+</body>
+</html>

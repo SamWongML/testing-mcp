@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { compileToFile, CompileError } from "@atp/compile";
+import { isReportFormat, REPORT_FORMATS } from "@atp/reporting";
 
-import { formatList, formatResult, listEntries, runById, validate } from "./commands";
+import { formatList, formatResult, listEntries, runById, validate, writeReport } from "./commands";
 
 export const CLI_PACKAGE = "@atp/cli";
 export * from "./commands";
@@ -12,7 +13,7 @@ const USAGE = `atp — API testing platform CLI
 Usage:
   atp compile                       build dist/manifest.json from tests/
   atp list [--tags a,b] [--owner o] [--kind test|suite]
-  atp run <id> [--params '<json>'] [--env name]
+  atp run <id> [--params '<json>'] [--env name] [--report md|html|junit|json|summary] [--out path]
   atp validate                      compile in-memory; fail on any error
 `;
 
@@ -76,12 +77,20 @@ export async function run(argv: string[], root: string = process.cwd()): Promise
           console.error(USAGE);
           return 1;
         }
+        if (flags.report && !isReportFormat(flags.report)) {
+          console.error(`atp run: unknown --report format "${flags.report}" (expected: ${REPORT_FORMATS.join(", ")})`);
+          return 1;
+        }
         const result = await runById(id, {
           root,
           params: flags.params ? (JSON.parse(flags.params) as Record<string, unknown>) : undefined,
           envName: flags.env || undefined,
         });
         console.log(formatResult(result));
+        if (flags.report && isReportFormat(flags.report)) {
+          const path = await writeReport(result, flags.report, flags.out || undefined);
+          console.log(`[report] ${flags.report} → ${path}`);
+        }
         return result.status === "passed" ? 0 : 1;
       }
 

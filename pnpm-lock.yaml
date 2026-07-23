@@ -47,6 +47,9 @@ importers:
       '@atp/engine':
         specifier: workspace:*
         version: link:../engine
+      '@atp/reporting':
+        specifier: workspace:*
+        version: link:../reporting
       '@atp/schema':
         specifier: workspace:*
         version: link:../schema
@@ -65,7 +68,11 @@ importers:
 
   packages/mcp-server: {}
 
-  packages/reporting: {}
+  packages/reporting:
+    dependencies:
+      '@atp/schema':
+        specifier: workspace:*
+        version: link:../schema
 
   packages/schema:
     dependencies:

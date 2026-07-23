@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="orders.create" tests="1" failures="0" errors="0" skipped="0" time="0.26">
+  <testsuite name="orders.create" tests="1" failures="0" errors="0" skipped="0" time="0.26" timestamp="2026-07-23T10:00:00.000Z">
+    <testcase name="create" classname="orders.create" time="0.08"/>
+  </testsuite>
+</testsuites>

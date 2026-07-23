@@ -1,0 +1,162 @@
+{
+  "runId": "run-long",
+  "entryId": "catalog.smoke",
+  "kind": "suite",
+  "status": "passed",
+  "steps": [
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "eq",
+          "path": "$.status",
+          "expected": 200,
+          "actual": 200
+        }
+      ],
+      "extracted": {},
+      "attempts": 1,
+      "id": "auth",
+      "status": "passed",
+      "request": {
+        "method": "POST",
+        "url": "http://sut.local/auth/login"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "token": "***"
+        },
+        "timingMs": 60
+      },
+      "timingMs": 60
+    },
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "gt",
+          "path": "$.count",
+          "expected": 0,
+          "actual": 12
+        }
+      ],
+      "extracted": {},
+      "attempts": 1,
+      "id": "list-products",
+      "status": "passed",
+      "request": {
+        "method": "GET",
+        "url": "http://sut.local/products"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "count": 12
+        },
+        "timingMs": 140
+      },
+      "timingMs": 140
+    },
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "eq",
+          "path": "$.id",
+          "expected": "p1",
+          "actual": "p1"
+        }
+      ],
+      "extracted": {},
+      "attempts": 1,
+      "id": "get-product",
+      "status": "passed",
+      "request": {
+        "method": "GET",
+        "url": "http://sut.local/products/p1"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "id": "p1"
+        },
+        "timingMs": 90
+      },
+      "timingMs": 90
+    },
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "isNumber",
+          "path": "$.count"
+        }
+      ],
+      "extracted": {},
+      "attempts": 1,
+      "id": "search",
+      "status": "passed",
+      "request": {
+        "method": "GET",
+        "url": "http://sut.local/products",
+        "query": {
+          "q": "widget"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "count": 3
+        },
+        "timingMs": 210
+      },
+      "timingMs": 210
+    },
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "eq",
+          "path": "$.ok",
+          "expected": true,
+          "actual": true
+        }
+      ],
+      "extracted": {},
+      "attempts": 1,
+      "id": "healthz",
+      "status": "passed",
+      "request": {
+        "method": "GET",
+        "url": "http://sut.local/healthz"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "ok": true
+        },
+        "timingMs": 15
+      },
+      "timingMs": 15
+    }
+  ],
+  "startedAt": "2026-07-23T10:00:00.000Z",
+  "finishedAt": "2026-07-23T10:00:00.515Z",
+  "durationMs": 515,
+  "metrics": {
+    "totalSteps": 5,
+    "passedSteps": 5,
+    "failedSteps": 0,
+    "totalAssertions": 5,
+    "failedAssertions": 0
+  },
+  "env": "staging",
+  "manifestHash": "sha256:0ff1ce",
+  "gitSha": "1234abc"
+}

@@ -1,7 +1,9 @@
+import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { compile, importDef } from "@atp/compile";
 import { expandUnits, isSuite, runSuite, runTest, type RunOptionsBase } from "@atp/engine";
+import { renderReport, reportExtension, type ReportFormat } from "@atp/reporting";
 import type { ExecutionResult, ManifestEntry, StepStatus } from "@atp/schema";
 
 import { startMockSut, type MockSut } from "./mock-sut";
@@ -81,6 +83,26 @@ export async function runById(id: string, opts: RunOptions = {}): Promise<Execut
   } finally {
     await sut?.close();
   }
+}
+
+/**
+ * Render `result` in the given format and write it as a local artifact (P5 CLI wiring).
+ * Defaults the filename to `<sanitized-entryId>.<ext>` in `cwd`; `out` overrides the path.
+ * Returns the path written so the caller can report it.
+ */
+export async function writeReport(
+  result: ExecutionResult,
+  format: ReportFormat,
+  out?: string,
+): Promise<string> {
+  const path = out ?? `${sanitizeId(result.entryId)}.${reportExtension(format)}`;
+  await writeFile(path, renderReport(result, format), "utf8");
+  return path;
+}
+
+/** Make an entry id safe as a filename (matrix ids carry `#`, `=`, `,`). */
+function sanitizeId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 /** A compact glyph per step status for the CLI result summary. */

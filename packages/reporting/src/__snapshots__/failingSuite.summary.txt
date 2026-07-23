@@ -1,0 +1,4 @@
+billing.e2e-refund [suite] failed — 2/4 steps, 2/3 assertions, 210ms
+not passed: verify (failed), notify (skipped)
+likely cause: assertion-failed — Step "verify" assertion eq at $.state failed: expected "settled", actual "pending".
+next action: Compare expected vs actual — update the assertion or fix the SUT.

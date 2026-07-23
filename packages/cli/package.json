@@ -20,6 +20,7 @@
   "dependencies": {
     "@atp/compile": "workspace:*",
     "@atp/engine": "workspace:*",
+    "@atp/reporting": "workspace:*",
     "@atp/schema": "workspace:*"
   }
 }

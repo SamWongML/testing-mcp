@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -54,5 +56,34 @@ describe("run (CLI dispatcher exit codes)", () => {
     const output = log.mock.calls.map((c) => String(c[0])).join("\n");
     expect(output).toContain("billing.e2e-refund");
     expect(output).not.toContain("identity.login");
+  });
+
+  it("rejects an unknown --report format → 1", async () => {
+    expect(await run(["run", "identity.login", "--report", "pdf"], repoRoot)).toBe(1);
+  });
+});
+
+describe("run --report (artifact writing)", () => {
+  let dir: string;
+  beforeEach(async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    dir = await mkdtemp(join(tmpdir(), "atp-report-"));
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("writes a markdown artifact to --out", async () => {
+    const out = join(dir, "report.md");
+    expect(await run(["run", "identity.login", "--report", "md", "--out", out], repoRoot)).toBe(0);
+    expect(await readFile(out, "utf8")).toContain("# Report — identity.login");
+  });
+
+  it("writes a self-contained html artifact to --out", async () => {
+    const out = join(dir, "report.html");
+    expect(await run(["run", "identity.login", "--report=html", `--out=${out}`], repoRoot)).toBe(0);
+    expect(await readFile(out, "utf8")).toContain("<!DOCTYPE html>");
   });
 });
