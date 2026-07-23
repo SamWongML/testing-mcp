@@ -79,7 +79,9 @@ export function manifestHash(entries: ManifestEntry[]): string {
   return `sha256:${digest}`;
 }
 
-function resolveGitSha(root: string): string {
+/** The git sha stamped onto the manifest: `$GITHUB_SHA` (CI) → `git rev-parse HEAD` →
+ *  `"unknown"` (e.g. a non-git checkout). An explicit `opts.gitSha` overrides all three. */
+export function resolveGitSha(root: string): string {
   if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], {
@@ -93,7 +95,10 @@ function resolveGitSha(root: string): string {
   }
 }
 
-async function importDef(file: string): Promise<AuthoredTestCase | AuthoredSuite> {
+/** Import an authored test/suite module and return its default export (the
+ *  `defineTest`/`defineSuite` value). Shared with the CLI's `run`, which loads a def's
+ *  source to execute it. The bare message is deliberate — `compile` prefixes the file. */
+export async function importDef(file: string): Promise<AuthoredTestCase | AuthoredSuite> {
   const mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
   if (!mod.default || typeof mod.default !== "object") {
     throw new Error("no default export (expected a defineTest/defineSuite value)");
@@ -134,4 +139,15 @@ export async function compile(opts: CompileOptions = {}): Promise<Manifest> {
 export async function writeManifest(manifest: Manifest, outPath: string): Promise<void> {
   await mkdir(dirname(outPath), { recursive: true });
   await writeFile(outPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+/** Compile the corpus and write `dist/manifest.json` under `root`. Returns the manifest
+ *  and the path written — the one operation both `pnpm compile` and `atp compile` share. */
+export async function compileToFile(
+  root: string,
+): Promise<{ manifest: Manifest; outPath: string }> {
+  const outPath = resolve(root, "dist/manifest.json");
+  const manifest = await compile({ root });
+  await writeManifest(manifest, outPath);
+  return { manifest, outPath };
 }

@@ -1,10 +1,12 @@
 import { defineEnv } from "@atp/engine";
 
 /**
- * The `local` environment (`{{env.*}}` source). Points at the local mock SUT so the
- * sample corpus runs offline via `atp run`. `ATP_BASE_URL` overrides the default — the
- * CLI sets it to the mock server it boots on an ephemeral port.
+ * The `local` environment (`{{env.*}}` source), pointing at the local mock SUT. This is a
+ * plain literal so the resolved `env` baked into the compiled manifest — and therefore the
+ * `manifestHash` — is deterministic, never dependent on ambient process env. The run-time
+ * override lives in the CLI: `atp run` honors `ATP_BASE_URL`, else boots a mock SUT and
+ * injects its ephemeral URL as `baseUrl`.
  */
 export const local = defineEnv({
-  baseUrl: process.env.ATP_BASE_URL ?? "http://127.0.0.1:8787",
+  baseUrl: "http://127.0.0.1:8787",
 });

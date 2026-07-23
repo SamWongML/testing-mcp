@@ -624,8 +624,37 @@ the only memory that crosses sessions.
 - **Exit criteria — all verified:** `pnpm compile` → 3-entry `dist/manifest.json`; `pnpm atp list`
   shows the corpus; `pnpm atp run identity.login` passes (exit 0) against the mock; the suite runs
   end-to-end (5/5 nodes, poll settles); adding `identity.ping` + recompiling surfaces it (4 entries)
-  with no other change, removing it returns to 3. Full gate green: **222 tests** (+25: 3 discover +
-  7 compile + 5 mock-sut + 10 commands), typecheck + lint clean.
+  with no other change, removing it returns to 3. Full gate green, typecheck + lint clean.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both traced the diff; **0
+  Blockers**, 2 Majors, and a set of Minors/Nits — all applied except two deliberately kept.
+  - **(Major) cwd-coupled CLI tests:** `commands.test.ts` called the commands with no `root`, so they
+    defaulted to `process.cwd()` — green under root `pnpm test` (cwd = repo root) but **9-failed under
+    `pnpm --filter @atp/cli test` / `pnpm -r test`** (cwd = the package → scanned a nonexistent
+    `packages/cli/tests`). Fixed: tests pin `root = resolve(__dirname, "../../..")`; `run(argv, root?)`
+    gained an injectable root. Recursive + per-package test now green.
+  - **(Major) env-dependent `manifestHash`:** `_shared/env/local.ts` read `process.env.ATP_BASE_URL`
+    at module load, and `normalize` bakes the resolved `env` into every entry → the hash changed with
+    ambient env (`e62215b7` vs `a26d42da`), breaking its "traces the exact catalog" contract (§21).
+    Fixed: the corpus env is now a plain literal; **only the CLI run path honors `ATP_BASE_URL`**
+    (verified: hash identical with/without it; the preset override still routes runs to a given URL).
+  - **(Major, both reviewers) `runById` matrix handling:** replaced the bespoke `cellCoords` id-string
+    parser (lossy — stringified coords, mishandled separators inside a dimension value) with the
+    engine's own `expandUnits(def).find(u => u.id === id)`, reusing its typed `.matrix`/`.env`. Deletes
+    the parser and aligns the run's coords with what the manifest recorded.
+  - **(simplicity dedup)** exported `importDef` + `compileToFile` from `@atp/compile` (dropped the CLI's
+    duplicate import helper and the twice-written compile→write→log), and hoisted `isSuite` into the
+    engine (`suite.ts`) as the one shared authored-vs-suite guard (was duplicated in `normalize.ts` +
+    the CLI). **(Nits)** `parseArgs` now accepts `--flag=value`; `--env ""` no longer records an empty
+    env name.
+  - **(coverage, "TDD" gaps)** +new `cli/index.test.ts` (dispatcher exit codes: list/validate/run/
+    missing-id/bad-`--params`/unknown-id/unknown-cmd/usage + `--flag=value`) and compile tests for the
+    no-default-export path (new `fixtures/nodefault/`), `resolveGitSha` (GITHUB_SHA / git / "unknown"),
+    and `writeManifest`/`compileToFile`. Full gate green: **237 tests** (+15), incl. `pnpm -r test`.
+  - **Kept deliberately (with reason):** `canonical()`'s explicit `undefined`-strip (harmless, documents
+    the canonical-form intent; `JSON.stringify` would drop them anyway) and root-tsconfig
+    `declaration:false` (the authoritative check is `--noEmit`, so TS2742 is moot; per-package configs
+    keep `declaration:true` for future builds). Flagged the `cellCoords` typed-value nuance was closed
+    by the `expandUnits` switch above.
 - **Exact next step (P5):** reporting renderers in `packages/reporting/src/` — `markdown.ts`,
   `summary.ts` (`llm_summary` + likely-cause heuristic off `AssertionResult.expected/actual` +
   status), `html.ts` (self-contained), `junit.ts`, `trace.ts` (already-redacted JSON). Golden-file
@@ -726,6 +755,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P4 (1/n) review | P4 | Completeness + simplicity review (2 subagents), no Blockers/Majors — transform correct on every traced path, needed no code change. Applied: dropped redundant `tags: def.tags ?? []` → `tags: def.tags` (schema defaults). +4 coverage tests: poll.intervalMs compile-throw (claimed-but-missing), matrixed suite (per-cell env, `kind:suite`), node retry/timeoutMs + declarative `message` passthrough + `{{secrets.*}}` literal in env, and the `useStep` node path. +4 tests (150 engine / 197 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P4 (2/n) | P4 | **P4 complete.** `tools/compile`: `discover` (readdir, no `glob` dep) → `compile({root})` (import → `normalize` → id-sorted `manifestSchema.parse`) + `manifestHash` (canonical sha256) + `gitSha`; friendly aggregated `CompileError` naming each offending file; `pnpm compile` writes gitignored `dist/manifest.json`. CLI (`packages/cli`): `list`/`validate` (in-memory compile), `run <id>` (imports source, boots mock SUT, runs via `runTest`/`runSuite`), thin `index.ts` arg-parsing; `pnpm atp`. Mock SUT (`node:http`, ephemeral port). Sample corpus (`_shared/{env,auth,steps}`, `identity/login`, `billing/get-invoice` + `end-to-end-refund.suite`). Corpus typechecked (added `tests/**` + root `@atp/*` devDeps + `declaration:false`). CI runs `pnpm compile`. TDD, +25 tests (222 total). All exit criteria verified. | _(this commit)_ |
 | 2026-07-23 | P4 fixup | P4 | Reverted a stray P4 deliverable: deleted the recreated `AGENTS.md` and scrubbed the stale `AGENTS.md` references across `docs/*` + repointed them to `CLAUDE.md`, completing commit `8b8e0f7` ("Replace AGENTS.md with a mapped CLAUDE.md") whose replacement had left ~15 dangling references that led P4 to recreate the intentionally-deleted file. No code change; gate still green. | _(this commit)_ |
+| 2026-07-23 | P4 (2/n) review | P4 | Completeness + simplicity review (2 subagents), **0 Blockers, 2 Majors**. Fixed: cwd-coupled CLI tests (9-failed under `pnpm --filter`/`-r`; pin `root` + injectable `run(argv,root)`); env-dependent `manifestHash` (corpus env now a literal, only the CLI run path honors `ATP_BASE_URL`); `runById` matrix handling reuses the engine's `expandUnits` (deletes the lossy `cellCoords` parser — flagged by both reviewers). Simplicity dedups: exported `importDef`/`compileToFile` from `@atp/compile`, hoisted `isSuite` into the engine. Nits: `--flag=value`, `--env ""`. +15 coverage tests (new `cli/index.test.ts` dispatcher exit codes; compile no-default-export/`resolveGitSha`/`writeManifest`). Kept w/ reason: `canonical` undefined-strip, root `declaration:false`. **237 tests**, incl. `pnpm -r test`. Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 

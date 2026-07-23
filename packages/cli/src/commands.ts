@@ -1,21 +1,8 @@
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
-import { compile } from "@atp/compile";
-import {
-  resolveEnv,
-  runSuite,
-  runTest,
-  type RunOptionsBase,
-  type RunTestOptions,
-} from "@atp/engine";
-import type {
-  AuthoredSuite,
-  AuthoredTestCase,
-  ExecutionResult,
-  ManifestEntry,
-  StepStatus,
-} from "@atp/schema";
+import { compile, importDef } from "@atp/compile";
+import { expandUnits, isSuite, runSuite, runTest, type RunOptionsBase } from "@atp/engine";
+import type { ExecutionResult, ManifestEntry, StepStatus } from "@atp/schema";
 
 import { startMockSut, type MockSut } from "./mock-sut";
 
@@ -26,31 +13,6 @@ import { startMockSut, type MockSut } from "./mock-sut";
  * the manifest strips), and executes it in-process via the engine against the local mock
  * SUT, so the inner loop works fully offline.
  */
-
-function isSuite(def: AuthoredTestCase | AuthoredSuite): def is AuthoredSuite {
-  return "nodes" in def;
-}
-
-async function importDefault(file: string): Promise<AuthoredTestCase | AuthoredSuite> {
-  const mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
-  if (!mod.default || typeof mod.default !== "object") {
-    throw new Error(`${file}: no default export (expected a defineTest/defineSuite value)`);
-  }
-  return mod.default as AuthoredTestCase | AuthoredSuite;
-}
-
-/** A matrix-cell id (`base#region=us,tier=free`) carries its coordinates in the suffix;
- *  a plain id has none. Coordinates repopulate `{{matrix.*}}` and select the cell env. */
-function cellCoords(id: string): Record<string, unknown> {
-  const hash = id.indexOf("#");
-  if (hash < 0) return {};
-  const coords: Record<string, unknown> = {};
-  for (const pair of id.slice(hash + 1).split(",")) {
-    const eq = pair.indexOf("=");
-    if (eq > 0) coords[pair.slice(0, eq)] = pair.slice(eq + 1);
-  }
-  return coords;
-}
 
 export interface ListOptions {
   root?: string;
@@ -96,24 +58,26 @@ export async function runById(id: string, opts: RunOptions = {}): Promise<Execut
     throw new Error(`unknown test id "${id}" (run \`atp list\` to see available ids)`);
   }
 
-  const def = await importDefault(resolve(root, entry.sourcePath));
-  const matrix = cellCoords(id);
+  const def = await importDef(resolve(root, entry.sourcePath));
+  // Reuse the engine's own cell enumeration so the run's `{{matrix.*}}` coords and per-cell
+  // env are exactly what the manifest recorded — no re-parsing the id string (which would
+  // lose the authored value types and mishandle separators inside a dimension value).
+  const unit = expandUnits(def).find((u) => u.id === id);
 
   const preset = process.env.ATP_BASE_URL;
   let sut: MockSut | undefined;
   const baseUrl = preset ?? (sut = await startMockSut()).url;
   try {
     const common: RunOptionsBase = {
-      env: { ...(resolveEnv(def.env, matrix) ?? {}), baseUrl },
+      env: { ...(unit?.env ?? {}), baseUrl },
       envName: opts.envName ?? "local",
-      matrix,
+      matrix: unit?.matrix ?? {},
       entryId: id,
       manifestHash: manifest.manifestHash,
       gitSha: manifest.gitSha,
     };
     if (isSuite(def)) return await runSuite(def, common);
-    const testOpts: RunTestOptions = { ...common, params: opts.params };
-    return await runTest(def, testOpts);
+    return await runTest(def, { ...common, params: opts.params });
   } finally {
     await sut?.close();
   }

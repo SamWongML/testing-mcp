@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-import { resolve } from "node:path";
-
-import { compile, writeManifest, CompileError } from "@atp/compile";
+import { compileToFile, CompileError } from "@atp/compile";
 
 import { formatList, formatResult, listEntries, runById, validate } from "./commands";
 
@@ -28,30 +26,31 @@ function parseArgs(argv: string[]): ParsedArgs {
   const flags: Record<string, string> = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] as string;
-    if (arg.startsWith("--")) flags[arg.slice(2)] = argv[++i] ?? "";
-    else positional.push(arg);
+    if (arg.startsWith("--")) {
+      // Accept both `--flag value` and `--flag=value`.
+      const eq = arg.indexOf("=");
+      if (eq >= 0) flags[arg.slice(2, eq)] = arg.slice(eq + 1);
+      else flags[arg.slice(2)] = argv[++i] ?? "";
+    } else positional.push(arg);
   }
   return { positional, flags };
 }
 
-async function runCompile(root: string): Promise<void> {
-  const outPath = resolve(root, "dist/manifest.json");
-  const manifest = await compile({ root });
-  await writeManifest(manifest, outPath);
-  console.log(`[compile] ${manifest.entries.length} entries → ${outPath} (git ${manifest.gitSha})`);
-}
-
-/** Dispatch a parsed command line. Returns the process exit code. */
-export async function run(argv: string[]): Promise<number> {
-  const root = process.cwd();
+/** Dispatch a parsed command line against the corpus at `root`. Returns the exit code.
+ *  `root` is injectable for tests; the real CLI passes `process.cwd()` (see below). */
+export async function run(argv: string[], root: string = process.cwd()): Promise<number> {
   const [command, ...rest] = argv;
   const { positional, flags } = parseArgs(rest);
 
   try {
     switch (command) {
-      case "compile":
-        await runCompile(root);
+      case "compile": {
+        const { manifest, outPath } = await compileToFile(root);
+        console.log(
+          `[compile] ${manifest.entries.length} entries → ${outPath} (git ${manifest.gitSha})`,
+        );
         return 0;
+      }
 
       case "list": {
         const entries = await listEntries({
@@ -80,7 +79,7 @@ export async function run(argv: string[]): Promise<number> {
         const result = await runById(id, {
           root,
           params: flags.params ? (JSON.parse(flags.params) as Record<string, unknown>) : undefined,
-          envName: flags.env,
+          envName: flags.env || undefined,
         });
         console.log(formatResult(result));
         return result.status === "passed" ? 0 : 1;

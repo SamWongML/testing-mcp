@@ -1,6 +1,4 @@
-import { resolve } from "node:path";
-
-import { compile, writeManifest, CompileError } from "./compile";
+import { compileToFile, CompileError } from "./compile";
 
 export const COMPILE_PACKAGE = "@atp/compile";
 export * from "./compile";
@@ -8,11 +6,8 @@ export * from "./discover";
 
 /** `pnpm compile`: build `dist/manifest.json` from the `tests/` corpus at the repo root. */
 export async function main(): Promise<void> {
-  const root = process.cwd();
-  const outPath = resolve(root, "dist/manifest.json");
   try {
-    const manifest = await compile({ root });
-    await writeManifest(manifest, outPath);
+    const { manifest, outPath } = await compileToFile(process.cwd());
     console.log(
       `[compile] ${manifest.entries.length} entries → ${outPath} (git ${manifest.gitSha})`,
     );
