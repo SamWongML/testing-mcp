@@ -17,7 +17,7 @@
 | P1 | Schema package (`@atp/schema`) | ✅ | 2026-07-23 | ✅ |
 | P2 | Engine I — single-test execution | ✅ | 2026-07-23 | ✅ |
 | P3 | Engine II — suites/DAG/auth/matrix | ✅ | 2026-07-23 | ✅ |
-| P4 | Compile + CLI + sample corpus | ⬜ | — | — |
+| P4 | Compile + CLI + sample corpus | 🔄 | 2026-07-23 | — |
 | P5 | Reporting renderers | ⬜ | — | — |
 | P6 | Store — Postgres record + queue + artifacts | ⬜ | — | — |
 | P7 | MCP server — sync surface | ⬜ | — | — |
@@ -485,7 +485,8 @@ the only memory that crosses sessions.
   Read plan §P4 and research §9, §7.4, §6, ADR-003.
 
 ### P4 — Compile + CLI + corpus
-- [ ] `tools/compile`: discovery → normalize → `dist/manifest.json` (+gitSha, manifestHash)
+- [x] `normalize()` core (authored → normalized `ManifestEntry[]`) — the compile transform
+- [ ] `tools/compile`: discovery (glob → import) → normalize → `dist/manifest.json` (+gitSha, manifestHash)
 - [ ] Friendly compile errors (file + reason)
 - [ ] CLI: `atp compile` / `list` / `run` / `validate`
 - [ ] Sample corpus (`tests/_shared/*`, identity, billing incl. one suite)
@@ -494,7 +495,78 @@ the only memory that crosses sessions.
 - [ ] CI runs `pnpm compile`
 - [ ] Exit: new dummy test appears in manifest with no other change
 
-**Handoff notes:** _none yet_
+**Handoff notes:**
+- **`normalize()` lives in `@atp/engine`** (`engine/src/normalize.ts`), not `@atp/schema` as the
+  §9 sketch imports it. Reason: it needs engine-owned transforms — `hashFn` (fn → content
+  hash), `planSuite` (suite node-map → topo-ordered `PlanNode[]`), `expandUnits`/`resolveEnv`
+  (matrix). It stays pure (no MCP/AWS), so the engine-purity rule holds. `tools/compile` and the
+  CLI `validate`/`compile` commands import `normalize` + `manifestSchema` from the two packages.
+  Signature: `normalize(def: AuthoredTestCase | AuthoredSuite, sourcePath) → ManifestEntry[]`
+  (an **array** because a matrix expands to N per-cell entries). Discriminates test vs suite by
+  `"nodes" in def` (suite) — a TS type guard so both branches narrow.
+- **fn-hashing + params derivation (done):** each authored `fn` assertion → `{ fnHash, message? }`
+  via `hashFn`; the `params` builder → `paramsSchema` (JSON Schema) via `deriveParamsSchema`
+  (`io:"input"`, so `.default()` params are optional). Suites have no `params` builder today →
+  `paramsSchema` omitted (see the per-node-params deferred item). `JSON.stringify(entry)` carries
+  no function source (a test asserts the predicate body is absent).
+- **Node normalization:** each step/node goes through `stepSchema.parse` (after mapping its
+  assertions), applying defaults (`assert`/`extract`/`needs` → `[]`) and validating. **Side
+  benefit:** this closes the poll-validation gap from the P3 deferred list — an authored
+  `poll: { intervalMs: 0 }` now throws at compile via `pollPolicySchema` (positive-int refinement)
+  on the normalize path. Suites flatten via `planSuite` → `topoSort`, so **cycles / unknown-`needs`
+  throw at compile** (the §12 compile-time DAG check; a test covers a cyclic suite).
+- **Matrix → per-cell entries (design decision, settles a P3-deferred item):** a matrixed def
+  emits **one entry per cartesian cell** via `expandUnits`. Each cell entry: `id =
+  ${base}#region=us,tier=free`; `env` = the cell's **resolved** env (`resolveEnv` runs the
+  `env: (m) => …` builder per cell, else the static object); `matrix` = the cell's coords as a
+  **singleton matrix** (`{ region: ["us"], tier: ["free"] }`) — schema-valid (`matrixSchema` =
+  `record(str, array.min(1))`) and self-describing. A non-matrix def → a single entry, `matrix`
+  omitted, `env` = resolved static env. **Compile-time guard added:** `normalize` runs
+  `matrixSchema.parse(def.matrix)` first, so an **empty dimension** (`{ region: [] }`) throws
+  instead of silently expanding to zero units (closes the other half of the P3 matrix-deferred
+  item). ⚠️ **Double-expansion caveat for P7/P8:** a per-cell entry's singleton `matrix`, if fed
+  back through `expandUnits`, would double the id suffix — the server must run an entry by its
+  exact id (not re-expand) or run from source via `runTest/runSuite(def, { matrix: coords })`.
+- **Schema-first change:** added optional `env: Record<string, unknown>` to `manifestEntrySchema`
+  (it had none; the P3-deferred note asked how per-cell resolved env lands in the manifest — this
+  is the answer). `{{secrets.*}}` inside env stays **literal** in the manifest (resolves in the
+  engine at run time), so no secret is baked in. Test added in `schema/manifest.test.ts`.
+- **`isLongRunning` inference:** `def.isLongRunning ?? (def.timeoutMs ?? 0) > 30_000`. So the §7.1
+  login (`15_000`) → `false`, the §7.2 suite (`120_000`) → `true`; an explicit `isLongRunning`
+  always wins. `LONG_RUNNING_TIMEOUT_MS = 30_000` is a named constant — revisit if a fast suite
+  legitimately exceeds 30s.
+- **Exit criteria (this sub-step):** `pnpm --filter @atp/engine test` green; full gate
+  `typecheck + lint + test` green (18 new tests: 17 `normalize.test.ts` + 1 `manifest.test.ts`;
+  197 total). This is the compile **transform**; discovery/emission is the next sub-step.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both confirmed the gate
+  green with **no Blockers/Majors** — the transform is correct on every traced path (test/suite
+  discrimination, fn→hash with no leak, plan `needs` overriding step `needs`, per-cell env,
+  shared-nodes-across-cells safe since Zod re-materializes per parse). Applied: (simplicity)
+  dropped the redundant `tags: def.tags ?? []` → `tags: def.tags` (schema already defaults to
+  `[]`), consistent with the sibling `title`/`owner`/`timeoutMs` passthroughs. (completeness, all
+  test-coverage gaps — transform needed no code change) +4 tests: the claimed-but-missing
+  **poll.intervalMs** compile-throw (pins the `stepSchema.parse` routing seam), a **matrixed
+  suite** (suite + matrix → one `kind:"suite"` entry per cell with per-cell env), node
+  **retry/timeoutMs + declarative `message`** passthrough with **`{{secrets.*}}` staying literal**
+  in env, and the **`useStep`** node path. Reviewers left #2/#3 simplicity nits as-is (the
+  tautological `manifestEntrySchema.parse` round-trip test documents the output contract; the
+  `: Step[]` annotation documents intent at the union site).
+- **Exact next step (P4 cont.):** build `tools/compile/src/index.ts` — glob
+  `tests/**/*.{test,suite}.ts`, `import(pathToFileURL(f))`, call `normalize(mod.default, f)`,
+  flatten all entries, wrap per-file `import`/normalize errors with the file path (friendly
+  errors), compute `gitSha` (`git rev-parse HEAD`) + `manifestHash` (stable hash of the sorted
+  entries), `manifestSchema.parse`, write `dist/manifest.json`. Then the `atp` CLI
+  (`compile`/`list`/`validate` are thin over compile+manifest; `run <id>` imports the source def
+  and calls `runTest`/`runSuite` in-process). Then the `tests/` sample corpus (`_shared/{env,auth,
+  steps}`, `identity/login.test.ts`, `billing/` + one suite composing `login`), a local mock SUT
+  (Hono) for offline `atp run`, the `AGENTS.md` add-a-test recipe, and `pnpm compile` in CI. Read
+  plan §P4 + research §9.
+- **Still deferred (unchanged by this step):** per-node suite **params baking** — suite nodes keep
+  their `{{params.*}}` templates in the manifest (a `useTest(login,{params})` override is NOT
+  resolved into the node's request at normalize time). Fine for P4: the manifest is the catalog,
+  and CLI `run` executes from **source** via `runSuite` (which resolves per-node params at run
+  time). Settle baking when the manifest itself becomes executable (P7/P8). See Deferred /
+  discovered work.
 
 ### P5 — Reporting
 - [ ] `markdown.ts` · [ ] `summary.ts` (llm_summary + likely-cause heuristic)
@@ -586,6 +658,8 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (5/n) review | P3 | Completeness + simplicity review (2 subagents), no Blockers. Fixed 2 Majors: `redactRequest` now redacts `query` (secret-sourced api-key in query no longer leaks at rest); oauth2 cache no longer memoizes a failed token fetch (evict on reject so a later node retries). Nits: `buildAuthRegistry` throws on duplicate id; `withHeaders` case-insensitive (injected auth replaces a pre-existing same-name header). Simplicity: reuse `erroredStep` in both `attemptStep` catches, tighten `authCache` type, hoist test `MockAgent` setup. TDD, +6 tests (118 engine / 164 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P3 (6/n) | P3 | **P3 complete.** Matrix expansion: `matrix.ts` (`expandMatrix` cartesian product; `expandUnits` → discrete named cells `id#region=us,tier=free` with per-cell env; `resolveEnv`). Authored `env` widened to `AuthoredEnv = Record \| (m)=>Record` (§7.3, deferred from P1). `RunOptionsBase` gained `matrix?`/`entryId?`; `runTest`/`runSuite` populate `{{matrix.*}}` + resolve per-cell env. §7.2 `billing.e2e-refund` closing e2e upgraded to full shape (useTest param override + useStep token bind + capture + refund + verify-with-poll) on MockAgent. TDD, +13 tests (131 engine / 177 total). Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P3 (6/n) review | P3 | Completeness + simplicity review (2 subagents), no Blockers/Majors — both verified the gate + traced the matrix paths (`{{matrix.*}}` survives the DAG spread, env precedence, strong §7.2 assertions). Applied: collapsed `expandUnits` through `expandMatrix`'s empty-product seed (DRY); reworded the stale runner "matrix out of scope" comment; exercised the untested `runSuite` env-builder fallback (drop pre-resolved env). +2 `matrix.test.ts` tests (object-valued key, `expandMatrix({})`). Deferred (authored-input validation, consistent w/ poll): empty-dimension→zero-units, dup-value→dup-ids, matrixed-run-without-cell — caught by `matrixSchema.min(1)` at P4 `.parse`. 133 engine / 179 total. Gate green. | _(this commit)_ |
+| 2026-07-23 | P4 (1/n) | P4 | Compile **transform** `normalize()` (`engine/src/normalize.ts`): authored test/suite → normalized `ManifestEntry[]`. fn → `{fnHash}`, `params` builder → `paramsSchema` (JSON Schema), suite node-map → topo-ordered nodes (cycles/unknown-`needs` throw), matrix → one **per-cell** entry (id `#region=us,tier=free`, resolved per-cell `env`, singleton-`matrix` coords), `isLongRunning` inferred from `timeoutMs > 30s` (explicit wins). Schema-first: added optional `env` to `manifestEntrySchema`. Compile-time guards now catch empty matrix dimension + non-positive `poll.intervalMs` (closes 2 P3-deferred items on the compile path). TDD, +14 tests (146 engine / 193 total). Gate green. Discovery/emission + CLI + corpus next. | _(this commit)_ |
+| 2026-07-23 | P4 (1/n) review | P4 | Completeness + simplicity review (2 subagents), no Blockers/Majors — transform correct on every traced path, needed no code change. Applied: dropped redundant `tags: def.tags ?? []` → `tags: def.tags` (schema defaults). +4 coverage tests: poll.intervalMs compile-throw (claimed-but-missing), matrixed suite (per-cell env, `kind:suite`), node retry/timeoutMs + declarative `message` passthrough + `{{secrets.*}}` literal in env, and the `useStep` node path. +4 tests (150 engine / 197 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
@@ -603,15 +677,15 @@ doing them out of order.
   them, so scalar policy fields bypass their Zod refinements at run time. `pollPolicySchema`
   enforces `intervalMs`/`maxMs` positive, but an authored `poll: { intervalMs: 0, maxMs }`
   reaches `withPoll` unguarded → a near-zero-spacing re-send loop that hammers the SUT for
-  the whole `maxMs` (poll's blast radius is worse than a bad `retry.backoffMs`/`timeoutMs`,
-  which only wait wrong). `defineTest` today only guards `id`/`version`/`steps.length`. The
-  proper fix is the **P4 normalizer** running `testCaseSchema.parse` on authored input
-  (functions stripped to `fnHash` first), which catches this with a friendly compile-time
-  error — add a fixture test for a non-positive `poll.intervalMs` there. Until then the
-  authored `runTest(...)` dev/test path is trusted. **Matrix shares this gap (from P3):** an
-  authored `matrix: { region: [] }` (empty dimension) bypasses `matrixSchema`'s
-  `.array().min(1)` and `expandUnits` silently yields zero units — same P4-normalizer fix,
-  add a fixture there too.
+  the whole `maxMs`. `defineTest` today only guards `id`/`version`/`steps.length`.
+  **PARTIALLY CLOSED (P4 `normalize`):** the compile path now runs `stepSchema.parse` per node
+  and `matrixSchema.parse(def.matrix)`, so a non-positive `poll.intervalMs` **and** an empty
+  matrix dimension (`{ region: [] }`) throw at compile with tests covering both. **Still open:**
+  the *direct* authored `runTest(...)`/`runSuite(...)` dev/test path (bypassing compile) remains
+  trusted, and `normalize` does not yet run the full `testCaseSchema`/`suiteSchema.parse` on the
+  top-level authored object (it validates per-node + matrix + the emitted entry, not e.g.
+  duplicate matrix **values** → duplicate cell ids). Consider a top-level authored parse if a
+  gap bites.
 - **Per-node params representation for P4 (from P3 review):** the engine's runtime
   `PlanNode` carries a per-node `params` bag, but the normalized `suiteNodeSchema`
   (= `stepSchema`) has no `params` field and `AuthoredSuite` has no `params` builder.
