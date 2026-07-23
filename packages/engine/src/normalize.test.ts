@@ -1,7 +1,7 @@
 import { manifestEntrySchema } from "@atp/schema";
 import { describe, expect, it } from "vitest";
 
-import { defineSuite, defineTest, useTest } from "./define";
+import { defineSuite, defineTest, useStep, useTest } from "./define";
 import { hashFn } from "./fnHash";
 import { normalize } from "./normalize";
 
@@ -77,6 +77,34 @@ describe("normalize (test)", () => {
   it("produces an entry that validates against manifestEntrySchema", () => {
     const [entry] = normalize(login, "tests/identity/login.test.ts");
     expect(() => manifestEntrySchema.parse(entry)).not.toThrow();
+  });
+
+  it("passes node retry/timeoutMs + a declarative message through, keeping {{secrets.*}} literal", () => {
+    const def = defineTest({
+      id: "t",
+      version: 1,
+      env: { token: "{{secrets.API_TOKEN}}" },
+      steps: [
+        {
+          id: "s",
+          request: { method: "GET", url: "u" },
+          assert: [{ path: "status", op: "eq", value: 200, message: "must be ok" }],
+          retry: { max: 2, backoffMs: 100, on: ["5xx"] },
+          timeoutMs: 5_000,
+        },
+      ],
+    });
+    const [entry] = normalize(def, "f.test.ts");
+    expect(entry?.nodes[0]?.retry).toEqual({ max: 2, backoffMs: 100, on: ["5xx"] });
+    expect(entry?.nodes[0]?.timeoutMs).toBe(5_000);
+    expect(entry?.nodes[0]?.assert[0]).toEqual({
+      path: "status",
+      op: "eq",
+      value: 200,
+      message: "must be ok",
+    });
+    // Secrets stay literal in the manifest — they resolve in the engine at run time.
+    expect(entry?.env).toEqual({ token: "{{secrets.API_TOKEN}}" });
   });
 });
 
@@ -180,5 +208,63 @@ describe("normalize (suite)", () => {
       },
     });
     expect(() => normalize(cyclic, "f.suite.ts")).toThrow();
+  });
+
+  it("normalizes a useStep node into a valid request node keyed by the map id", () => {
+    const createOrder = {
+      id: "create-order",
+      request: { method: "POST" as const, url: "{{env.baseUrl}}/orders" },
+      assert: [{ path: "status", op: "eq" as const, value: 201 }],
+    };
+    const withStep = defineSuite({
+      id: "billing.order",
+      version: 1,
+      nodes: { order: useStep(createOrder, { with: { token: "{{nodes.auth.authToken}}" } }) },
+    });
+    const [entry] = normalize(withStep, "f.suite.ts");
+    expect(entry?.nodes[0]?.id).toBe("order");
+    expect(entry?.nodes[0]?.request.url).toBe("{{env.baseUrl}}/orders");
+  });
+
+  it("expands a matrixed suite into one suite entry per cell with per-cell env", () => {
+    const regional = defineSuite({
+      id: "billing.regional",
+      version: 1,
+      matrix: { region: ["us", "eu"] },
+      env: (m) => ({ baseUrl: `https://${m.region as string}.example.com` }),
+      nodes: {
+        charge: {
+          request: { method: "POST", url: "{{env.baseUrl}}/charge" },
+          assert: [{ path: "status", op: "eq", value: 200 }],
+        },
+      },
+    });
+    const entries = normalize(regional, "f.suite.ts");
+    expect(entries.map((e) => e.id)).toEqual([
+      "billing.regional#region=us",
+      "billing.regional#region=eu",
+    ]);
+    expect(entries.every((e) => e.kind === "suite")).toBe(true);
+    expect(entries[0]?.env).toEqual({ baseUrl: "https://us.example.com" });
+    expect(entries[1]?.env).toEqual({ baseUrl: "https://eu.example.com" });
+    expect(entries[0]?.nodes.map((n) => n.id)).toEqual(["charge"]);
+  });
+});
+
+describe("normalize (compile-time guards)", () => {
+  it("rejects a non-positive poll.intervalMs at compile time", () => {
+    const bad = defineTest({
+      id: "t",
+      version: 1,
+      steps: [
+        {
+          id: "s",
+          request: { method: "GET", url: "u" },
+          assert: [],
+          poll: { untilAssertPasses: true, intervalMs: 0, maxMs: 1_000 },
+        },
+      ],
+    });
+    expect(() => normalize(bad, "f.test.ts")).toThrow();
   });
 });

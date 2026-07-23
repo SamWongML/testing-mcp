@@ -84,7 +84,8 @@ export function normalize(def: AuthoredDef, sourcePath: string): ManifestEntry[]
       kind: suite ? "suite" : "test",
       version: def.version,
       title: def.title,
-      tags: def.tags ?? [],
+      // undefined passes through — `manifestEntrySchema` defaults `tags` to `[]`.
+      tags: def.tags,
       owner: def.owner,
       timeoutMs: def.timeoutMs,
       isLongRunning,

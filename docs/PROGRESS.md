@@ -536,8 +536,21 @@ the only memory that crosses sessions.
   always wins. `LONG_RUNNING_TIMEOUT_MS = 30_000` is a named constant — revisit if a fast suite
   legitimately exceeds 30s.
 - **Exit criteria (this sub-step):** `pnpm --filter @atp/engine test` green; full gate
-  `typecheck + lint + test` green (14 new tests: 13 `normalize.test.ts` + 1 `manifest.test.ts`;
-  193 total). This is the compile **transform**; discovery/emission is the next sub-step.
+  `typecheck + lint + test` green (18 new tests: 17 `normalize.test.ts` + 1 `manifest.test.ts`;
+  197 total). This is the compile **transform**; discovery/emission is the next sub-step.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both confirmed the gate
+  green with **no Blockers/Majors** — the transform is correct on every traced path (test/suite
+  discrimination, fn→hash with no leak, plan `needs` overriding step `needs`, per-cell env,
+  shared-nodes-across-cells safe since Zod re-materializes per parse). Applied: (simplicity)
+  dropped the redundant `tags: def.tags ?? []` → `tags: def.tags` (schema already defaults to
+  `[]`), consistent with the sibling `title`/`owner`/`timeoutMs` passthroughs. (completeness, all
+  test-coverage gaps — transform needed no code change) +4 tests: the claimed-but-missing
+  **poll.intervalMs** compile-throw (pins the `stepSchema.parse` routing seam), a **matrixed
+  suite** (suite + matrix → one `kind:"suite"` entry per cell with per-cell env), node
+  **retry/timeoutMs + declarative `message`** passthrough with **`{{secrets.*}}` staying literal**
+  in env, and the **`useStep`** node path. Reviewers left #2/#3 simplicity nits as-is (the
+  tautological `manifestEntrySchema.parse` round-trip test documents the output contract; the
+  `: Step[]` annotation documents intent at the union site).
 - **Exact next step (P4 cont.):** build `tools/compile/src/index.ts` — glob
   `tests/**/*.{test,suite}.ts`, `import(pathToFileURL(f))`, call `normalize(mod.default, f)`,
   flatten all entries, wrap per-file `import`/normalize errors with the file path (friendly
@@ -646,6 +659,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (6/n) | P3 | **P3 complete.** Matrix expansion: `matrix.ts` (`expandMatrix` cartesian product; `expandUnits` → discrete named cells `id#region=us,tier=free` with per-cell env; `resolveEnv`). Authored `env` widened to `AuthoredEnv = Record \| (m)=>Record` (§7.3, deferred from P1). `RunOptionsBase` gained `matrix?`/`entryId?`; `runTest`/`runSuite` populate `{{matrix.*}}` + resolve per-cell env. §7.2 `billing.e2e-refund` closing e2e upgraded to full shape (useTest param override + useStep token bind + capture + refund + verify-with-poll) on MockAgent. TDD, +13 tests (131 engine / 177 total). Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P3 (6/n) review | P3 | Completeness + simplicity review (2 subagents), no Blockers/Majors — both verified the gate + traced the matrix paths (`{{matrix.*}}` survives the DAG spread, env precedence, strong §7.2 assertions). Applied: collapsed `expandUnits` through `expandMatrix`'s empty-product seed (DRY); reworded the stale runner "matrix out of scope" comment; exercised the untested `runSuite` env-builder fallback (drop pre-resolved env). +2 `matrix.test.ts` tests (object-valued key, `expandMatrix({})`). Deferred (authored-input validation, consistent w/ poll): empty-dimension→zero-units, dup-value→dup-ids, matrixed-run-without-cell — caught by `matrixSchema.min(1)` at P4 `.parse`. 133 engine / 179 total. Gate green. | _(this commit)_ |
 | 2026-07-23 | P4 (1/n) | P4 | Compile **transform** `normalize()` (`engine/src/normalize.ts`): authored test/suite → normalized `ManifestEntry[]`. fn → `{fnHash}`, `params` builder → `paramsSchema` (JSON Schema), suite node-map → topo-ordered nodes (cycles/unknown-`needs` throw), matrix → one **per-cell** entry (id `#region=us,tier=free`, resolved per-cell `env`, singleton-`matrix` coords), `isLongRunning` inferred from `timeoutMs > 30s` (explicit wins). Schema-first: added optional `env` to `manifestEntrySchema`. Compile-time guards now catch empty matrix dimension + non-positive `poll.intervalMs` (closes 2 P3-deferred items on the compile path). TDD, +14 tests (146 engine / 193 total). Gate green. Discovery/emission + CLI + corpus next. | _(this commit)_ |
+| 2026-07-23 | P4 (1/n) review | P4 | Completeness + simplicity review (2 subagents), no Blockers/Majors — transform correct on every traced path, needed no code change. Applied: dropped redundant `tags: def.tags ?? []` → `tags: def.tags` (schema defaults). +4 coverage tests: poll.intervalMs compile-throw (claimed-but-missing), matrixed suite (per-cell env, `kind:suite`), node retry/timeoutMs + declarative `message` passthrough + `{{secrets.*}}` literal in env, and the `useStep` node path. +4 tests (150 engine / 197 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
