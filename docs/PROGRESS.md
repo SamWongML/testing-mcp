@@ -216,11 +216,11 @@ the only memory that crosses sessions.
   research §12, §7.2–7.3, §10.2–10.3.
 
 ### P3 — Engine II
-- [ ] `defineSuite` / `useTest` / `useStep` / `defineAuth`
+- [x] `defineSuite` / `useTest` / `useStep` / `defineAuth`
 - [x] `graph.ts` (topo sort, cycle detection)
 - [x] DAG runner (parallel branches, `{{nodes.X.var}}`, run timeout, cancel between nodes)
 - [x] `poll.untilAssertPasses`
-- [ ] Auth providers: bearer, basic, api-key, oauth2-cc (cached), custom
+- [x] Auth providers: bearer, basic, api-key, oauth2-cc (cached), custom
 - [ ] Matrix expansion → discrete executable units
 - [ ] Tests incl. §7.2-style e2e suite on MockAgent
 
@@ -349,13 +349,52 @@ the only memory that crosses sessions.
     **Skipped w/ reason:** `timingMs` = final send (intentional settled-snapshot), the
     `signal?.aborted` stop term (load-bearing for the general helper + mirrors `withRetry`),
     `assert:[]` single-send (authoring oddity). 97 engine / 143 total, gate green.
-- **Exact next step: auth providers + matrix expansion.** (1) `auth/` — `defineAuth` +
-  providers `bearer`/`basic`/`api-key`/`oauth2-client-credentials` (token cached per run)/
-  `custom`; wire `applyAuth(request, ctx)` into `attemptStep` right after `resolveTemplates`
-  (research §10.3 shows the seam). (2) Matrix expansion: one authored file → N discrete
-  executable units (research §7.3 — includes the matrix-derived `env: (m) => …` deferred
-  from P1). Then the §7.2 `billing.e2e-refund` MockAgent e2e closes P3. Read plan §P3 and
-  research §10.2–10.3, §12, §7.2–7.3.
+- **Auth providers (`auth.ts`, done):** `applyAuth(request, ctx)` is wired into
+  `attemptStep` on the §10.3 seam — `await applyAuth(resolveTemplates(step.request, ctx), ctx)`.
+  A request's `authRef` (already on `requestSchema`) selects a provider from a per-run
+  registry; no `authRef` is a zero-cost passthrough, and an unknown `authRef` throws →
+  the runner surfaces it as an **errored** step (not a run-wide throw). Providers are
+  passed via run options: `runTest/runSuite(..., { auth: [provider, …] })`, indexed by id
+  through `buildAuthRegistry`. Design points:
+  - **Context carries the registry + cache:** `RunContext` gained `auth: Record<id,
+    AuthProvider>` and `authCache: Map<string, unknown>` (both always initialized by
+    `createRunContext`; the suite runner's `{ ...baseCtx, params }` spread preserves them,
+    so parallel nodes share one registry + token cache). `AuthProvider` (`{ id, apply }`)
+    lives in `context.ts` next to `RunContext` to avoid an `auth.ts`↔`context.ts` cycle.
+  - **Providers** (factories in `auth.ts`): `bearerAuth` (`Authorization: Bearer`),
+    `basicAuth` (base64 `Basic`), `apiKeyAuth` (`in: "header"` default | `"query"`),
+    `oauth2ClientCredentials`, `customAuth` (arbitrary transform). `defineAuth` (typed
+    identity + guard) is in `define.ts` alongside `defineTest`/`defineSuite`, for
+    hand-written providers.
+  - **Template-aware credentials:** after a provider runs, `applyAuth` re-runs
+    `resolveTemplates` on the result, so `bearerAuth({ token: "{{secrets.API_TOKEN}}" })`
+    resolves against the run context (idempotent for the already-resolved request body).
+    Redaction still masks the `authorization` header wholesale before persistence (the
+    e2e test asserts the SUT receives `Bearer run-token` while the snapshot shows `***`).
+  - **oauth2-cc token caching (per run):** the access token is fetched once via
+    `sendRequest` (POST `application/x-www-form-urlencoded` client-credentials grant) and
+    the **promise** is cached in `ctx.authCache` keyed by provider id — so concurrent
+    branches share one in-flight fetch and later nodes reuse it. A non-2xx / missing
+    `access_token` throws (→ errored step). Cancellation during the token fetch is caught
+    by `attemptStep`'s pre-send catch and reads as `cancelled` (added an abort check there,
+    shared with the template-resolve failure path).
+  - TDD: 12 `auth.test.ts` tests (each provider, passthrough, unknown-ref throw, templated
+    bearer, oauth2 cache-proof via a single one-shot interceptor, oauth2 no-token error,
+    runTest e2e seam + redaction, runTest unknown-ref → errored) + 3 `defineAuth` guards.
+    112 engine / 158 total, gate green.
+  - **Deferred:** provider-value resolution beyond templates is enough for now; wiring
+    `authRef` into the *normalized manifest* (does a compiled node keep `authRef` and the
+    server hold the provider registry?) is P4/P7 territory — the manifest carries no
+    functions, so `_shared/auth` providers are constructed at server boot and keyed by the
+    same `authRef` string. Note this when P4 normalizes suites.
+- **Exact next step: matrix expansion + §7.2 e2e (closes P3).** (1) Matrix expansion —
+  one authored file (`matrix: { region: [...], tier: [...] }`) → N discrete executable
+  units (cartesian product), each a run with its `{{matrix.*}}` scope populated and the
+  authored `env: (m) => …` (deferred from P1) expanded per cell. Decide the seam: expand
+  at plan time into named cells (`id#region=us,tier=pro`) so an agent can run one cell or
+  all. (2) Then adapt the §7.2 `billing.e2e-refund` suite (login→order→capture→refund→
+  verify-with-poll) onto MockAgent as the P3 closing e2e. Read plan §P3 and research §7.3,
+  §7.2, §12.
 
 ### P4 — Compile + CLI + corpus
 - [ ] `tools/compile`: discovery → normalize → `dist/manifest.json` (+gitSha, manifestHash)
@@ -455,6 +494,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (3/n) review | P3 | Completeness + simplicity review (2 subagents). Fixed a `concurrency:0` infinite-hang (clamp to default), added a `runStep` rejection guard, extracted `collectSecretValues` + `RunOptionsBase`. +4 tests (89 engine / 135 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P3 (4/n) | P3 | `poll.untilAssertPasses`: `poll.ts` `withPoll` (abortable interval loop mirroring `retry.ts`); `attemptStep` factors send+assert into a closure routed through `withPoll` when `step.poll` set. Poll owns the assertion-retry axis (suppresses `assertion` `retryOn`); retry owns transport; each send bounded by step `timeoutMs`, loop by `maxMs`. Extracted shared `sleep` into `util.ts`. TDD, +6 tests (95 engine / 141 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P3 (4/n) review | P3 | Completeness + simplicity review (2 subagents): correct + complete, no Blockers/Majors. Added 2 runner tests (cancel-mid-poll → `cancelled`; retry `on:["assertion"]` can't restart the poll loop), tightened the `maxMs`-budget doc, one comment nit. Deferred authored-input validation (non-positive `poll.intervalMs`) to the P4 normalizer. +2 tests (97 engine / 143 total). Gate green. | _(this commit)_ |
+| 2026-07-23 | P3 (5/n) | P3 | Auth providers: `auth.ts` (`bearer`/`basic`/`api-key`/`oauth2-client-credentials` w/ per-run promise-cached token/`custom`) + `defineAuth` + `buildAuthRegistry`; `applyAuth` wired into `attemptStep` on the §10.3 seam (resolve→auth→send), re-resolving templated credentials (`{{secrets.*}}`). `RunContext` gained `auth`/`authCache`; run options gained `auth: AuthProvider[]`. Unknown-ref → errored step; cancel-during-token-fetch → cancelled. TDD, +15 tests (112 engine / 158 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 

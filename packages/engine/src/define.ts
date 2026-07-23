@@ -6,6 +6,8 @@ import type {
   UseTestNode,
 } from "@atp/schema";
 
+import type { AuthProvider } from "./context";
+
 /**
  * Authoring entry points (research §7.1 / §7.2). `defineTest`/`defineSuite`/`defineEnv`
  * are typed identity functions: they keep the authored, function-carrying form intact
@@ -30,6 +32,21 @@ export function defineTest<T extends AuthoredTestCase>(test: T): T {
 /** Typed identity for a reusable environment object (`{{env.*}}` source). */
 export function defineEnv<T extends Record<string, unknown>>(env: T): T {
   return env;
+}
+
+/**
+ * Typed identity + guard for a hand-written auth provider (the `custom` escape hatch;
+ * the `bearer`/`basic`/`api-key`/`oauth2` factories in `auth.ts` cover the common cases).
+ * Lives alongside a suite's other reusable building blocks in `tests/_shared/auth`.
+ */
+export function defineAuth<T extends AuthProvider>(provider: T): T {
+  if (!provider.id || typeof provider.id !== "string") {
+    throw new Error("defineAuth: `id` must be a non-empty string");
+  }
+  if (typeof provider.apply !== "function") {
+    throw new Error(`defineAuth(${provider.id}): must provide an \`apply\` function`);
+  }
+  return provider;
 }
 
 /** A suite composes tests/steps into a DAG (research §7.2 / §12). */

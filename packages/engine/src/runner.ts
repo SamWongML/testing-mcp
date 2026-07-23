@@ -14,7 +14,8 @@ import type {
 import { executionResultSchema } from "@atp/schema";
 
 import { evaluateAssertions } from "./assertions";
-import type { EngineResponse, ResolvedRequest, RunContext } from "./context";
+import { applyAuth, buildAuthRegistry } from "./auth";
+import type { AuthProvider, EngineResponse, ResolvedRequest, RunContext } from "./context";
 import { extract } from "./extract";
 import { sendRequest } from "./http";
 import { resolveParams } from "./params";
@@ -28,17 +29,19 @@ import { createRunContext, resolveTemplates } from "./variables";
  * Execution (research §10.3). A test is a one-node-at-a-time run over its steps;
  * a suite (`runSuite`) is a topologically-scheduled DAG over the same node runner,
  * with independent branches running under a bounded concurrency limit. Each node:
- * resolve templates → send → assert → extract → publish, with per-step retry,
- * eventual-consistency polling, and redacted snapshots. `attemptStep`/`runStep` are
- * shared by both drivers.
+ * resolve templates → apply auth → send → assert → extract → publish, with per-step
+ * retry, eventual-consistency polling, and redacted snapshots. `attemptStep`/`runStep`
+ * are shared by both drivers.
  *
- * Matrix expansion and real auth providers are still out of scope here (P3).
+ * Matrix expansion is still out of scope here (P3).
  */
 
 /** Options common to both drivers (single test and suite). */
 export interface RunOptionsBase {
   env?: Record<string, unknown>;
   secrets?: Record<string, string>;
+  /** Auth providers a step's `request.authRef` may select (research §10.3). */
+  auth?: AuthProvider[];
   signal?: AbortSignal;
   runId?: string;
   /** Env name recorded on the result (the resolved env values come from `env`). */
@@ -76,9 +79,18 @@ async function attemptStep(
 ): Promise<Attempt<StepResult>> {
   let request: ResolvedRequest;
   try {
-    request = resolveTemplates(step.request, ctx);
+    // Resolve templates, then inject auth (research §10.3 seam) — a provider may fetch
+    // a token, so this can await and can be aborted by cancellation.
+    request = await applyAuth(resolveTemplates(step.request, ctx), ctx);
   } catch (err) {
-    // A template that cannot resolve is an authoring/data error, not transient.
+    // Cancellation during an auth token fetch reads as cancelled, not a run error.
+    if (ctx.signal?.aborted) {
+      return {
+        result: { id: step.id, status: "cancelled", assertions: [], extracted: {}, attempts: 1 },
+        retryOn: [],
+      };
+    }
+    // An unresolved template or unknown authRef is an authoring/config error, not transient.
     return {
       result: {
         id: step.id,
@@ -233,6 +245,7 @@ export async function runTest(
     env: opts.env ?? test.env ?? {},
     params,
     secrets: opts.secrets ?? {},
+    auth: buildAuthRegistry(opts.auth),
     signal: opts.signal,
   });
   const secretValues = collectSecretValues(opts.secrets);
@@ -410,6 +423,7 @@ export async function runSuite(
   const baseCtx = createRunContext({
     env: opts.env ?? suite.env ?? {},
     secrets: opts.secrets ?? {},
+    auth: buildAuthRegistry(opts.auth),
     signal,
   });
   const secretValues = collectSecretValues(opts.secrets);
