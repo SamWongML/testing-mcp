@@ -99,23 +99,47 @@ describe.skipIf(!pgAvailable)("queue", () => {
     expect(await heartbeat(tdb.db, jobId, "other-worker")).toBe(false);
   });
 
-  it("markDone removes a job from reaper eligibility", async () => {
+  it("markDone (done|failed) removes a job from reaper eligibility", async () => {
     await enqueue(tdb.db, { runId: "finished" });
     const claimed = await claim(tdb.db, "worker-a");
     await tdb.pool.query(`UPDATE jobs SET claimed_at = now() - interval '1 hour'`);
 
-    await markDone(tdb.db, claimed!.id, "done");
-    expect(await reapExpired(tdb.db, 60_000)).toEqual([]); // done → never requeued
+    expect(await markDone(tdb.db, claimed!.id, "worker-a", "failed")).toBe(true);
+    expect(await reapExpired(tdb.db, 60_000)).toEqual([]); // terminal → never requeued
+    // A terminal job can no longer be heartbeated.
+    expect(await heartbeat(tdb.db, claimed!.id, "worker-a")).toBe(false);
+  });
+
+  it("markDone is guarded: a stale worker cannot finalize a reassigned job", async () => {
+    await enqueue(tdb.db, { runId: "reassigned" });
+    const first = await claim(tdb.db, "worker-a"); // A claims, then stalls
+    await tdb.pool.query(`UPDATE jobs SET claimed_at = now() - interval '1 hour'`);
+    await reapExpired(tdb.db, 60_000); // reaper requeues it
+    const second = await claim(tdb.db, "worker-b"); // B claims the same job
+    expect(second?.id).toBe(first!.id);
+
+    // A resumes and tries to finalize — must be rejected (B still owns it, running).
+    expect(await markDone(tdb.db, first!.id, "worker-a")).toBe(false);
+    const [row] = await tdb.pool
+      .query<{ status: string; worker_id: string }>(
+        `SELECT status, worker_id FROM jobs WHERE id = $1`,
+        [first!.id],
+      )
+      .then((r) => r.rows);
+    expect(row).toMatchObject({ status: "running", worker_id: "worker-b" });
   });
 
   it("cancel flag is set per run and observable by the worker", async () => {
     const job = await enqueue(tdb.db, { runId: "to-cancel" });
     expect(await isCancelRequested(tdb.db, job.id)).toBe(false);
+    // A running job can still be flagged for cancellation.
+    await claim(tdb.db, "worker-a");
 
     expect(await requestCancel(tdb.db, "to-cancel")).toBe(true);
     expect(await isCancelRequested(tdb.db, job.id)).toBe(true);
 
-    // No matching run → nothing flagged.
+    // No matching run → nothing flagged; unknown job id → not cancelled.
     expect(await requestCancel(tdb.db, "nonexistent")).toBe(false);
+    expect(await isCancelRequested(tdb.db, "no-such-job")).toBe(false);
   });
 });

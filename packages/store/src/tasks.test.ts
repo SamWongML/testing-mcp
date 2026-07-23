@@ -54,8 +54,15 @@ describe.skipIf(!pgAvailable)("PostgresTaskStore", () => {
   it("setProgress advances progress without disturbing state", async () => {
     await store.put({ runId: "r1", state: "working" });
     await store.setProgress("r1", 50, "node-3");
-    const got = await store.get("r1");
-    expect(got).toMatchObject({ state: "working", progressPct: 50, currentNode: "node-3" });
+    expect(await store.get("r1")).toMatchObject({
+      state: "working",
+      progressPct: 50,
+      currentNode: "node-3",
+    });
+
+    // Omitting currentNode advances progress without clearing the prior node.
+    await store.setProgress("r1", 75);
+    expect(await store.get("r1")).toMatchObject({ progressPct: 75, currentNode: "node-3" });
   });
 
   it("requestCancel flags the task", async () => {

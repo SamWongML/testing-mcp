@@ -38,6 +38,7 @@ CREATE TABLE runs (
   id            text PRIMARY KEY,
   entry_id      text,
   manifest_hash text,
+  git_sha       text,
   status        text,
   params        jsonb,
   env           text,

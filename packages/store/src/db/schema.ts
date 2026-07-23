@@ -60,7 +60,11 @@ export const jobs = pgTable("jobs", {
 export const runs = pgTable("runs", {
   id: text("id").primaryKey(),
   entryId: text("entry_id"),
+  // Reproducibility (§21 invariant): every run records the manifest hash + git sha it
+  // ran against. gitSha is denormalized onto the run (not only `manifests`) so a run row
+  // is self-describing without waiting on the P7 catalog-snapshot writer.
   manifestHash: text("manifest_hash"),
+  gitSha: text("git_sha"),
   status: text("status"),
   params: jsonb("params"),
   env: text("env"),

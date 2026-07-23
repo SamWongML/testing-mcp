@@ -33,6 +33,7 @@ export async function recordRun(
       id: result.runId,
       entryId: result.entryId,
       manifestHash: result.manifestHash ?? null,
+      gitSha: result.gitSha ?? null,
       status: result.status,
       params: result.params ?? null,
       env: result.env ?? null,
@@ -43,25 +44,30 @@ export async function recordRun(
       invokedBy: meta.invokedBy ?? null,
     });
 
-    for (const step of result.steps) {
-      await tx.insert(stepResults).values({
+    // Batched: one insert for all steps, one for all assertions (Drizzle rejects an
+    // empty `.values([])`, so guard each on length).
+    if (result.steps.length > 0) {
+      await tx.insert(stepResults).values(
+        result.steps.map((step) => ({
+          runId: result.runId,
+          nodeId: step.id,
+          status: step.status,
+          timingMs: toInt(step.timingMs),
+          attempts: step.attempts,
+        })),
+      );
+    }
+    const assertionRows = result.steps.flatMap((step) =>
+      step.assertions.map((a, idx) => ({
         runId: result.runId,
         nodeId: step.id,
-        status: step.status,
-        timingMs: toInt(step.timingMs),
-        attempts: step.attempts,
-      });
-      if (step.assertions.length > 0) {
-        await tx.insert(assertionResults).values(
-          step.assertions.map((a, idx) => ({
-            runId: result.runId,
-            nodeId: step.id,
-            idx,
-            ok: a.ok,
-            message: a.message ?? null,
-          })),
-        );
-      }
+        idx,
+        ok: a.ok,
+        message: a.message ?? null,
+      })),
+    );
+    if (assertionRows.length > 0) {
+      await tx.insert(assertionResults).values(assertionRows);
     }
   });
 }
@@ -85,7 +91,7 @@ export async function listRuns(db: Db, filter: ListRunsFilter = {}): Promise<Run
     .select()
     .from(runs)
     .where(conds.length ? and(...conds) : undefined)
-    .orderBy(desc(runs.startedAt))
+    .orderBy(desc(runs.startedAt), desc(runs.id)) // id tiebreaks equal timestamps → stable
     .limit(filter.limit ?? 100);
 }
 

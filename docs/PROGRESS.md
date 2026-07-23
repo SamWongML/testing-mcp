@@ -843,6 +843,37 @@ the only memory that crosses sessions.
   — and **skips cleanly with no DB**. Full gate `typecheck + lint + test` green (329 total,
   **+26**) plus `pnpm compile`. Postgres deviation (`text` ids, hand-SQL migrations, S3/catalog
   deferrals) all documented above.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both confirmed the
+  gate green with **no Blockers**, and traced the SKIP-LOCKED claim, migration, and
+  redaction paths as correct. Applied:
+  - **(Major, completeness) `gitSha` now persisted.** `recordRun` dropped `result.gitSha`
+    (only `manifests.git_sha` held it, and that writer is deferred to P7), so the §21
+    "every run records `manifestHash` + `gitSha`" invariant was unsatisfiable for a P6 run.
+    Added a **`git_sha` column to `runs`** (denormalized onto the run so it's self-describing
+    with no P7-ordering dependency); `recordRun` writes it and a test asserts the round-trip.
+    `schema.ts` ↔ `0000_init.sql` kept in sync.
+  - **(Major, simplicity) `recordRun` batched.** The per-step loop (up to `2n+1` sequential
+    inserts in the txn) collapsed to one batched `stepResults` insert + one `flatMap`ed
+    `assertionResults` insert (each guarded on length — Drizzle rejects an empty `.values([])`).
+  - **(Minor) `markDone` ownership guard.** Was an unconditional `UPDATE … WHERE id`; a
+    reaped-then-reassigned job could be finalized by the dead worker. Now guarded by
+    `and(id, workerId, status='running')` (symmetric with `heartbeat`) and returns a boolean;
+    the signature gained `workerId` (no consumers yet — P8 worker loop).
+  - **(Minor) `listRuns` stable order.** Added `desc(runs.id)` as a tiebreaker so equal
+    `started_at` rows (and `limit`) are deterministic.
+  - **(Nit) dropped `satisfies JobStatus`** (3 sites) — `satisfies` appears nowhere else in
+    non-test source; the exported `JobStatus` type still documents the status domain.
+  - **(coverage) +tests** for the enumerated TDD gaps: `markDone("failed")` + the
+    ownership-guard rejection, `heartbeat` on a terminal job, `requestCancel` on a running
+    job, `isCancelRequested` on an unknown job, `setProgress` without `currentNode`
+    (undefined-omission doesn't clear it), and `recordRun` with an assertion-less step + a
+    step-less run.
+  - **Kept w/ reason:** `getRun` (P8's `get_run` needs it), the `manifests`/`catalog_entries`
+    tables without a writer (P7 snapshot), the per-file test `beforeEach`/`afterEach`
+    (readable; `migrate.test` uses a different lifecycle). **Documented (not changed):**
+    `recordRun` is **not idempotent** — a duplicate `runId` hits the `runs` PK and the txn
+    rolls back (a run is recorded once; idempotency keys are P8). +2 tests (**28 store /
+    331 total**). Gate green.
 - **Exact next step (P7): stateless MCP sync surface.** Streamable-HTTP MCP server (SDK +
   Hono) in `packages/mcp-server/src/`: `server.ts` (stateless, `/healthz`/`/readyz`,
   fail-fast `loadConfig`), manifest load at boot, tools `list_tests`/`describe_test`/
@@ -932,6 +963,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P5 | P5 | **P5 complete.** `@atp/reporting`: five pure renderers off one canonical `ExecutionResult` (ADR-006) — `markdown` (status/step-table/failures), `summary` (`llm_summary`: compact pass line, else likely-cause + next-action), `html` (self-contained: inline CSS, native `<details>` traces, no JS/external refs, XML-escaped — renders in Chromium), `junit` (XML; cancelled→skipped), `trace` (redacted full-fidelity JSON). Shared `diagnose` likely-cause heuristic (auth/server-error/timeout/network/schema-mismatch/assertion-failed/cancelled) backs summary **and** md/html. `renderReport` format dispatch. Golden-file tests (`toMatchFileSnapshot`) over 5 fixtures (pass/fail/retried/cancelled/long-suite) + semantic assertions. CLI `atp run <id> --report md\|html\|junit\|json\|summary [--out]`. TDD, +64 tests (301 total). All exit criteria verified. | _(this commit)_ |
 | 2026-07-23 | P5 review | P5 | Completeness + simplicity review (2 subagents): gate green, design sound; completeness 1 Major, simplicity 0 Blockers/Majors. Fixed the Major — a whole-suite `timeoutMs` breach (engine: `errored` run + `cancelled` nodes) was diagnosed `cancelled`, never `timeout`; now `classifyErrorText(result.error)` routes it to `timeout` while a caller-cancel stays `cancelled` (+2 regression tests). Simplicity: hoisted the junit↔diagnose plain-text `assertionLine` into `util.ts` (output byte-identical, no golden changed); collapsed a redundant `badgeColors` union to `Record<StepStatus,string>`. +2 tests (303 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P6 | P6 | **P6 complete.** `@atp/store`: Drizzle schema (`db/schema.ts`) mirroring §16.1 + stage-1 `tasks` table (ids `text`, not `uuid`, to honor the string-id IR); hand-authored SQL migration + in-house `migrate()` (tracks `_migrations`, per-file txn — no drizzle-kit). `queue.ts` (§11.2): `claim` via `SELECT … FOR UPDATE SKIP LOCKED` + typed UPDATE-by-id, `heartbeat`/`reapExpired`(lease)/`markDone`/`requestCancel`/`isCancelRequested`. `TaskStateStore` interface + `PostgresTaskStore` (upsert/patch/progress/cancel/TTL sweep — the seam P11's Dynamo adapter implements). `ArtifactStore` interface + `LocalArtifactStore` (`node:fs`, traversal-guarded) + `artifactKey` §16.3 layout — **S3 → P11**. `runs.ts`: `recordRun` (run+steps+assertions, one txn) + `listRuns`(entryId/status/since) + `getRun`. Harness `db/test-db.ts` gated on `ATP_TEST_DATABASE_URL` (per-schema isolation; skips w/o a DB). CI gains a `postgres:16` service on the test step; `docker-compose.dev.yml` added. Deferred: catalog-snapshot writer → P7, S3ArtifactStore → P11. TDD, +26 tests (329 total), verified vs. real Postgres 16. All exit criteria green. | _(this commit)_ |
+| 2026-07-23 | P6 review | P6 | Completeness + simplicity review (2 subagents), gate green, **no Blockers**. Fixed: **(Major)** `recordRun` now persists `gitSha` (new denormalized `runs.git_sha` column) — the §21 `manifestHash`+`gitSha` invariant was unmet for a P6 run; **(Major, simplicity)** batched `recordRun`'s per-step inserts (`2n+1` → 2 statements); **(Minor)** `markDone` gained a worker-ownership + `running` guard (a reaped-then-reassigned job can't be finalized by the dead worker) and returns bool; **(Minor)** `listRuns` tiebreaks equal `started_at` by `id`; **(Nit)** dropped `satisfies JobStatus`. +coverage: `markDone` failed/guard, heartbeat-terminal, cancel-running, `isCancelRequested`-unknown, `setProgress`-no-node, empty-assertions/step-less run. Documented `recordRun` non-idempotency (dup `runId` → PK rollback; idempotency keys are P8). +2 tests (28 store / 331 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 

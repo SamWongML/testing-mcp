@@ -35,7 +35,7 @@ export async function enqueue(db: Db, input: EnqueueInput = {}): Promise<Job> {
       runId: input.runId ?? null,
       spec: input.spec ?? null,
       priority: input.priority ?? 0,
-      status: "queued" satisfies JobStatus,
+      status: "queued",
       runAfter: input.runAfter, // undefined → DB default now()
     })
     .returning();
@@ -61,7 +61,7 @@ export async function claim(db: Db, workerId: string): Promise<Job | null> {
     if (!id) return null;
     const [row] = await tx
       .update(jobs)
-      .set({ status: "running" satisfies JobStatus, workerId, claimedAt: sql`now()` })
+      .set({ status: "running", workerId, claimedAt: sql`now()` })
       .where(eq(jobs.id, id))
       .returning();
     return row ?? null;
@@ -78,13 +78,24 @@ export async function heartbeat(db: Db, jobId: string, workerId: string): Promis
   return rows.length > 0;
 }
 
-/** Move a claimed job to a terminal state so the reaper leaves it alone. */
+/**
+ * Move a claimed job to a terminal state so the reaper leaves it alone. Guarded by
+ * worker ownership + `running` status (like `heartbeat`): a worker that lost its lease
+ * to the reaper cannot finalize a job another worker has since claimed. Returns false
+ * when this worker no longer owns a running job by that id.
+ */
 export async function markDone(
   db: Db,
   jobId: string,
+  workerId: string,
   status: "done" | "failed" = "done",
-): Promise<void> {
-  await db.update(jobs).set({ status }).where(eq(jobs.id, jobId));
+): Promise<boolean> {
+  const rows = await db
+    .update(jobs)
+    .set({ status })
+    .where(and(eq(jobs.id, jobId), eq(jobs.workerId, workerId), eq(jobs.status, "running")))
+    .returning({ id: jobs.id });
+  return rows.length > 0;
 }
 
 /**
@@ -94,7 +105,7 @@ export async function markDone(
 export async function reapExpired(db: Db, leaseMs: number): Promise<Job[]> {
   return db
     .update(jobs)
-    .set({ status: "queued" satisfies JobStatus, workerId: null, claimedAt: null })
+    .set({ status: "queued", workerId: null, claimedAt: null })
     .where(
       and(
         eq(jobs.status, "running"),

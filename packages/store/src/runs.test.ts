@@ -53,6 +53,7 @@ describe.skipIf(!pgAvailable)("runs", () => {
       env: null,
       durationMs: 1501, // float rounded to int
       manifestHash: "sha256:abc",
+      gitSha: "deadbeef", // reproducibility invariant (§21): run is self-describing
       invokedBy: "agent-1",
       artifactUri: "file:///a/run-1",
     });
@@ -76,6 +77,25 @@ describe.skipIf(!pgAvailable)("runs", () => {
 
   it("getRun returns null for an unknown run", async () => {
     expect(await getRun(tdb.db, "ghost")).toBeNull();
+  });
+
+  it("records a step with no assertions, and a run with no steps", async () => {
+    await recordRun(
+      tdb.db,
+      makeResult({
+        runId: "no-assert",
+        steps: [{ id: "s1", status: "passed", attempts: 1, assertions: [], extracted: {} }],
+      }),
+    );
+    const d1 = await getRun(tdb.db, "no-assert");
+    expect(d1!.steps).toHaveLength(1);
+    expect(d1!.assertions).toHaveLength(0);
+
+    await recordRun(tdb.db, makeResult({ runId: "no-steps", steps: [] }));
+    const d2 = await getRun(tdb.db, "no-steps");
+    expect(d2!.run.id).toBe("no-steps");
+    expect(d2!.steps).toHaveLength(0);
+    expect(d2!.assertions).toHaveLength(0);
   });
 
   it("lists runs newest-first, filtered by entryId / status / since", async () => {
