@@ -219,7 +219,7 @@ the only memory that crosses sessions.
 - [ ] `defineSuite` / `useTest` / `useStep` / `defineAuth`
 - [x] `graph.ts` (topo sort, cycle detection)
 - [x] DAG runner (parallel branches, `{{nodes.X.var}}`, run timeout, cancel between nodes)
-- [ ] `poll.untilAssertPasses`
+- [x] `poll.untilAssertPasses`
 - [ ] Auth providers: bearer, basic, api-key, oauth2-cc (cached), custom
 - [ ] Matrix expansion → discrete executable units
 - [ ] Tests incl. §7.2-style e2e suite on MockAgent
@@ -313,15 +313,35 @@ the only memory that crosses sessions.
   `{{vars.*}}` is last-writer-wins across parallel branches — `{{nodes.X.var}}` is the
   deterministic cross-node addressing (comment in `scheduleNodes`); a node with no
   `step.timeoutMs` and a suite with no `timeoutMs` relies on the server responding.
-- **Exact next step: `poll.untilAssertPasses`.** Add polling for eventual-consistency
-  endpoints (research §10.2–10.3): a step's `poll: { intervalMs, maxMs }` (already in the
-  schema, currently **ignored** by `attemptStep`) re-sends and re-evaluates that step's
-  assertions until they pass or the budget elapses — abortable sleep like `retry.ts`,
-  honoring `ctx.signal`. Decide the retry×poll interaction (poll wraps the assert loop for
-  a single logical attempt; retry still owns transport/5xx re-tries) and where the poll
-  budget sits vs. the step/suite timeout. After that: auth providers (`defineAuth` +
-  bearer/basic/api-key/oauth2-cc-cached/custom) and matrix expansion → discrete units.
-  Read plan §P3 and research §10.2–10.3, §12, §7.3.
+- **`poll.untilAssertPasses` (done):** `poll.ts` `withPoll(policy, run, {signal})` mirrors
+  `retry.ts` — it re-runs `run` on an `intervalMs` cadence until an attempt reports `ok`
+  or the `maxMs` budget would be overrun by another interval, with an abortable wait.
+  `run` returns `PollAttempt<T> = { result, ok }`. `attemptStep` factors send+assert into
+  a `sendAndAssert` closure and routes it through `withPoll` when `step.poll` is set (else
+  a single call); extraction/publish still happen once, on the **settled** response.
+  - **Retry×poll interaction (settled):** poll owns the **assertion** retry axis; retry
+    owns **transport** (`network`/`4xx`/`5xx`). So when `step.poll` is set, `attemptStep`
+    **suppresses** the `assertion` `retryOn` signal (else `withRetry` would restart the
+    whole poll loop each transport attempt). `5xx`/`4xx` are still reported, so a step can
+    combine poll (eventual consistency) with retry (transport flakiness) and they compose.
+  - **Budget vs. timeout (settled):** each individual send is bounded by the step
+    `timeoutMs` (undici, unchanged); the whole poll loop is bounded by `maxMs`. The suite
+    run-timeout / caller-cancel abort the poll wait; the next `sendAndAssert` then sends
+    with an aborted signal, which throws and surfaces as `cancelled` via the existing
+    catch — so cancel-during-poll doesn't need special-casing (mirrors retry-backoff).
+  - **`attempts` unchanged:** poll re-sends are the assertion axis, **not** retry attempts,
+    so a polled step still reports `attempts: 1` (the runner poll-timeout test asserts this).
+  - **Refactor:** the abortable `sleep` moved from `retry.ts` into `util.ts`; `retry.ts`
+    and `poll.ts` both import it (was about to be byte-duplicated). `withPoll`/`PollAttempt`
+    exported via `index.ts`. TDD: 4 `poll.test.ts` unit tests + 2 runner integration tests
+    (poll-until-passes success, poll-budget-elapsed failure). 95 engine / 141 total, gate green.
+- **Exact next step: auth providers + matrix expansion.** (1) `auth/` — `defineAuth` +
+  providers `bearer`/`basic`/`api-key`/`oauth2-client-credentials` (token cached per run)/
+  `custom`; wire `applyAuth(request, ctx)` into `attemptStep` right after `resolveTemplates`
+  (research §10.3 shows the seam). (2) Matrix expansion: one authored file → N discrete
+  executable units (research §7.3 — includes the matrix-derived `env: (m) => …` deferred
+  from P1). Then the §7.2 `billing.e2e-refund` MockAgent e2e closes P3. Read plan §P3 and
+  research §10.2–10.3, §12, §7.2–7.3.
 
 ### P4 — Compile + CLI + corpus
 - [ ] `tools/compile`: discovery → normalize → `dist/manifest.json` (+gitSha, manifestHash)
@@ -419,6 +439,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (2/n) | P3 | `defineSuite`/`useTest`/`useStep` (by-reference composition) + `planSuite` normalizer (authored node map → ordered `PlanNode[]`, per-node params scope). Schema-first: `UseTestNode`/`UseStepNode` carry the object; `InlineNode` id optional. Extracted shared `resolveParams`. TDD, 10 tests (71 engine / 117 total). | _(this commit)_ |
 | 2026-07-23 | P3 (3/n) | P3 | DAG runner `runSuite`: `scheduleNodes` topo-schedules `PlanNode[]` with bounded parallelism (default 8), per-node `params` sharing suite-wide `nodes`/`vars` for cross-branch `{{nodes.X.var}}`, failed-dep→`skipped` cascade, cooperative cancel→`cancelled`, whole-run `timeoutMs` budget→`errored`. Refactored `attemptStep`/`runStep` off `test` (fallback-timeout param); `finalize` generalized to test\|suite. TDD, 7 tests (85 engine / 131 total). | _(this commit)_ |
 | 2026-07-23 | P3 (3/n) review | P3 | Completeness + simplicity review (2 subagents). Fixed a `concurrency:0` infinite-hang (clamp to default), added a `runStep` rejection guard, extracted `collectSecretValues` + `RunOptionsBase`. +4 tests (89 engine / 135 total). Gate green. | _(this commit)_ |
+| 2026-07-23 | P3 (4/n) | P3 | `poll.untilAssertPasses`: `poll.ts` `withPoll` (abortable interval loop mirroring `retry.ts`); `attemptStep` factors send+assert into a closure routed through `withPoll` when `step.poll` set. Poll owns the assertion-retry axis (suppresses `assertion` `retryOn`); retry owns transport; each send bounded by step `timeoutMs`, loop by `maxMs`. Extracted shared `sleep` into `util.ts`. TDD, +6 tests (95 engine / 141 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 

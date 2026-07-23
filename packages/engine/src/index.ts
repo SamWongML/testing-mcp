@@ -5,6 +5,7 @@ export * from "./variables";
 export * from "./assertions";
 export * from "./extract";
 export * from "./retry";
+export * from "./poll";
 export * from "./redact";
 export * from "./http";
 export * from "./define";

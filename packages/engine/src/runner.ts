@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AssertionResult,
   AuthoredStep,
   AuthoredSuite,
   AuthoredTestCase,
@@ -17,6 +18,7 @@ import type { EngineResponse, ResolvedRequest, RunContext } from "./context";
 import { extract } from "./extract";
 import { sendRequest } from "./http";
 import { resolveParams } from "./params";
+import { type PollAttempt, withPoll } from "./poll";
 import { redactRequest, redactResponse } from "./redact";
 import { type Attempt, withRetry } from "./retry";
 import { type PlanNode, planSuite } from "./suite";
@@ -26,10 +28,11 @@ import { createRunContext, resolveTemplates } from "./variables";
  * Execution (research §10.3). A test is a one-node-at-a-time run over its steps;
  * a suite (`runSuite`) is a topologically-scheduled DAG over the same node runner,
  * with independent branches running under a bounded concurrency limit. Each node:
- * resolve templates → send → assert → extract → publish, with per-step retry and
- * redacted snapshots. `attemptStep`/`runStep` are shared by both drivers.
+ * resolve templates → send → assert → extract → publish, with per-step retry,
+ * eventual-consistency polling, and redacted snapshots. `attemptStep`/`runStep` are
+ * shared by both drivers.
  *
- * `poll`, matrix expansion and real auth providers are out of scope here (P3).
+ * Matrix expansion and real auth providers are still out of scope here (P3).
  */
 
 /** Options common to both drivers (single test and suite). */
@@ -90,12 +93,25 @@ async function attemptStep(
   }
 
   const redactedRequest = redactRequest(request, secretValues);
+  const timeoutMs = step.timeoutMs ?? fallbackTimeoutMs;
+  const asserts = step.assert ?? [];
+
+  // One send + assertion pass — the unit `poll` repeats for eventual consistency.
+  const sendAndAssert = async (): Promise<
+    PollAttempt<{ response: EngineResponse; assertions: AssertionResult[] }>
+  > => {
+    const response = await sendRequest(request, { signal: ctx.signal, timeoutMs });
+    const assertions = evaluateAssertions(asserts, response);
+    return { result: { response, assertions }, ok: assertions.every((a) => a.ok) };
+  };
+
   let response: EngineResponse;
+  let assertions: AssertionResult[];
   try {
-    response = await sendRequest(request, {
-      signal: ctx.signal,
-      timeoutMs: step.timeoutMs ?? fallbackTimeoutMs,
-    });
+    const settled = step.poll?.untilAssertPasses
+      ? await withPoll(step.poll, sendAndAssert, { signal: ctx.signal })
+      : (await sendAndAssert()).result;
+    ({ response, assertions } = settled);
   } catch (err) {
     if (ctx.signal?.aborted) {
       return {
@@ -124,7 +140,6 @@ async function attemptStep(
     };
   }
 
-  const assertions = evaluateAssertions(step.assert ?? [], response);
   const extracted = extract(step.extract ?? [], response);
   ctx.nodes[step.id] = { ...(ctx.nodes[step.id] ?? {}), ...extracted };
   Object.assign(ctx.vars, extracted);
@@ -133,7 +148,9 @@ async function attemptStep(
   const retryOn: RetryOn[] = [];
   if (response.status >= 500) retryOn.push("5xx");
   else if (response.status >= 400) retryOn.push("4xx");
-  if (!assertionsOk) retryOn.push("assertion");
+  // `poll` already spent the assertion-retry budget, so don't also hand `assertion`
+  // to `withRetry` — that would restart the whole poll loop per transport attempt.
+  if (!assertionsOk && !step.poll?.untilAssertPasses) retryOn.push("assertion");
 
   return {
     result: {

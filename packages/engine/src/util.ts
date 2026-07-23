@@ -32,6 +32,25 @@ export function mapDeepStrings(value: unknown, fn: (s: string) => unknown): unkn
   return value;
 }
 
+/**
+ * Resolve after `ms`, or immediately if `signal` is (or becomes) aborted. Shared by
+ * the retry backoff and the poll interval — both need a wait that a cancel can cut short.
+ */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
 /** Structural deep equality for assertion comparisons (order-insensitive on keys). */
 export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
