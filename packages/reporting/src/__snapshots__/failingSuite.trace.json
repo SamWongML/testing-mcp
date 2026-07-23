@@ -1,0 +1,120 @@
+{
+  "runId": "run-fail-suite",
+  "entryId": "billing.e2e-refund",
+  "kind": "suite",
+  "status": "failed",
+  "steps": [
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "eq",
+          "path": "$.status",
+          "expected": 200,
+          "actual": 200
+        }
+      ],
+      "extracted": {
+        "token": "tok"
+      },
+      "attempts": 1,
+      "id": "login",
+      "status": "passed",
+      "request": {
+        "method": "POST",
+        "url": "http://sut.local/auth/login"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "token": "***"
+        },
+        "timingMs": 30
+      },
+      "timingMs": 30
+    },
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "eq",
+          "path": "$.status",
+          "expected": 201,
+          "actual": 201
+        }
+      ],
+      "extracted": {
+        "refundId": "rf_1"
+      },
+      "attempts": 1,
+      "id": "refund",
+      "status": "passed",
+      "request": {
+        "method": "POST",
+        "url": "http://sut.local/payments/pay_1/refund",
+        "headers": {
+          "authorization": "***"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "refundId": "rf_1"
+        },
+        "timingMs": 55
+      },
+      "timingMs": 55
+    },
+    {
+      "assertions": [
+        {
+          "ok": false,
+          "op": "eq",
+          "path": "$.state",
+          "expected": "settled",
+          "actual": "pending",
+          "message": "ledger not yet settled"
+        }
+      ],
+      "extracted": {},
+      "attempts": 1,
+      "id": "verify",
+      "status": "failed",
+      "request": {
+        "method": "GET",
+        "url": "http://sut.local/ledger/refunds/rf_1"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "state": "pending"
+        },
+        "timingMs": 120
+      },
+      "timingMs": 120
+    },
+    {
+      "assertions": [],
+      "extracted": {},
+      "attempts": 0,
+      "id": "notify",
+      "status": "skipped"
+    }
+  ],
+  "startedAt": "2026-07-23T10:00:00.000Z",
+  "finishedAt": "2026-07-23T10:00:00.210Z",
+  "durationMs": 210,
+  "metrics": {
+    "totalSteps": 4,
+    "passedSteps": 2,
+    "failedSteps": 1,
+    "totalAssertions": 3,
+    "failedAssertions": 1
+  },
+  "env": "local",
+  "manifestHash": "sha256:def456",
+  "gitSha": "cafef00d"
+}

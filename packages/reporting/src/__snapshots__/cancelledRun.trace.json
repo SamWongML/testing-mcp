@@ -1,0 +1,61 @@
+{
+  "runId": "run-cancelled",
+  "entryId": "billing.e2e-refund",
+  "kind": "suite",
+  "status": "cancelled",
+  "steps": [
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "eq",
+          "path": "$.status",
+          "expected": 200,
+          "actual": 200
+        }
+      ],
+      "extracted": {},
+      "attempts": 1,
+      "id": "login",
+      "status": "passed",
+      "request": {
+        "method": "POST",
+        "url": "http://sut.local/auth/login"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "token": "***"
+        },
+        "timingMs": 30
+      },
+      "timingMs": 30
+    },
+    {
+      "assertions": [],
+      "extracted": {},
+      "attempts": 0,
+      "id": "refund",
+      "status": "cancelled"
+    },
+    {
+      "assertions": [],
+      "extracted": {},
+      "attempts": 0,
+      "id": "verify",
+      "status": "cancelled"
+    }
+  ],
+  "startedAt": "2026-07-23T10:00:00.000Z",
+  "finishedAt": "2026-07-23T10:00:00.035Z",
+  "durationMs": 35,
+  "metrics": {
+    "totalSteps": 3,
+    "passedSteps": 1,
+    "failedSteps": 0,
+    "totalAssertions": 1,
+    "failedAssertions": 0
+  },
+  "error": "run cancelled by caller"
+}

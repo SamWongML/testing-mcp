@@ -21,9 +21,10 @@ The platform is built in sequential phases (P0–P11) tracked in `docs/PROGRESS.
    `PROGRESS.md`; don't do it now.
 5. Update `docs/PROGRESS.md` (status, checklist, handoff notes), then commit and push.
 
-**Current state:** P0–P4 done; P5 (reporting renderers) next. `@atp/schema`, `@atp/engine`,
-`@atp/cli`, and `tools/compile` are implemented, and a sample corpus lives in `tests/`;
-`reporting`, `store`, and `mcp-server` are still one-line stubs.
+**Current state:** P0–P5 done; P6 (store — Postgres record + queue + artifacts) next.
+`@atp/schema`, `@atp/engine`, `@atp/reporting`, `@atp/cli`, and `tools/compile` are
+implemented, and a sample corpus lives in `tests/`; `store` and `mcp-server` are still
+one-line stubs.
 
 ## Commands
 

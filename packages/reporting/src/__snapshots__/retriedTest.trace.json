@@ -1,0 +1,48 @@
+{
+  "runId": "run-retried",
+  "entryId": "orders.create",
+  "kind": "test",
+  "status": "passed",
+  "steps": [
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "eq",
+          "path": "$.status",
+          "expected": 201,
+          "actual": 201
+        }
+      ],
+      "extracted": {
+        "orderId": "ord_9"
+      },
+      "attempts": 3,
+      "id": "create",
+      "status": "passed",
+      "request": {
+        "method": "POST",
+        "url": "http://sut.local/orders"
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "id": "ord_9"
+        },
+        "timingMs": 80
+      },
+      "timingMs": 80
+    }
+  ],
+  "startedAt": "2026-07-23T10:00:00.000Z",
+  "finishedAt": "2026-07-23T10:00:00.260Z",
+  "durationMs": 260,
+  "metrics": {
+    "totalSteps": 1,
+    "passedSteps": 1,
+    "failedSteps": 0,
+    "totalAssertions": 1,
+    "failedAssertions": 0
+  }
+}

@@ -10,5 +10,11 @@
     }
   },
   "main": "./src/index.ts",
-  "types": "./src/index.ts"
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run --root ../.. packages/reporting/"
+  },
+  "dependencies": {
+    "@atp/schema": "workspace:*"
+  }
 }

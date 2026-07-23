@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="billing.e2e-refund" tests="3" failures="0" errors="0" skipped="2" time="0.035">
+  <testsuite name="billing.e2e-refund" tests="3" failures="0" errors="0" skipped="2" time="0.035" timestamp="2026-07-23T10:00:00.000Z">
+    <testcase name="login" classname="billing.e2e-refund" time="0.03"/>
+    <testcase name="refund" classname="billing.e2e-refund" time="0">
+      <skipped message="cancelled"/>
+    </testcase>
+    <testcase name="verify" classname="billing.e2e-refund" time="0">
+      <skipped message="cancelled"/>
+    </testcase>
+  </testsuite>
+</testsuites>

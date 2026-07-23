@@ -1,0 +1,1 @@
+catalog.smoke [suite] passed — 5/5 steps, 5/5 assertions, 515ms

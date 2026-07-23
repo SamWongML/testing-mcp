@@ -1,0 +1,66 @@
+{
+  "runId": "run-pass",
+  "entryId": "identity.login",
+  "kind": "test",
+  "status": "passed",
+  "steps": [
+    {
+      "assertions": [
+        {
+          "ok": true,
+          "op": "eq",
+          "path": "$.status",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "op": "isString",
+          "path": "$.token"
+        }
+      ],
+      "extracted": {
+        "token": "tok-1"
+      },
+      "attempts": 1,
+      "id": "login",
+      "status": "passed",
+      "request": {
+        "method": "POST",
+        "url": "http://sut.local/auth/login",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "email": "qa@example.com",
+          "password": "***"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "token": "tok-1",
+          "userId": 42
+        },
+        "timingMs": 42
+      },
+      "timingMs": 42
+    }
+  ],
+  "startedAt": "2026-07-23T10:00:00.000Z",
+  "finishedAt": "2026-07-23T10:00:00.045Z",
+  "durationMs": 45,
+  "metrics": {
+    "totalSteps": 1,
+    "passedSteps": 1,
+    "failedSteps": 0,
+    "totalAssertions": 2,
+    "failedAssertions": 0
+  },
+  "env": "local",
+  "manifestHash": "sha256:abc123",
+  "gitSha": "deadbeef"
+}

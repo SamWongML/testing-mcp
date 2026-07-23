@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="identity.login" tests="1" failures="0" errors="0" skipped="0" time="0.045">
+  <testsuite name="identity.login" tests="1" failures="0" errors="0" skipped="0" time="0.045" timestamp="2026-07-23T10:00:00.000Z">
+    <testcase name="login" classname="identity.login" time="0.042"/>
+  </testsuite>
+</testsuites>

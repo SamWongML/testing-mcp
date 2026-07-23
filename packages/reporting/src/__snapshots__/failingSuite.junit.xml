@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="billing.e2e-refund" tests="4" failures="1" errors="0" skipped="1" time="0.21">
+  <testsuite name="billing.e2e-refund" tests="4" failures="1" errors="0" skipped="1" time="0.21" timestamp="2026-07-23T10:00:00.000Z">
+    <testcase name="login" classname="billing.e2e-refund" time="0.03"/>
+    <testcase name="refund" classname="billing.e2e-refund" time="0.055"/>
+    <testcase name="verify" classname="billing.e2e-refund" time="0.12">
+      <failure message="assertion eq at $.state failed: expected &quot;settled&quot;, actual &quot;pending&quot;">assertion eq at $.state failed: expected &quot;settled&quot;, actual &quot;pending&quot;</failure>
+    </testcase>
+    <testcase name="notify" classname="billing.e2e-refund" time="0">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>
