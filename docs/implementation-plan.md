@@ -19,7 +19,7 @@ should complete one phase (occasionally two small adjacent ones), verify it, upd
    - This file — only the section for that phase.
    - `docs/research.md` — **only the sections referenced by the phase** (listed per phase).
      Do NOT read the whole research doc; it alone is ~30k tokens.
-   - `AGENTS.md` at repo root once it exists (P0 creates it).
+   - `CLAUDE.md` at repo root — the agent guide (conventions, architecture, invariants).
 2. **Verify the previous phase's exit criteria still pass** (run the commands listed
    under its "Exit criteria") before building on it. If broken, fix first — that is the
    session's real starting point.
