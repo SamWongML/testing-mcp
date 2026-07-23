@@ -13,5 +13,13 @@
     }
   },
   "main": "./src/index.ts",
-  "types": "./src/index.ts"
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run --root ../.. packages/cli/"
+  },
+  "dependencies": {
+    "@atp/compile": "workspace:*",
+    "@atp/engine": "workspace:*",
+    "@atp/schema": "workspace:*"
+  }
 }

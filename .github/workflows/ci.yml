@@ -19,3 +19,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - run: pnpm compile # builds dist/manifest.json (gitignored); fails on a bad test
