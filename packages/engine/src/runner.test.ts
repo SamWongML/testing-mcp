@@ -197,6 +197,127 @@ describe("runTest — retry", () => {
   });
 });
 
+describe("runTest — poll (eventual consistency)", () => {
+  it("re-sends and re-asserts until the assertion passes, then passes the step", async () => {
+    const pool = agent.get("https://api.example.com");
+    pool.intercept({ path: "/job", method: "GET" }).reply(200, { state: "pending" }, JSON_HEADERS);
+    pool.intercept({ path: "/job", method: "GET" }).reply(200, { state: "pending" }, JSON_HEADERS);
+    pool.intercept({ path: "/job", method: "GET" }).reply(200, { state: "done" }, JSON_HEADERS);
+
+    const test = defineTest({
+      id: "poll-until",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      steps: [
+        {
+          id: "check",
+          request: { method: "GET", url: "{{env.baseUrl}}/job" },
+          assert: [{ path: "body.state", op: "eq", value: "done" }],
+          poll: { untilAssertPasses: true, intervalMs: 5, maxMs: 1000 },
+        },
+      ],
+    });
+
+    const result = await runTest(test);
+    expect(result.status).toBe("passed");
+    expect(result.steps[0]?.status).toBe("passed");
+    // Poll is a within-attempt loop, so `attempts` (the retry axis) stays at 1.
+    expect(result.steps[0]?.attempts).toBe(1);
+    // The final snapshot reflects the settled response.
+    expect((result.steps[0]?.response?.body as { state: string }).state).toBe("done");
+  });
+
+  it("fails the step when the poll budget elapses without the assertion passing", async () => {
+    agent
+      .get("https://api.example.com")
+      .intercept({ path: "/job", method: "GET" })
+      .reply(200, { state: "pending" }, JSON_HEADERS)
+      .persist();
+
+    const test = defineTest({
+      id: "poll-timeout",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      steps: [
+        {
+          id: "check",
+          request: { method: "GET", url: "{{env.baseUrl}}/job" },
+          assert: [{ path: "body.state", op: "eq", value: "done" }],
+          poll: { untilAssertPasses: true, intervalMs: 5, maxMs: 25 },
+        },
+      ],
+    });
+
+    const result = await runTest(test);
+    expect(result.status).toBe("failed");
+    expect(result.steps[0]?.status).toBe("failed");
+    expect(result.steps[0]?.assertions[0]?.ok).toBe(false);
+    // Poll owns the assertion-retry budget; it must not inflate the retry count.
+    expect(result.steps[0]?.attempts).toBe(1);
+  });
+
+  it("does not let a retry policy restart the poll loop on the assertion axis", async () => {
+    // `retry.on` includes "assertion", but poll owns that axis: the assertion signal is
+    // suppressed, so `withRetry` never fires and `attempts` stays 1 despite max: 3.
+    agent
+      .get("https://api.example.com")
+      .intercept({ path: "/job", method: "GET" })
+      .reply(200, { state: "pending" }, JSON_HEADERS)
+      .persist();
+
+    const test = defineTest({
+      id: "poll-retry-split",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      steps: [
+        {
+          id: "check",
+          request: { method: "GET", url: "{{env.baseUrl}}/job" },
+          assert: [{ path: "body.state", op: "eq", value: "done" }],
+          poll: { untilAssertPasses: true, intervalMs: 5, maxMs: 25 },
+          retry: { max: 3, backoffMs: 0, on: ["assertion"] },
+        },
+      ],
+    });
+
+    const result = await runTest(test);
+    expect(result.status).toBe("failed");
+    expect(result.steps[0]?.attempts).toBe(1);
+  });
+
+  it("marks a step cancelled when the signal aborts mid-poll", async () => {
+    // Never satisfies the assertion, so the step is still polling when the abort lands.
+    agent
+      .get("https://api.example.com")
+      .intercept({ path: "/job", method: "GET" })
+      .reply(200, { state: "pending" }, JSON_HEADERS)
+      .persist();
+
+    const controller = new AbortController();
+    const test = defineTest({
+      id: "poll-cancel",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      steps: [
+        {
+          id: "check",
+          request: { method: "GET", url: "{{env.baseUrl}}/job" },
+          assert: [{ path: "body.state", op: "eq", value: "done" }],
+          poll: { untilAssertPasses: true, intervalMs: 20, maxMs: 5000 },
+        },
+      ],
+    });
+
+    setTimeout(() => controller.abort(), 10);
+    const result = await runTest(test, { signal: controller.signal });
+
+    // The abort interrupts a poll interval; the next send throws on the aborted signal.
+    expect(result.status).toBe("cancelled");
+    expect(result.steps[0]?.status).toBe("cancelled");
+    expect(result.steps[0]?.attempts).toBe(1);
+  });
+});
+
 describe("runTest — chaining via extract + {{nodes.X.var}}", () => {
   it("passes an extracted value from one step into the next", async () => {
     const pool = agent.get("https://api.example.com");

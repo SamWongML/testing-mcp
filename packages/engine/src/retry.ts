@@ -1,5 +1,7 @@
 import type { RetryOn, RetryPolicy } from "@atp/schema";
 
+import { sleep } from "./util";
+
 /**
  * Per-step retry (research §10.2/§10.3). The caller runs one attempt and reports
  * which retryable conditions it hit (`network`, `4xx`, `5xx`, `assertion`);
@@ -11,21 +13,6 @@ export interface Attempt<T> {
   result: T;
   /** Retryable conditions this attempt hit — empty means "final, do not retry". */
   retryOn: RetryOn[];
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) return resolve();
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
 }
 
 export async function withRetry<T>(
