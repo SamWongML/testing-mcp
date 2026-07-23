@@ -16,7 +16,7 @@
 | P0 | Monorepo foundation | ✅ | 2026-07-23 | ✅ |
 | P1 | Schema package (`@atp/schema`) | ✅ | 2026-07-23 | ✅ |
 | P2 | Engine I — single-test execution | ✅ | 2026-07-23 | ✅ |
-| P3 | Engine II — suites/DAG/auth/matrix | ⬜ | — | — |
+| P3 | Engine II — suites/DAG/auth/matrix | 🔄 | 2026-07-23 | — |
 | P4 | Compile + CLI + sample corpus | ⬜ | — | — |
 | P5 | Reporting renderers | ⬜ | — | — |
 | P6 | Store — Postgres record + queue + artifacts | ⬜ | — | — |
@@ -217,14 +217,33 @@ the only memory that crosses sessions.
 
 ### P3 — Engine II
 - [ ] `defineSuite` / `useTest` / `useStep` / `defineAuth`
-- [ ] `graph.ts` (topo sort, cycle detection)
+- [x] `graph.ts` (topo sort, cycle detection)
 - [ ] DAG runner (parallel branches, `{{nodes.X.var}}`, run timeout, cancel between nodes)
 - [ ] `poll.untilAssertPasses`
 - [ ] Auth providers: bearer, basic, api-key, oauth2-cc (cached), custom
 - [ ] Matrix expansion → discrete executable units
 - [ ] Tests incl. §7.2-style e2e suite on MockAgent
 
-**Handoff notes:** _none yet_
+**Handoff notes:**
+- **`graph.ts` (done):** `topoSort(nodes: {id, needs?}[]) → string[]` (Kahn's algorithm,
+  ties broken by authored order → deterministic). Validates the graph as it sorts and
+  **throws** on: duplicate node ids, a `needs` edge pointing at an unknown node, and
+  cycles (error names the nodes still in the cycle). A missing `needs` is treated as no
+  deps. This is the compile-time cycle/edge check §12 promises (P4's compile step will
+  call it; the DAG runner also uses it to order execution). Pure + framework-free — takes
+  the minimal `GraphNode` shape (`id` + optional `needs`), not the full `Step`, so it works
+  on authored *or* normalized nodes. 7 tests in `graph.test.ts`.
+- **Exact next step:** the suite **normalizer + `defineSuite`/`useTest`/`useStep`**. Turn
+  the authored `AuthoredSuite.nodes` (a `Record<id, AuthoredSuiteNode>` where a node is
+  `UseTestNode | UseStepNode | InlineNode` — see `schema/src/suite.ts`) into the normalized
+  **array of `SuiteNode`** (= `stepSchema`) that the DAG runner consumes. `useTest(login,
+  {params})` inlines the reused test's step(s) with param overrides applied; `useStep(step,
+  {with})` inlines a shared step binding its inputs; inline nodes pass through. Each authored
+  node's map key becomes the node `id` and its `needs` carry over. Keep `defineSuite` a typed
+  identity + cheap structural guards (mirror `defineTest`). Then the **DAG runner** reuses
+  `topoSort` for scheduling and the existing `attemptStep`/`runStep` node runner from
+  `runner.ts` (already written to be graph-agnostic), publishing extracts to `ctx.nodes[id]`
+  for `{{nodes.X.var}}`. Read plan §P3, research §12 + §7.2.
 
 ### P4 — Compile + CLI + corpus
 - [ ] `tools/compile`: discovery → normalize → `dist/manifest.json` (+gitSha, manifestHash)
@@ -318,6 +337,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P0 | P0 | Monorepo foundation: workspace, 7 package stubs, strict tsconfig, Vitest (1 test), ESLint+Prettier, CI, AGENTS.md. Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P1 | P1 | `@atp/schema`: test/suite/result/manifest/params/config schemas (Zod 4) + authored-vs-normalized split, fnHash marker, matrix, `z.toJSONSchema` params derivation, `SCHEMA_VERSION`. TDD, 40 tests. Exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P2 | P2 | `@atp/engine` single-test execution: define/variables/http(undici)/assertions(all ops + fn)/extract/retry/redact/runner + fnHash. RunContext var bag + reusable node runner designed for P3. TDD, 46 engine tests (92 total). Exit criteria green. | _(this commit)_ |
+| 2026-07-23 | P3 (1/n) | P3 | `graph.ts`: `topoSort` (Kahn, deterministic) with cycle + unknown-`needs` + duplicate-id validation — the §12 compile-time DAG check. TDD, 7 tests (61 engine / 107 total). P3 in progress. | _(this commit)_ |
 
 ## Deferred / discovered work
 
