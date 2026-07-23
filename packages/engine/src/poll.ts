@@ -9,9 +9,11 @@ import { sleep } from "./util";
  * elapses — abortable via `signal`, exactly like the retry backoff.
  *
  * `poll` owns the *assertion* retry axis; transport re-tries stay with `withRetry`, so
- * the two compose cleanly: each individual send is bounded by the step timeout, the
- * whole poll loop by `maxMs`. A caller-cancel or run-timeout aborts the wait, and the
- * next attempt (with an aborted signal) surfaces the cancellation through the runner.
+ * the two compose cleanly: each individual send is bounded by the step timeout, while
+ * `maxMs` bounds the re-send *scheduling* between attempts. A send already in flight is
+ * never cut short, so keep the step timeout ≤ `maxMs` for the budget to stay meaningful.
+ * A caller-cancel or run-timeout aborts the wait, and the next attempt (with an aborted
+ * signal) surfaces the cancellation through the runner.
  */
 export interface PollAttempt<T> {
   result: T;

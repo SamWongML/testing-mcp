@@ -96,7 +96,7 @@ async function attemptStep(
   const timeoutMs = step.timeoutMs ?? fallbackTimeoutMs;
   const asserts = step.assert ?? [];
 
-  // One send + assertion pass — the unit `poll` repeats for eventual consistency.
+  // One send + assertion pass — the unit `withPoll` repeats for eventual consistency.
   const sendAndAssert = async (): Promise<
     PollAttempt<{ response: EngineResponse; assertions: AssertionResult[] }>
   > => {

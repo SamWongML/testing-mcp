@@ -335,6 +335,20 @@ the only memory that crosses sessions.
     and `poll.ts` both import it (was about to be byte-duplicated). `withPoll`/`PollAttempt`
     exported via `index.ts`. TDD: 4 `poll.test.ts` unit tests + 2 runner integration tests
     (poll-until-passes success, poll-budget-elapsed failure). 95 engine / 141 total, gate green.
+  - **Post-review hardening (completeness + simplicity, 2 subagents):** both confirmed the
+    change correct + complete with no Blockers/Majors; the simplicity pass found the design
+    already minimal (a well-matched `withRetry` sibling, complete `sleep` extraction). Applied:
+    (a) two runner tests pinning behavior previously only hand-traced — **cancel mid-poll →
+    `cancelled`** (abort interrupts a poll interval; the next send throws on the aborted
+    signal) and **retry `on:["assertion"]` does not restart the poll loop** (`attempts`
+    stays 1, proving the suppression seam); (b) tightened the `withPoll` doc — `maxMs` bounds
+    re-send *scheduling between* attempts, not an in-flight send, so keep step `timeoutMs` ≤
+    `maxMs`; (c) a comment-wording nit. **Deferred** (see Deferred work): authored-input
+    validation so a non-positive `poll.intervalMs` can't reach `withPoll` — systemic
+    (retry/timeout are equally untrusted on the authored path), P4-normalizer territory.
+    **Skipped w/ reason:** `timingMs` = final send (intentional settled-snapshot), the
+    `signal?.aborted` stop term (load-bearing for the general helper + mirrors `withRetry`),
+    `assert:[]` single-send (authoring oddity). 97 engine / 143 total, gate green.
 - **Exact next step: auth providers + matrix expansion.** (1) `auth/` — `defineAuth` +
   providers `bearer`/`basic`/`api-key`/`oauth2-client-credentials` (token cached per run)/
   `custom`; wire `applyAuth(request, ctx)` into `attemptStep` right after `resolveTemplates`
@@ -440,6 +454,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (3/n) | P3 | DAG runner `runSuite`: `scheduleNodes` topo-schedules `PlanNode[]` with bounded parallelism (default 8), per-node `params` sharing suite-wide `nodes`/`vars` for cross-branch `{{nodes.X.var}}`, failed-dep→`skipped` cascade, cooperative cancel→`cancelled`, whole-run `timeoutMs` budget→`errored`. Refactored `attemptStep`/`runStep` off `test` (fallback-timeout param); `finalize` generalized to test\|suite. TDD, 7 tests (85 engine / 131 total). | _(this commit)_ |
 | 2026-07-23 | P3 (3/n) review | P3 | Completeness + simplicity review (2 subagents). Fixed a `concurrency:0` infinite-hang (clamp to default), added a `runStep` rejection guard, extracted `collectSecretValues` + `RunOptionsBase`. +4 tests (89 engine / 135 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P3 (4/n) | P3 | `poll.untilAssertPasses`: `poll.ts` `withPoll` (abortable interval loop mirroring `retry.ts`); `attemptStep` factors send+assert into a closure routed through `withPoll` when `step.poll` set. Poll owns the assertion-retry axis (suppresses `assertion` `retryOn`); retry owns transport; each send bounded by step `timeoutMs`, loop by `maxMs`. Extracted shared `sleep` into `util.ts`. TDD, +6 tests (95 engine / 141 total). Gate green. | _(this commit)_ |
+| 2026-07-23 | P3 (4/n) review | P3 | Completeness + simplicity review (2 subagents): correct + complete, no Blockers/Majors. Added 2 runner tests (cancel-mid-poll → `cancelled`; retry `on:["assertion"]` can't restart the poll loop), tightened the `maxMs`-budget doc, one comment nit. Deferred authored-input validation (non-positive `poll.intervalMs`) to the P4 normalizer. +2 tests (97 engine / 143 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
@@ -452,6 +467,17 @@ doing them out of order.
   MockAgent + most SUT calls). Wire an explicit dispatcher with the `redirect`
   interceptor + pooling when a real deployment needs it (P10/P11 territory, or
   sooner if a test SUT requires following redirects).
+- **Authored-input validation for the runtime path (from P3 poll review):** `runTest`/
+  `runSuite` consume the *authored* (function-carrying) types and never `stepSchema.parse`
+  them, so scalar policy fields bypass their Zod refinements at run time. `pollPolicySchema`
+  enforces `intervalMs`/`maxMs` positive, but an authored `poll: { intervalMs: 0, maxMs }`
+  reaches `withPoll` unguarded → a near-zero-spacing re-send loop that hammers the SUT for
+  the whole `maxMs` (poll's blast radius is worse than a bad `retry.backoffMs`/`timeoutMs`,
+  which only wait wrong). `defineTest` today only guards `id`/`version`/`steps.length`. The
+  proper fix is the **P4 normalizer** running `testCaseSchema.parse` on authored input
+  (functions stripped to `fnHash` first), which catches this with a friendly compile-time
+  error — add a fixture test for a non-positive `poll.intervalMs` there. Until then the
+  authored `runTest(...)` dev/test path is trusted.
 - **Per-node params representation for P4 (from P3 review):** the engine's runtime
   `PlanNode` carries a per-node `params` bag, but the normalized `suiteNodeSchema`
   (= `stepSchema`) has no `params` field and `AuthoredSuite` has no `params` builder.
