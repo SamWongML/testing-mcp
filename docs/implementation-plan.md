@@ -96,7 +96,7 @@ with typecheck/lint/test wiring and CI that runs them.
 - Vitest configured at the workspace level; one trivial passing test
 - ESLint + Prettier (minimal config, no ceremony)
 - `.github/workflows/ci.yml`: install → typecheck → lint → test
-- `AGENTS.md` skeleton: repo conventions, package map, "how to run a session" pointer
+- `CLAUDE.md`: repo conventions, package map, "how to run a session" pointer
   to this plan, placeholder sections to be filled by later phases
 - `.gitignore`, `README.md` updated with the package map
 
@@ -224,8 +224,6 @@ to MockAgent) runs end-to-end and produces a multi-step `ExecutionResult`.
   `billing/` with one test + one suite composing `login` — mirroring §7.1/§7.2
 - A tiny local mock SUT (e.g. a Hono server started by tests/CLI dev mode) so
   `atp run` works offline
-- `AGENTS.md`: fill in the "add a test" recipe, conventions (folder=tag=owner,
-  `*.test.ts` / `*.suite.ts`), `defineTest` API summary
 - CI: add `pnpm compile` to the workflow (manifest built, not committed)
 
 **Exit criteria**
@@ -353,7 +351,7 @@ the extension is experimental (§20 row 1).
 - Integration tests: submit long suite → poll to `completed`; cancel mid-run →
   `cancelled`; kill worker mid-run (simulated) → reaper requeues → completes;
   non-Task client path via `get_run`/`get_run_result`
-- `pnpm dev:worker`; document the two-process local dev flow in `AGENTS.md`
+- `pnpm dev:worker`; document the two-process local dev flow in `CLAUDE.md`
 
 **Exit criteria:** the §7.2-style sample suite runs asynchronously end-to-end locally
 (server + worker + Postgres) with progress observable during the run and a fetchable
@@ -364,7 +362,7 @@ report after; all P7 tests still green.
 ## P9 — MCP prompts, agent workflows, Insomnia migration
 
 **Goal:** The agent-facing layer: MCP prompts encoding the workflows, the migration
-path from Insomnia YAML, and the finished `AGENTS.md` contract.
+path from Insomnia YAML, and the finished `CLAUDE.md` contract.
 
 **Research sections:** §13 (all), §19 (all), §8.3.
 
@@ -382,7 +380,7 @@ path from Insomnia YAML, and the finished `AGENTS.md` contract.
 - `MIGRATION.md` template (Insomnia id → IR id mapping table)
 - `regenerate_reports` implementation: re-render stored `ExecutionResult`s to a new format
 - Fixture Insomnia YAML + tests for the importer mapping
-- `AGENTS.md` finalized: conventions, recipes (add/edit/compose/migrate/triage),
+- `CLAUDE.md` finalized: conventions, recipes (add/edit/compose/migrate/triage),
   full tool/prompt/resource reference
 
 **Exit criteria:** importer converts the fixture collection into compiling tests

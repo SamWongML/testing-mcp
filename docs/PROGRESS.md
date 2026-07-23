@@ -41,7 +41,7 @@ the only memory that crosses sessions.
 - [x] Vitest wired; one passing test
 - [x] ESLint + Prettier
 - [x] CI workflow (install → typecheck → lint → test)
-- [x] `AGENTS.md` skeleton; README package map
+- [x] `CLAUDE.md` agent guide; README package map
 - [x] Exit criteria pass: `pnpm install && pnpm typecheck && pnpm lint && pnpm test`
 
 **Handoff notes:**
@@ -491,7 +491,6 @@ the only memory that crosses sessions.
 - [x] CLI: `atp compile` / `list` / `run` / `validate`
 - [x] Sample corpus (`tests/_shared/*`, identity, billing incl. one suite)
 - [x] Local mock SUT for offline runs
-- [x] `AGENTS.md`: add-a-test recipe + conventions
 - [x] CI runs `pnpm compile`
 - [x] Exit: new dummy test appears in manifest with no other change
 
@@ -559,7 +558,7 @@ the only memory that crosses sessions.
   (`compile`/`list`/`validate` are thin over compile+manifest; `run <id>` imports the source def
   and calls `runTest`/`runSuite` in-process). Then the `tests/` sample corpus (`_shared/{env,auth,
   steps}`, `identity/login.test.ts`, `billing/` + one suite composing `login`), a local mock SUT
-  (Hono) for offline `atp run`, the `AGENTS.md` add-a-test recipe, and `pnpm compile` in CI. Read
+  (Hono) for offline `atp run` and `pnpm compile` in CI. Read
   plan §P4 + research §9.
 - **Still deferred (unchanged by this step):** per-node suite **params baking** — suite nodes keep
   their `{{params.*}}` templates in the manifest (a `useTest(login,{params})` override is NOT
@@ -617,6 +616,11 @@ the only memory that crosses sessions.
   `/payments/:id/refund`, `/ledger/refunds/:id`, `/invoices/:id`. Each instance binds its own
   ephemeral loopback port (no collisions across tests/runs).
 - **CI:** `pnpm compile` appended after `pnpm test` (manifest built, gitignored, fails on a bad test).
+- **No `AGENTS.md` (deliberate):** the agent contract lives in **`CLAUDE.md`** (commit `8b8e0f7`
+  replaced AGENTS.md with a mapped CLAUDE.md). An earlier P4 pass recreated AGENTS.md by following
+  the then-stale `AGENTS.md` deliverables in this tracker + the plan; those references have since
+  been repointed to `CLAUDE.md`. **Do not recreate `AGENTS.md`** — document agent conventions/recipes
+  in `CLAUDE.md` instead.
 - **Exit criteria — all verified:** `pnpm compile` → 3-entry `dist/manifest.json`; `pnpm atp list`
   shows the corpus; `pnpm atp run identity.login` passes (exit 0) against the mock; the suite runs
   end-to-end (5/5 nodes, poll settles); adding `identity.ping` + recompiling surfaces it (4 entries)
@@ -673,7 +677,7 @@ the only memory that crosses sessions.
 - [ ] `atp import` deterministic scaffolder (§13.1 mapping) + fixture tests
 - [ ] Golden-master parity helper
 - [ ] `MIGRATION.md` template; `regenerate_reports` impl
-- [ ] `AGENTS.md` finalized (recipes + full surface reference)
+- [ ] `CLAUDE.md` finalized (recipes + full surface reference)
 
 **Handoff notes:** _none yet_
 
@@ -720,7 +724,8 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (6/n) review | P3 | Completeness + simplicity review (2 subagents), no Blockers/Majors — both verified the gate + traced the matrix paths (`{{matrix.*}}` survives the DAG spread, env precedence, strong §7.2 assertions). Applied: collapsed `expandUnits` through `expandMatrix`'s empty-product seed (DRY); reworded the stale runner "matrix out of scope" comment; exercised the untested `runSuite` env-builder fallback (drop pre-resolved env). +2 `matrix.test.ts` tests (object-valued key, `expandMatrix({})`). Deferred (authored-input validation, consistent w/ poll): empty-dimension→zero-units, dup-value→dup-ids, matrixed-run-without-cell — caught by `matrixSchema.min(1)` at P4 `.parse`. 133 engine / 179 total. Gate green. | _(this commit)_ |
 | 2026-07-23 | P4 (1/n) | P4 | Compile **transform** `normalize()` (`engine/src/normalize.ts`): authored test/suite → normalized `ManifestEntry[]`. fn → `{fnHash}`, `params` builder → `paramsSchema` (JSON Schema), suite node-map → topo-ordered nodes (cycles/unknown-`needs` throw), matrix → one **per-cell** entry (id `#region=us,tier=free`, resolved per-cell `env`, singleton-`matrix` coords), `isLongRunning` inferred from `timeoutMs > 30s` (explicit wins). Schema-first: added optional `env` to `manifestEntrySchema`. Compile-time guards now catch empty matrix dimension + non-positive `poll.intervalMs` (closes 2 P3-deferred items on the compile path). TDD, +14 tests (146 engine / 193 total). Gate green. Discovery/emission + CLI + corpus next. | _(this commit)_ |
 | 2026-07-23 | P4 (1/n) review | P4 | Completeness + simplicity review (2 subagents), no Blockers/Majors — transform correct on every traced path, needed no code change. Applied: dropped redundant `tags: def.tags ?? []` → `tags: def.tags` (schema defaults). +4 coverage tests: poll.intervalMs compile-throw (claimed-but-missing), matrixed suite (per-cell env, `kind:suite`), node retry/timeoutMs + declarative `message` passthrough + `{{secrets.*}}` literal in env, and the `useStep` node path. +4 tests (150 engine / 197 total). Gate green. | _(this commit)_ |
-| 2026-07-23 | P4 (2/n) | P4 | **P4 complete.** `tools/compile`: `discover` (readdir, no `glob` dep) → `compile({root})` (import → `normalize` → id-sorted `manifestSchema.parse`) + `manifestHash` (canonical sha256) + `gitSha`; friendly aggregated `CompileError` naming each offending file; `pnpm compile` writes gitignored `dist/manifest.json`. CLI (`packages/cli`): `list`/`validate` (in-memory compile), `run <id>` (imports source, boots mock SUT, runs via `runTest`/`runSuite`), thin `index.ts` arg-parsing; `pnpm atp`. Mock SUT (`node:http`, ephemeral port). Sample corpus (`_shared/{env,auth,steps}`, `identity/login`, `billing/get-invoice` + `end-to-end-refund.suite`). Corpus typechecked (added `tests/**` + root `@atp/*` devDeps + `declaration:false`). CI runs `pnpm compile`; `AGENTS.md` authored. TDD, +25 tests (222 total). All exit criteria verified. | _(this commit)_ |
+| 2026-07-23 | P4 (2/n) | P4 | **P4 complete.** `tools/compile`: `discover` (readdir, no `glob` dep) → `compile({root})` (import → `normalize` → id-sorted `manifestSchema.parse`) + `manifestHash` (canonical sha256) + `gitSha`; friendly aggregated `CompileError` naming each offending file; `pnpm compile` writes gitignored `dist/manifest.json`. CLI (`packages/cli`): `list`/`validate` (in-memory compile), `run <id>` (imports source, boots mock SUT, runs via `runTest`/`runSuite`), thin `index.ts` arg-parsing; `pnpm atp`. Mock SUT (`node:http`, ephemeral port). Sample corpus (`_shared/{env,auth,steps}`, `identity/login`, `billing/get-invoice` + `end-to-end-refund.suite`). Corpus typechecked (added `tests/**` + root `@atp/*` devDeps + `declaration:false`). CI runs `pnpm compile`. TDD, +25 tests (222 total). All exit criteria verified. | _(this commit)_ |
+| 2026-07-23 | P4 fixup | P4 | Reverted a stray P4 deliverable: deleted the recreated `AGENTS.md` and scrubbed the stale `AGENTS.md` references across `docs/*` + repointed them to `CLAUDE.md`, completing commit `8b8e0f7` ("Replace AGENTS.md with a mapped CLAUDE.md") whose replacement had left ~15 dangling references that led P4 to recreate the intentionally-deleted file. No code change; gate still green. | _(this commit)_ |
 
 ## Deferred / discovered work
 
