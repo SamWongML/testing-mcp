@@ -37,6 +37,17 @@ describe("expandMatrix", () => {
     expect(cells.map((c) => c.key)).toEqual(["replicas=1", "replicas=3"]);
     expect(cells[0]?.coords).toEqual({ replicas: 1 });
   });
+
+  it("JSON-encodes object dimension values in the key", () => {
+    const cells = expandMatrix({ cfg: [{ a: 1 }] });
+    expect(cells[0]?.key).toBe('cfg={"a":1}');
+    expect(cells[0]?.coords).toEqual({ cfg: { a: 1 } });
+  });
+
+  it("yields a single empty cell for a matrix with no dimensions (the empty product)", () => {
+    // Load-bearing: `expandUnits` routes the no-matrix case through this seed.
+    expect(expandMatrix({})).toEqual([{ coords: {}, key: "" }]);
+  });
 });
 
 describe("resolveEnv", () => {

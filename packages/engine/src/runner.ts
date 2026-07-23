@@ -34,7 +34,8 @@ import { createRunContext, resolveTemplates } from "./variables";
  * retry, eventual-consistency polling, and redacted snapshots. `attemptStep`/`runStep`
  * are shared by both drivers.
  *
- * Matrix expansion is still out of scope here (P3).
+ * Matrix *expansion* stays plan-time (`expandUnits` in `matrix.ts`); the runner executes
+ * a single cell — `opts.matrix` populates `{{matrix.*}}` and selects the per-cell env.
  */
 
 /** Options common to both drivers (single test and suite). */

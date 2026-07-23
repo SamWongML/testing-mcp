@@ -456,8 +456,25 @@ the only memory that crosses sessions.
   `***` at rest (the passing `order` proves the token flowed — the `/orders` mock only matched
   `Bearer tok-1`), the polled response settled, and the result parses with
   `executionResultSchema`. **This is the P3 exit criterion.**
-- **P3 exit criteria met:** `pnpm --filter @atp/engine test` green (131 engine); full gate
-  `typecheck + lint + test` green (177 total). Matrix expansion + the §7.2 e2e close P3.
+- **P3 exit criteria met:** `pnpm --filter @atp/engine test` green (133 engine); full gate
+  `typecheck + lint + test` green (179 total). Matrix expansion + the §7.2 e2e close P3.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both confirmed the gate
+  green and traced the matrix paths — no Blockers/Majors (`{{matrix.*}}` survives the DAG
+  `{...baseCtx, params}` spread; env precedence `opts.env ?? resolveEnv(def.env, matrix) ?? {}`
+  correct; the §7.2 e2e assertions are strong, not weak). Applied: (a) collapsed `expandUnits`
+  to route the no-matrix case through `expandMatrix`'s empty-product seed (DRY — dropped the
+  duplicated base-unit literal + compound guard, made the seed load-bearing); (b) reworded the
+  stale runner "matrix out of scope (P3)" comment now that the runner consumes cells; (c) closed
+  the one untested runtime path — `runSuite`'s per-cell env-*builder* fallback (the suite matrix
+  test now passes only `{ matrix }`, so `resolveEnv(suite.env, coords)` actually fires); (d) +2
+  `matrix.test.ts` tests (object-valued dimension key → JSON; `expandMatrix({})` empty product,
+  now load-bearing). **Deferred w/ reason (authored-input validation, same class as the poll
+  note):** an empty dimension array (`{region: []}`) → zero units silently, duplicate dimension
+  values → duplicate unit ids, and running a matrixed def with no cell selected → `undefined`
+  coords in an `env` builder. All three are misuse of the *authored* path; `matrixSchema`'s
+  `.array().min(1)` + the P4 normalizer `.parse` catch them at compile time (the manifest's
+  per-cell entries can't express them), so the fix belongs in P4, not an ad-hoc runtime guard.
+  +2 tests (133 engine / 179 total). Gate green.
 - **Exact next step (P4): compile + CLI + sample corpus.** Implement `tools/compile` (glob
   `tests/**/*.{test,suite}.ts` → import → `normalize()` incl. fn-hashing + **matrix expansion
   into per-cell manifest entries** via `expandUnits` → validate → `dist/manifest.json` with
@@ -568,6 +585,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P3 (5/n) | P3 | Auth providers: `auth.ts` (`bearer`/`basic`/`api-key`/`oauth2-client-credentials` w/ per-run promise-cached token/`custom`) + `defineAuth` + `buildAuthRegistry`; `applyAuth` wired into `attemptStep` on the §10.3 seam (resolve→auth→send), re-resolving templated credentials (`{{secrets.*}}`). `RunContext` gained `auth`/`authCache`; run options gained `auth: AuthProvider[]`. Unknown-ref → errored step; cancel-during-token-fetch → cancelled. TDD, +15 tests (112 engine / 158 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P3 (5/n) review | P3 | Completeness + simplicity review (2 subagents), no Blockers. Fixed 2 Majors: `redactRequest` now redacts `query` (secret-sourced api-key in query no longer leaks at rest); oauth2 cache no longer memoizes a failed token fetch (evict on reject so a later node retries). Nits: `buildAuthRegistry` throws on duplicate id; `withHeaders` case-insensitive (injected auth replaces a pre-existing same-name header). Simplicity: reuse `erroredStep` in both `attemptStep` catches, tighten `authCache` type, hoist test `MockAgent` setup. TDD, +6 tests (118 engine / 164 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P3 (6/n) | P3 | **P3 complete.** Matrix expansion: `matrix.ts` (`expandMatrix` cartesian product; `expandUnits` → discrete named cells `id#region=us,tier=free` with per-cell env; `resolveEnv`). Authored `env` widened to `AuthoredEnv = Record \| (m)=>Record` (§7.3, deferred from P1). `RunOptionsBase` gained `matrix?`/`entryId?`; `runTest`/`runSuite` populate `{{matrix.*}}` + resolve per-cell env. §7.2 `billing.e2e-refund` closing e2e upgraded to full shape (useTest param override + useStep token bind + capture + refund + verify-with-poll) on MockAgent. TDD, +13 tests (131 engine / 177 total). Exit criteria green. | _(this commit)_ |
+| 2026-07-23 | P3 (6/n) review | P3 | Completeness + simplicity review (2 subagents), no Blockers/Majors — both verified the gate + traced the matrix paths (`{{matrix.*}}` survives the DAG spread, env precedence, strong §7.2 assertions). Applied: collapsed `expandUnits` through `expandMatrix`'s empty-product seed (DRY); reworded the stale runner "matrix out of scope" comment; exercised the untested `runSuite` env-builder fallback (drop pre-resolved env). +2 `matrix.test.ts` tests (object-valued key, `expandMatrix({})`). Deferred (authored-input validation, consistent w/ poll): empty-dimension→zero-units, dup-value→dup-ids, matrixed-run-without-cell — caught by `matrixSchema.min(1)` at P4 `.parse`. 133 engine / 179 total. Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 

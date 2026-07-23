@@ -72,19 +72,17 @@ export function resolveEnv(
 
 /**
  * Enumerate the discrete executable units of an authored test or suite. With no `matrix`
- * (or an empty one) there is a single base unit; with a `matrix`, one unit per cartesian
- * cell, each carrying its `{{matrix.*}}` coords and per-cell resolved env.
+ * (or an empty one) there is a single base unit — the empty product yields one cell with
+ * an empty `key`, so the id stays the bare `def.id`; with a `matrix`, one unit per
+ * cartesian cell, each carrying its `{{matrix.*}}` coords and per-cell resolved env.
  */
 export function expandUnits(def: {
   id: string;
   matrix?: Record<string, unknown[]>;
   env?: AuthoredEnv;
 }): MatrixUnit[] {
-  if (!def.matrix || Object.keys(def.matrix).length === 0) {
-    return [{ id: def.id, matrix: {}, env: resolveEnv(def.env, {}) }];
-  }
-  return expandMatrix(def.matrix).map((cell) => ({
-    id: `${def.id}#${cell.key}`,
+  return expandMatrix(def.matrix ?? {}).map((cell) => ({
+    id: cell.key ? `${def.id}#${cell.key}` : def.id,
     matrix: cell.coords,
     env: resolveEnv(def.env, cell.coords),
   }));

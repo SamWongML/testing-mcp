@@ -429,12 +429,10 @@ describe("runSuite — matrix cell execution (§7.3)", () => {
       },
     });
 
+    // Pass only the cell coords (not a pre-resolved env) so runSuite itself calls the
+    // authored env builder with the coords — the URL's `eu.api` proves that fallback path.
     const euCell = expandUnits(suite).find((u) => u.matrix.region === "eu");
-    const result = await runSuite(suite, {
-      entryId: euCell?.id,
-      matrix: euCell?.matrix,
-      env: euCell?.env,
-    });
+    const result = await runSuite(suite, { entryId: euCell?.id, matrix: euCell?.matrix });
 
     expect(result.status).toBe("passed");
     expect(result.entryId).toBe("region.smoke#region=eu");
