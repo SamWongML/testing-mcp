@@ -731,6 +731,36 @@ the only memory that crosses sessions.
   resources (`run://{id}/report.md`, `.../trace.json`) and `get_report` (md/json inline,
   html via artifact-store presign) routes through the same `renderReport` dispatch — no
   renderer changes needed, just call sites. Artifact **persistence** is P6/P7.
+- **Post-review hardening (completeness + simplicity, 2 subagents):** both confirmed the
+  full gate green and the design sound; completeness found **1 Major**, simplicity **0
+  Blockers/Majors**. Fixed:
+  - **(Major) suite-timeout misdiagnosed.** The engine records a whole-suite `timeoutMs`
+    breach as an **`errored` run** (`error: 'suite "…" exceeded timeoutMs (…ms)'`) whose
+    in-flight/pending nodes read as **`cancelled`** (runner.ts:435-440, 128-139). `diagnose`
+    matched the first cancelled step → `cause:"cancelled"` with a misleading "re-run"
+    next-action — never `timeout`, one of the four classes §14 requires. Fix: classify
+    `result.error` (a new `classifyErrorText` applying the timeout/network regexes) in the
+    run-level and cancelled-step branches, so a suite-budget timeout is `timeout`; a plain
+    caller-cancel (`"run cancelled by caller"`, no timeout signal) stays `cancelled`. Also
+    dedup: the errored-step branch now shares `classifyErrorText`. +2 regression tests
+    (in-flight-cancelled timeout; timeout-after-all-passed). Per-step timeouts were already
+    correct (errored step whose abort message matches the regex).
+  - **(simplicity M1) junit↔diagnose plain-text duplication:** the byte-identical
+    `assertion <op> at <path> failed: expected X, actual Y` builder lived in both
+    `junit.ts` and `diagnose.ts`. Lifted to `util.ts` `assertionLine` (shared by both;
+    md/html keep their own backtick/`<code>` variants — legitimate per-format divergence).
+    Output byte-identical → **no golden changed**.
+  - **(simplicity M2) redundant type union:** `badgeColors` was `Record<StepStatus |
+    "passed" | … , string>` — every literal already ∈ `StepStatus`; collapsed to
+    `Record<StepStatus, string>`.
+  - **Deferred / noted (not changed):** cross-step precedence picks the *first* non-passing
+    step (the DAG root cause; a later 401 stays behind an earlier assertion failure) —
+    defensible, "response-status-first" holds *within* a step. A `failed` run with zero/only-
+    skipped steps would label `errored`/"Run failed." — unreachable from the current engine
+    (`computeStatus` only yields `failed` when a failed step exists). `.badge-skipped` CSS
+    is emitted but `result.status` (ExecutionStatus) is never `skipped` — harmless dead CSS,
+    keeping the map total over `StepStatus`. `fixtures.ts` under `src/` (test-only, not
+    re-exported) — acceptable placement. Gate green (303 total, +2).
 
 ### P6 — Store
 - [ ] Drizzle schema + migrations (§16.1 tables + stage-1 `tasks` table)
@@ -820,6 +850,7 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P4 fixup | P4 | Reverted a stray P4 deliverable: deleted the recreated `AGENTS.md` and scrubbed the stale `AGENTS.md` references across `docs/*` + repointed them to `CLAUDE.md`, completing commit `8b8e0f7` ("Replace AGENTS.md with a mapped CLAUDE.md") whose replacement had left ~15 dangling references that led P4 to recreate the intentionally-deleted file. No code change; gate still green. | _(this commit)_ |
 | 2026-07-23 | P4 (2/n) review | P4 | Completeness + simplicity review (2 subagents), **0 Blockers, 2 Majors**. Fixed: cwd-coupled CLI tests (9-failed under `pnpm --filter`/`-r`; pin `root` + injectable `run(argv,root)`); env-dependent `manifestHash` (corpus env now a literal, only the CLI run path honors `ATP_BASE_URL`); `runById` matrix handling reuses the engine's `expandUnits` (deletes the lossy `cellCoords` parser — flagged by both reviewers). Simplicity dedups: exported `importDef`/`compileToFile` from `@atp/compile`, hoisted `isSuite` into the engine. Nits: `--flag=value`, `--env ""`. +15 coverage tests (new `cli/index.test.ts` dispatcher exit codes; compile no-default-export/`resolveGitSha`/`writeManifest`). Kept w/ reason: `canonical` undefined-strip, root `declaration:false`. **237 tests**, incl. `pnpm -r test`. Gate green. | _(this commit)_ |
 | 2026-07-23 | P5 | P5 | **P5 complete.** `@atp/reporting`: five pure renderers off one canonical `ExecutionResult` (ADR-006) — `markdown` (status/step-table/failures), `summary` (`llm_summary`: compact pass line, else likely-cause + next-action), `html` (self-contained: inline CSS, native `<details>` traces, no JS/external refs, XML-escaped — renders in Chromium), `junit` (XML; cancelled→skipped), `trace` (redacted full-fidelity JSON). Shared `diagnose` likely-cause heuristic (auth/server-error/timeout/network/schema-mismatch/assertion-failed/cancelled) backs summary **and** md/html. `renderReport` format dispatch. Golden-file tests (`toMatchFileSnapshot`) over 5 fixtures (pass/fail/retried/cancelled/long-suite) + semantic assertions. CLI `atp run <id> --report md\|html\|junit\|json\|summary [--out]`. TDD, +64 tests (301 total). All exit criteria verified. | _(this commit)_ |
+| 2026-07-23 | P5 review | P5 | Completeness + simplicity review (2 subagents): gate green, design sound; completeness 1 Major, simplicity 0 Blockers/Majors. Fixed the Major — a whole-suite `timeoutMs` breach (engine: `errored` run + `cancelled` nodes) was diagnosed `cancelled`, never `timeout`; now `classifyErrorText(result.error)` routes it to `timeout` while a caller-cancel stays `cancelled` (+2 regression tests). Simplicity: hoisted the junit↔diagnose plain-text `assertionLine` into `util.ts` (output byte-identical, no golden changed); collapsed a redundant `badgeColors` union to `Record<StepStatus,string>`. +2 tests (303 total). Gate green. | _(this commit)_ |
 
 ## Deferred / discovered work
 

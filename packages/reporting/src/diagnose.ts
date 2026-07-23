@@ -1,6 +1,6 @@
 import type { ExecutionResult, StepResult } from "@atp/schema";
 
-import { fmtValue } from "./util";
+import { assertionLine } from "./util";
 
 /**
  * The heuristic "likely cause" classifier (research §14, ADR-006). Given a finished
@@ -45,9 +45,23 @@ const NEXT_ACTION: Record<LikelyCause, string> = {
 const TIMEOUT_RE = /timeout|timed out|abort/i;
 const NETWORK_RE = /econn|enotfound|network|fetch failed|socket|dns|getaddr|unreachable/i;
 
+/** Classify free-text error output as a timeout or a connection failure (else undefined). */
+function classifyErrorText(text: string | undefined): "timeout" | "network" | undefined {
+  if (!text) return undefined;
+  if (TIMEOUT_RE.test(text)) return "timeout";
+  if (NETWORK_RE.test(text)) return "network";
+  return undefined;
+}
+
 /** Classify why a run did not pass. Returns `undefined` for a passed run. */
 export function diagnose(result: ExecutionResult): Diagnosis | undefined {
   if (result.status === "passed") return undefined;
+
+  // A run-level error string is the most authoritative timeout/network signal: the engine
+  // records a whole-suite `timeoutMs` breach as an `errored` run whose in-flight/pending
+  // nodes read as `cancelled` (runner.ts), so the per-step scan alone would call it
+  // `cancelled`. Classify from `result.error` first so a suite-budget timeout is a timeout.
+  const runLevel = classifyErrorText(result.error);
 
   const step = result.steps.find(
     (s) => s.status === "failed" || s.status === "errored" || s.status === "cancelled",
@@ -56,21 +70,23 @@ export function diagnose(result: ExecutionResult): Diagnosis | undefined {
   // No offending step — a run-level cancel/error (e.g. the whole run timed out before any
   // step recorded a result).
   if (!step) {
+    if (runLevel) {
+      return { cause: runLevel, detail: result.error as string, nextAction: NEXT_ACTION[runLevel] };
+    }
     const cause: LikelyCause = result.status === "cancelled" ? "cancelled" : "errored";
     return { cause, detail: result.error ?? `Run ${result.status}.`, nextAction: NEXT_ACTION[cause] };
   }
 
   if (step.status === "cancelled") {
+    // A node cancelled under a run-level timeout inherits that cause; a plain caller-cancel
+    // (no timeout/network signal in `result.error`) stays `cancelled`.
+    if (runLevel) return diag(runLevel, step, result.error as string);
     return diag("cancelled", step, result.error ?? `Step "${step.id}" was cancelled.`);
   }
 
   if (step.status === "errored") {
     const err = step.error ?? "";
-    const cause: LikelyCause = TIMEOUT_RE.test(err)
-      ? "timeout"
-      : NETWORK_RE.test(err)
-        ? "network"
-        : "errored";
+    const cause = classifyErrorText(err) ?? "errored";
     return diag(cause, step, err || `Step "${step.id}" errored.`);
   }
 
@@ -89,13 +105,7 @@ export function diagnose(result: ExecutionResult): Diagnosis | undefined {
     return diag("schema-mismatch", step, `Step "${step.id}" response failed schema validation${where}.`);
   }
   if (failed) {
-    const op = failed.op ?? "fn";
-    const where = failed.path ? ` at ${failed.path}` : "";
-    const cmp =
-      failed.expected !== undefined || failed.actual !== undefined
-        ? `: expected ${fmtValue(failed.expected)}, actual ${fmtValue(failed.actual)}`
-        : "";
-    return diag("assertion-failed", step, `Step "${step.id}" assertion ${op}${where} failed${cmp}.`);
+    return diag("assertion-failed", step, `Step "${step.id}" ${assertionLine(failed)}.`);
   }
 
   return diag("assertion-failed", step, `Step "${step.id}" failed.`);

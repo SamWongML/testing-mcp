@@ -1,6 +1,6 @@
-import type { AssertionResult, ExecutionResult, StepResult } from "@atp/schema";
+import type { ExecutionResult, StepResult } from "@atp/schema";
 
-import { escapeXml, fmtValue, secs } from "./util";
+import { assertionLine, escapeXml, secs } from "./util";
 
 /**
  * JUnit XML report (research §14) — drops straight into CI dashboards. One `<testsuite>`
@@ -57,14 +57,4 @@ function failureDetail(step: StepResult): string {
   const failed = step.assertions.filter((a) => !a.ok);
   if (failed.length === 0) return step.error ?? `step "${step.id}" failed`;
   return failed.map(assertionLine).join("; ");
-}
-
-function assertionLine(a: AssertionResult): string {
-  const op = a.op ?? "fn";
-  const where = a.path ? ` at ${a.path}` : "";
-  const cmp =
-    a.expected !== undefined || a.actual !== undefined
-      ? `: expected ${fmtValue(a.expected)}, actual ${fmtValue(a.actual)}`
-      : "";
-  return `assertion ${op}${where} failed${cmp}`;
 }

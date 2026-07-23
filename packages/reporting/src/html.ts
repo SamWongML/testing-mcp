@@ -119,7 +119,7 @@ function renderAssertion(a: StepResult["assertions"][number]): string {
   return `<li class="${cls}">${glyph} <code>${escapeXml(op)}</code>${where}${cmp}${message}</li>`;
 }
 
-const badgeColors: Record<StepStatus | "passed" | "failed" | "cancelled" | "errored", string> = {
+const badgeColors: Record<StepStatus, string> = {
   passed: "#137333",
   failed: "#b3261e",
   errored: "#8a1f11",

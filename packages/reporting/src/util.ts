@@ -1,3 +1,5 @@
+import type { AssertionResult } from "@atp/schema";
+
 /** Small shared helpers for the renderers (research §14). Kept internal to the package. */
 
 /**
@@ -32,4 +34,20 @@ export function fmtValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/**
+ * Plain-text one-liner for a failed assertion (`assertion eq at $.state failed: expected
+ * "x", actual "y"`). Shared by the junit renderer and the diagnose heuristic so their
+ * wording can't drift; the markdown/html renderers format the same fields differently
+ * (backticks / `<code>`) and keep their own.
+ */
+export function assertionLine(a: AssertionResult): string {
+  const op = a.op ?? "fn";
+  const where = a.path ? ` at ${a.path}` : "";
+  const cmp =
+    a.expected !== undefined || a.actual !== undefined
+      ? `: expected ${fmtValue(a.expected)}, actual ${fmtValue(a.actual)}`
+      : "";
+  return `assertion ${op}${where} failed${cmp}`;
 }

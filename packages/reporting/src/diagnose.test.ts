@@ -93,6 +93,36 @@ describe("diagnose (likely-cause heuristic)", () => {
     expect(d?.detail).toContain("pending");
   });
 
+  it("classifies a whole-suite timeout as timeout (not cancelled)", () => {
+    // The engine records a suite `timeoutMs` breach as an `errored` run whose in-flight
+    // node reads as `cancelled` (runner.ts) — the run error carries the timeout signal.
+    const d = diagnose(
+      makeResult({
+        status: "errored",
+        error: 'suite "billing.e2e" exceeded timeoutMs (2000ms)',
+        steps: [
+          makeStep({ id: "login", status: "passed" }),
+          makeStep({ id: "slow-refund", status: "cancelled", attempts: 1 }),
+        ],
+      }),
+    );
+    expect(d?.cause).toBe("timeout");
+    expect(d?.detail).toContain("exceeded timeoutMs");
+    expect(d?.nextAction).toContain("timeoutMs");
+  });
+
+  it("classifies a suite timeout that fired after every node passed", () => {
+    // No non-passing step remains, so the run-level error must drive the classification.
+    const d = diagnose(
+      makeResult({
+        status: "errored",
+        error: 'suite "billing.e2e" exceeded timeoutMs (2000ms)',
+        steps: [makeStep({ id: "a", status: "passed" }), makeStep({ id: "b", status: "passed" })],
+      }),
+    );
+    expect(d?.cause).toBe("timeout");
+  });
+
   it("classifies a cancelled run", () => {
     const d = diagnose(
       makeResult({
