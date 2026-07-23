@@ -15,6 +15,23 @@ export function getBySegments(obj: unknown, segments: readonly string[]): unknow
   return cur;
 }
 
+/**
+ * Deep-map a value, replacing each string leaf via `fn` and recursing into arrays
+ * and plain objects. `fn`'s result is not re-walked, so a string that resolves to a
+ * non-string (or another string) is taken as final — shared by template resolution
+ * and redaction, which differ only in the leaf transform.
+ */
+export function mapDeepStrings(value: unknown, fn: (s: string) => unknown): unknown {
+  if (typeof value === "string") return fn(value);
+  if (Array.isArray(value)) return value.map((v) => mapDeepStrings(v, fn));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = mapDeepStrings(v, fn);
+    return out;
+  }
+  return value;
+}
+
 /** Structural deep equality for assertion comparisons (order-insensitive on keys). */
 export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;

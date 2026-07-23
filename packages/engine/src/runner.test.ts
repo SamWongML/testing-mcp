@@ -123,6 +123,78 @@ describe("runTest — retry", () => {
     expect(result.status).toBe("passed");
     expect(result.steps[0]?.attempts).toBe(3);
   });
+
+  it("retries on a network error when the policy allows it", async () => {
+    const pool = agent.get("https://api.example.com");
+    pool.intercept({ path: "/net", method: "GET" }).replyWithError(new Error("ECONNRESET"));
+    pool.intercept({ path: "/net", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
+
+    const test = defineTest({
+      id: "net-retry",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      steps: [
+        {
+          id: "get",
+          request: { method: "GET", url: "{{env.baseUrl}}/net" },
+          assert: [{ path: "status", op: "eq", value: 200 }],
+          retry: { max: 1, backoffMs: 0, on: ["network"] },
+        },
+      ],
+    });
+
+    const result = await runTest(test);
+    expect(result.status).toBe("passed");
+    expect(result.steps[0]?.attempts).toBe(2);
+  });
+
+  it("retries on 4xx when the policy allows it", async () => {
+    const pool = agent.get("https://api.example.com");
+    pool.intercept({ path: "/4xx", method: "GET" }).reply(429, "slow down");
+    pool.intercept({ path: "/4xx", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
+
+    const test = defineTest({
+      id: "4xx-retry",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      steps: [
+        {
+          id: "get",
+          request: { method: "GET", url: "{{env.baseUrl}}/4xx" },
+          assert: [{ path: "status", op: "eq", value: 200 }],
+          retry: { max: 1, backoffMs: 0, on: ["4xx"] },
+        },
+      ],
+    });
+
+    const result = await runTest(test);
+    expect(result.status).toBe("passed");
+    expect(result.steps[0]?.attempts).toBe(2);
+  });
+
+  it("retries on a failed assertion (2xx) when the policy allows it", async () => {
+    const pool = agent.get("https://api.example.com");
+    pool.intercept({ path: "/eventual", method: "GET" }).reply(200, { ready: false }, JSON_HEADERS);
+    pool.intercept({ path: "/eventual", method: "GET" }).reply(200, { ready: true }, JSON_HEADERS);
+
+    const test = defineTest({
+      id: "assertion-retry",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      steps: [
+        {
+          id: "get",
+          request: { method: "GET", url: "{{env.baseUrl}}/eventual" },
+          assert: [{ path: "body.ready", op: "eq", value: true }],
+          retry: { max: 1, backoffMs: 0, on: ["assertion"] },
+        },
+      ],
+    });
+
+    const result = await runTest(test);
+    expect(result.status).toBe("passed");
+    expect(result.steps[0]?.attempts).toBe(2);
+  });
 });
 
 describe("runTest — chaining via extract + {{nodes.X.var}}", () => {
@@ -231,5 +303,29 @@ describe("runTest — cancellation", () => {
     expect(result.status).toBe("cancelled");
     expect(result.steps[0]?.status).toBe("cancelled");
     expect(result.steps[0]?.attempts).toBe(0);
+  });
+
+  it("cancels a step aborted while the request is in flight", async () => {
+    agent
+      .get("https://api.example.com")
+      .intercept({ path: "/slow", method: "GET" })
+      .reply(200, "late")
+      .delay(100);
+
+    const controller = new AbortController();
+    const test = defineTest({
+      id: "cancel-mid",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      steps: [{ id: "get", request: { method: "GET", url: "{{env.baseUrl}}/slow" } }],
+    });
+
+    setTimeout(() => controller.abort(), 10);
+    const result = await runTest(test, { signal: controller.signal });
+
+    expect(result.status).toBe("cancelled");
+    expect(result.steps[0]?.status).toBe("cancelled");
+    // The request was actually sent before the abort — distinct from the pre-abort path.
+    expect(result.steps[0]?.attempts).toBe(1);
   });
 });

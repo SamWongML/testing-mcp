@@ -1,6 +1,7 @@
 import type { RequestSpec } from "@atp/schema";
 
 import type { EngineResponse, ResolvedRequest } from "./context";
+import { mapDeepStrings } from "./util";
 
 /**
  * Secret redaction (research §10.2, §21). Snapshots persisted to the store/S3 pass
@@ -26,19 +27,8 @@ function maskSecrets(input: string, secrets: readonly string[]): string {
   return out;
 }
 
-function redactString(value: string, secrets: readonly string[]): string {
-  return maskSecrets(value, secrets);
-}
-
 function redactDeep(value: unknown, secrets: readonly string[]): unknown {
-  if (typeof value === "string") return redactString(value, secrets);
-  if (Array.isArray(value)) return value.map((v) => redactDeep(v, secrets));
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = redactDeep(v, secrets);
-    return out;
-  }
-  return value;
+  return mapDeepStrings(value, (s) => maskSecrets(s, secrets));
 }
 
 function redactHeaders(
@@ -48,7 +38,7 @@ function redactHeaders(
   if (!headers) return headers;
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(headers)) {
-    out[k] = SENSITIVE_HEADERS.has(k.toLowerCase()) ? MASK : redactString(v, secrets);
+    out[k] = SENSITIVE_HEADERS.has(k.toLowerCase()) ? MASK : maskSecrets(v, secrets);
   }
   return out;
 }

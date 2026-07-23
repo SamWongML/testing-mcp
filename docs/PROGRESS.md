@@ -193,9 +193,19 @@ the only memory that crosses sessions.
 - **fn-hashing (`fnHash.ts`):** `hashFn(fn)` = `sha256:<hex of fn.toString()>` — the
   engine owns this; the P4 normalizer will call it to turn authored `fn` predicates
   into the manifest's `fnHash` markers. Not needed by the runner (it holds the real fn).
-- **Exit criteria:** `pnpm --filter @atp/engine test` green (46 tests); full gate
-  `typecheck + lint + test` green (92 tests total). The §7.1 login demo runs on
+- **Exit criteria:** `pnpm --filter @atp/engine test` green (54 tests); full gate
+  `typecheck + lint + test` green (100 tests total). The §7.1 login demo runs on
   MockAgent and produces an `ExecutionResult` that `executionResultSchema` parses.
+- **Post-review hardening (completeness + simplicity pass):** added tests for the
+  previously-unexercised runtime paths — retry on `network`/`4xx`/`assertion` (not just
+  `5xx`), **in-flight** AbortSignal cancellation (abort after the request starts, vs the
+  pre-abort case), abortable retry backoff, response-side sensitive-header redaction,
+  and the `matches` invalid-regex / `gt`/`lt` non-numeric branches. Simplifications:
+  extracted one shared deep-string walker `mapDeepStrings` in `util.ts` (was duplicated
+  as `resolveValue` in `variables.ts` + `redactDeep` in `redact.ts`), dropped a trivial
+  `redactString` wrapper, narrowed `applyOp` to `Exclude<AssertionOp,"jsonpath">` (the
+  jsonpath case is handled upstream), and flattened the scope→bag ternary in
+  `variables.ts` to an allow-list `Set`.
 - **Explicitly deferred to P3 (schema exists, engine support pending):** `poll`
   (`step.poll` is ignored today), suites/DAG parallelism, matrix expansion, real auth
   providers (`authRef`/`applyAuth` — no auth applied yet), matrix-derived `env`.

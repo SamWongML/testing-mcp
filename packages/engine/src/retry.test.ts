@@ -58,4 +58,23 @@ describe("withRetry", () => {
     expect(calls).toBe(1);
     expect(attempts).toBe(1);
   });
+
+  it("interrupts the backoff sleep when aborted mid-wait", async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const started = Date.now();
+    const promise = withRetry(
+      { max: 5, backoffMs: 10_000, on: ["5xx"] },
+      async () => {
+        calls++;
+        return { result: calls, retryOn: ["5xx"] };
+      },
+      { signal: controller.signal },
+    );
+    // First attempt has run and entered the 10s backoff; aborting must unblock it.
+    setTimeout(() => controller.abort(), 10);
+    const { attempts } = await promise;
+    expect(attempts).toBe(2); // the wake-from-sleep runs one more attempt, then stops (aborted)
+    expect(Date.now() - started).toBeLessThan(9_000);
+  });
 });

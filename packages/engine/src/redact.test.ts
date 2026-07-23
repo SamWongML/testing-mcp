@@ -40,4 +40,16 @@ describe("redactResponse", () => {
     );
     expect(out).toEqual({ status: 200, headers: {}, body: { token: "***" }, timingMs: 5 });
   });
+
+  it("masks sensitive response header keys wholesale", () => {
+    const out = redactResponse(
+      {
+        status: 200,
+        headers: { "set-cookie": "session=abc", "content-type": "application/json" },
+        body: null,
+      },
+      [],
+    );
+    expect(out.headers).toEqual({ "set-cookie": "***", "content-type": "application/json" });
+  });
 });

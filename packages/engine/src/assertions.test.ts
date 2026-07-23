@@ -42,6 +42,19 @@ describe("evaluateAssertion — declarative operators", () => {
     );
   });
 
+  it("matches fails (not throws) on an invalid regex", () => {
+    expect(evaluateAssertion({ path: "body.token", op: "matches", value: "[" }, response).ok).toBe(
+      false,
+    );
+  });
+
+  it("gt / lt fail when a side is not numeric", () => {
+    expect(evaluateAssertion({ path: "body.token", op: "gt", value: 2 }, response).ok).toBe(false);
+    expect(evaluateAssertion({ path: "body.count", op: "lt", value: "x" }, response).ok).toBe(
+      false,
+    );
+  });
+
   it("isString / isNumber check types", () => {
     expect(evaluateAssertion({ path: "body.token", op: "isString" }, response).ok).toBe(true);
     expect(evaluateAssertion({ path: "body.count", op: "isNumber" }, response).ok).toBe(true);

@@ -16,7 +16,13 @@ import { deepEqual, getByPath } from "./util";
  * engine executes directly against the response `{ status, headers, body }`.
  */
 
-function applyOp(op: AssertionOp, actual: unknown, expected: unknown): boolean {
+// `jsonpath` is excluded: it needs the whole response, so it is handled in
+// `evaluateAssertion` before `applyOp`, which only ever sees a resolved scalar.
+function applyOp(
+  op: Exclude<AssertionOp, "jsonpath">,
+  actual: unknown,
+  expected: unknown,
+): boolean {
   switch (op) {
     case "eq":
       return deepEqual(actual, expected);
@@ -45,8 +51,6 @@ function applyOp(op: AssertionOp, actual: unknown, expected: unknown): boolean {
       return typeof actual === "number";
     case "jsonSchema":
       return matchesJsonSchema(expected, actual);
-    case "jsonpath":
-      return false; // handled before applyOp (needs the whole response, not a scalar)
   }
 }
 
