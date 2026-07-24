@@ -27,14 +27,15 @@ Handoff notes for `✅ done` phases live in `docs/phases/P<n>.md` — read one *
 phase revisits that work. **Never let `PROGRESS.md` grow past 150 lines**: it is read in full every
 session and is the largest fixed context cost of a session start.
 
-**Current state:** P0–P8 done; P9 (prompts + Insomnia migration) next. `@atp/schema`,
+**Current state:** P0–P9 done; P10 (auth + observability) next. `@atp/schema`,
 `@atp/engine`, `@atp/reporting`, `@atp/store`, `@atp/cli`, `@atp/mcp-server`, and `tools/compile`
 are implemented, with a sample corpus in `tests/`. The MCP server has a stateless **sync** surface
 (`pnpm dev:server`) and, when a run database is configured, an **async** surface: `run_suite` (an
 SEP-1686 MCP Task), `run_selection`, and the `get_run`/`get_run_result`/`cancel_run` mirror tools,
-executed by a separate worker (`pnpm dev:worker`). DB-backed tests gate on `ATP_TEST_DATABASE_URL`
-(see `docker-compose.dev.yml`) and skip without it — the ~36 skips in a local `pnpm test` are
-expected, not a regression.
+executed by a separate worker (`pnpm dev:worker`). It also exposes the five workflow **prompts**
+(§8.3) and the `atp import` Insomnia scaffolder (see *MCP surface & agent recipes* below).
+DB-backed tests gate on `ATP_TEST_DATABASE_URL` (see `docker-compose.dev.yml`) and skip without
+it — the ~37 skips in a local `pnpm test` are expected, not a regression.
 
 **Two-process local dev (async runs).** Async execution needs a durable queue, so bring up
 Postgres and run the server and worker as two processes sharing one `DATABASE_URL`:
@@ -59,6 +60,7 @@ pnpm test                    # vitest run, full reporter — use when something 
 pnpm format                  # prettier --write .   (Markdown is intentionally excluded)
 pnpm compile                 # discovery → dist/manifest.json
 pnpm atp list|run|validate   # local dev CLI over the tests/ corpus (P4)
+pnpm atp import <file.yaml>  # scaffold defineTest/defineSuite drafts + MIGRATION.md from Insomnia v5 (P9)
 pnpm dev:server              # MCP HTTP surface (needs DATABASE_URL for the async path)
 pnpm dev:worker              # async run worker (requires DATABASE_URL)
 ```
@@ -83,6 +85,37 @@ in dev/test. To add a cross-package dependency, add `"@atp/x": "workspace:*"` to
 
 Per-package detail (representation model, execution model, template scopes, store test gating, MCP
 statelessness) lives in `.claude/rules/*.md` and loads automatically when you open a file it covers.
+
+## MCP surface & agent recipes
+
+The surface is small and fixed — tests are *data*, so authoring a new test never needs a new tool.
+
+**Tools.** `list_tests` (catalog query) · `describe_test` (one entry's node graph + params schema) ·
+`run_test` (sync verdict; auto-tasks a long-running test) · `get_report {runId, format}` (re-render a
+stored run: md/html/junit/json/summary) · `list_runs` (history). *Async surface (needs a run db):*
+`run_suite` (SEP-1686 Task) · `run_selection {tags}` (batch) · `get_run`/`get_run_result`/`cancel_run`
+(mirror tools that observe the same durable state as the Task).
+
+**Prompts** (`packages/mcp-server/src/prompts/`, always registered — §8.3): `import_insomnia_collection`
+· `author_new_test` · `triage_failure` · `generate_suite` · `regenerate_reports`. Each renders a
+concrete instruction template over the real tools/CLI; edit the template, not each caller's prompt.
+
+**Resources** (`resources.ts`): `test://catalog` (the manifest) · `test://{id}` (one normalized
+entry) · `run://{runId}/report.md` · `run://{runId}/trace.json`.
+
+**Recipes** (the workflows the prompts encode):
+- *Add a test* → `author_new_test`: new `tests/<domain>/<name>.test.ts`, unique dotted id, Zod
+  `params`, declarative asserts; `pnpm compile` + `pnpm typecheck`, then `run_test`.
+- *Edit a test* → change the `*.test.ts` declaratively; `tsc` + compile catch regressions.
+- *Compose a suite* → `generate_suite`: reuse first (`list_tests` → `useTest`/`useStep`), explicit
+  `needs`, `{{nodes.X.var}}` across branches.
+- *Migrate from Insomnia* → `atp import <file.yaml>` scaffolds drafts + `MIGRATION.md`; the
+  `import_insomnia_collection` prompt drives wiring the `__TODO_CHAIN__` response-refs + golden-master
+  parity assertions (`goldenAssertions`, §19). Deterministic transform in `packages/cli/src/import.ts`.
+- *Triage a failure* → `triage_failure {runId}`: `get_report` + `run://{id}/trace.json` → hypothesis
+  (auth vs schema-drift vs timeout) → fix or quarantine → re-run.
+- *Regenerate reports* → `regenerate_reports {format}`: `list_runs` → `get_report {runId, format}` per
+  run (pure re-render of stored `ExecutionResult`s; nothing re-executes).
 
 ## Invariants
 

@@ -27,29 +27,13 @@
 | P6 | Store — Postgres record + queue + artifacts | ✅ | 2026-07-23 | ✅ | [phases/P6.md](./phases/P6.md) |
 | P7 | MCP server — sync surface | ✅ | 2026-07-24 | ✅ | [phases/P7.md](./phases/P7.md) |
 | P8 | Worker + MCP Tasks — async lifecycle | ✅ | 2026-07-24 | ✅ | [phases/P8.md](./phases/P8.md) |
-| P9 | Prompts + Insomnia migration | ⬜ | — | — | ← **current** |
-| P10 | AuthN/Z + observability | ⬜ | — | — | |
+| P9 | Prompts + Insomnia migration | ✅ | 2026-07-24 | ✅ | [phases/P9.md](./phases/P9.md) |
+| P10 | AuthN/Z + observability | ⬜ | — | — | ← **current** |
 | P11 | CDK infra + DynamoDB adapter | ⬜ | — | — | |
 
 ---
 
 ## Current phase
-
-### P9 — Prompts + migration
-- [ ] Prompts: `import_insomnia_collection` `author_new_test` `triage_failure` `generate_suite` `regenerate_reports`
-- [ ] `atp import` deterministic scaffolder (§13.1 mapping) + fixture tests
-- [ ] Golden-master parity helper
-- [ ] `MIGRATION.md` template; `regenerate_reports` impl
-- [ ] `CLAUDE.md` finalized (recipes + full surface reference)
-
-**Handoff notes:** _none yet_
-
-**Entering P9, read:** plan §P9 · research §13 (all), §19 (all), §8.3 · [docs/deferred.md](./deferred.md) ·
-[phases/P8.md](./phases/P8.md) for the exact next step + the full async tool/prompt surface P9 documents.
-
----
-
-## Upcoming phases
 
 ### P10 — Auth + observability
 - [ ] OAuth 2.1 (`jose`, RFC 9728/8707), `test:read`/`test:run` scopes, dev-off flag
@@ -58,6 +42,17 @@
 - [ ] OTel tracing (MCP call → run → SUT call spans)
 - [ ] Metrics incl. `queue_depth` for autoscaling
 - [ ] Tests: scope rejection, audit rows, correlation ids
+
+**Handoff notes:** _none yet_
+
+**Entering P10, read:** plan §P10 · research §15 (all), ADR-007, §2.4 (auth capabilities), §8.1 ·
+[docs/deferred.md](./deferred.md) · [phases/P9.md](./phases/P9.md) for the finished agent-facing
+surface (tools/prompts/resources) auth now gates, and [phases/P8.md](./phases/P8.md) for the async
+lifecycle whose run-invoking calls need audit rows + correlation ids.
+
+---
+
+## Upcoming phases
 
 ### P11 — Infra + DynamoDB
 - [ ] Dockerfile (MODE=server|worker, tini, graceful shutdown)

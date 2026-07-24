@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ServerContext } from "./context";
+import { registerPrompts } from "./prompts";
 import { registerResources } from "./resources";
 import { SdkTaskStore } from "./sdk-tasks";
 import {
@@ -47,6 +48,7 @@ export function buildMcpServer(ctx: ServerContext): McpServer {
   registerGetReport(server, ctx);
   registerListRuns(server, ctx);
   registerResources(server, ctx);
+  registerPrompts(server);
   if (asyncEnabled) {
     registerRunSuite(server, ctx);
     registerRunSelection(server, ctx);

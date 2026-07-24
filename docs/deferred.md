@@ -69,6 +69,18 @@ doing them out of order.
   `catalog_entries` row per entry), called by `mcp-server` `main.ts` at boot when a db is
   configured. pg-gated tests (`manifests.test.ts`) skip offline — **not yet run against a live
   Postgres**; verify under `ATP_TEST_DATABASE_URL`.
+- **Golden-master live-capture CLI (from P9) → when a real migration needs it:** `goldenAssertions`/
+  `renderAssertions` (`packages/cli/src/golden.ts`) are the pure core (baseline response → parity
+  assertions), but nothing *captures* a live baseline yet. Wire an `atp golden <id>` command that runs
+  the migrated entry once against the SUT, feeds the recorded (redacted) response through
+  `goldenAssertions`, and prints/patches the `assert` block — the §19 step-4 "run once via Inso" step,
+  as a first-class CLI. The `import_insomnia_collection` prompt currently tells the agent to do this
+  by hand (`atp run <id>` → add assertions).
+- **Importer: per-request env override + params vs env split (from P9) → if a migration needs it:**
+  `atp import` maps every `{{ _.x }}` to `{{env.x}}` against a single collection-level environment and
+  ignores Insomnia sub-environments; it never emits a Zod `params` builder (auth tokens are the only
+  `{{secrets.*}}`). Fine for the common case; revisit (sub-env → per-cell env or `params`) if a real
+  collection leans on sub-environments or request-scoped variables.
 - **Migrations dir must be copied on `tsc` build (from P6) → P11:** `migrate()` resolves
   `db/migrations/*.sql` relative to `import.meta.url`, which works under `tsx`/`vitest` (no
   build). The P11 container build (`tsc` emit to `dist/`) must copy the `migrations` dir into
