@@ -17,7 +17,8 @@
     "test:quiet": "vitest run --reporter=dot",
     "compile": "tsx tools/compile/src/index.ts",
     "atp": "tsx packages/cli/src/index.ts",
-    "dev:server": "tsx watch packages/mcp-server/src/main.ts"
+    "dev:server": "tsx watch packages/mcp-server/src/main.ts",
+    "dev:worker": "tsx watch packages/mcp-server/src/main-worker.ts"
   },
   "devDependencies": {
     "@atp/engine": "workspace:*",

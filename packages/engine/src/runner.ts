@@ -38,6 +38,16 @@ import { createRunContext, resolveTemplates } from "./variables";
  * a single cell — `opts.matrix` populates `{{matrix.*}}` and selects the per-cell env.
  */
 
+/** A single k/n progress tick emitted as a node/step settles (research §11.2). */
+export interface ProgressUpdate {
+  /** Settled nodes so far (1-based; reaches `total` when the run finishes). */
+  completed: number;
+  /** Total nodes/steps in the plan. */
+  total: number;
+  /** The id of the node/step that just settled. */
+  nodeId: string;
+}
+
 /** Options common to both drivers (single test and suite). */
 export interface RunOptionsBase {
   env?: Record<string, unknown>;
@@ -49,6 +59,10 @@ export interface RunOptionsBase {
    *  Use `expandUnits` to enumerate a matrixed definition's cells. */
   matrix?: Record<string, unknown>;
   signal?: AbortSignal;
+  /** Fired as each node/step settles (passed, failed, skipped, or cancelled) so a driver
+   *  can surface k/n progress — the P8 worker maps this onto task progress + MCP progress
+   *  notifications. `completed` counts settled nodes, `total` the plan size. */
+  onProgress?: (update: ProgressUpdate) => void;
   runId?: string;
   /** The executable-unit id recorded as the result's `entryId` (defaults to the
    *  test/suite id). For a matrix cell, pass the cell-addressed id, e.g.
@@ -247,23 +261,30 @@ export async function runTest(
   const secretValues = collectSecretValues(opts.secrets);
 
   const steps: StepResult[] = [];
+  const total = test.steps.length;
+  // Fire onProgress after each step settles — `completed` tracks the pushed count so a
+  // driver sees k/n advance (including the skip/cancel fill) up to `total`.
+  const settle = (result: StepResult): void => {
+    steps.push(result);
+    opts.onProgress?.({ completed: steps.length, total, nodeId: result.id });
+  };
   for (let i = 0; i < test.steps.length; i++) {
     const step = test.steps[i] as AuthoredStep;
     if (ctx.signal?.aborted) {
-      steps.push(notRunStep(step.id, "cancelled"));
+      settle(notRunStep(step.id, "cancelled"));
       continue;
     }
     const result = await runStep(step, ctx, secretValues, test.timeoutMs);
-    steps.push(result);
+    settle(result);
     if (result.status === "cancelled") {
       for (let j = i + 1; j < test.steps.length; j++)
-        steps.push(notRunStep((test.steps[j] as AuthoredStep).id, "cancelled"));
+        settle(notRunStep((test.steps[j] as AuthoredStep).id, "cancelled"));
       break;
     }
     if (result.status === "failed" || result.status === "errored") {
       // Later steps depend on this one's published vars — skip rather than cascade.
       for (let j = i + 1; j < test.steps.length; j++)
-        steps.push(notRunStep((test.steps[j] as AuthoredStep).id, "skipped"));
+        settle(notRunStep((test.steps[j] as AuthoredStep).id, "skipped"));
       break;
     }
   }
@@ -330,11 +351,19 @@ function scheduleNodes(
   baseCtx: RunContext,
   secretValues: string[],
   concurrency: number,
+  onProgress?: (update: ProgressUpdate) => void,
 ): Promise<Map<string, StepResult>> {
   const results = new Map<string, StepResult>();
   // Started but maybe not settled — a node in flight must not look "settled" to its
   // dependents, so readiness keys off `results` while `started` guards against relaunch.
   const started = new Set<string>();
+
+  // Record a node's terminal result and emit a k/n progress tick (§11.2) — every settle
+  // site (ran, skipped, cancelled) goes through here so `completed` reaches `total`.
+  const settle = (nodeId: string, result: StepResult): void => {
+    results.set(nodeId, result);
+    onProgress?.({ completed: results.size, total: plan.length, nodeId });
+  };
 
   const depsSettled = (node: PlanNode): boolean => node.needs.every((d) => results.has(d));
   const depsPassed = (node: PlanNode): boolean =>
@@ -349,12 +378,12 @@ function scheduleNodes(
         // Aborting (caller cancel or run-timeout) short-circuits every remaining node.
         if (baseCtx.signal?.aborted) {
           started.add(node.id);
-          results.set(node.id, notRunStep(node.id, "cancelled"));
+          settle(node.id, notRunStep(node.id, "cancelled"));
           continue;
         }
         if (!depsPassed(node)) {
           started.add(node.id);
-          results.set(node.id, notRunStep(node.id, "skipped"));
+          settle(node.id, notRunStep(node.id, "skipped"));
           continue;
         }
         if (active >= concurrency) continue;
@@ -362,7 +391,7 @@ function scheduleNodes(
         active++;
         const nodeCtx: RunContext = { ...baseCtx, params: node.params };
         const finish = (result: StepResult): void => {
-          results.set(node.id, result);
+          settle(node.id, result);
           active--;
           pump();
         };
@@ -429,7 +458,7 @@ export async function runSuite(
   // `?? DEFAULT` doesn't guard 0 (a valid number): a 0 limit launches nothing and hangs.
   const concurrency =
     opts.concurrency && opts.concurrency > 0 ? Math.floor(opts.concurrency) : DEFAULT_CONCURRENCY;
-  const resultMap = await scheduleNodes(plan, baseCtx, secretValues, concurrency);
+  const resultMap = await scheduleNodes(plan, baseCtx, secretValues, concurrency, opts.onProgress);
   const steps = plan.map((n) => resultMap.get(n.id) as StepResult);
 
   const timedOut = timeoutSignal?.aborted === true && opts.signal?.aborted !== true;

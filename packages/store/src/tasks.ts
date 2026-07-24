@@ -22,6 +22,10 @@ export interface TaskRecord {
   cancelRequested: boolean;
   /** TTL: when the retained result expires and `deleteExpired` may reap it. */
   expiresAt: Date | null;
+  /** When the task was first created — SEP-1686 `Task.createdAt` (§11.1). */
+  createdAt: Date;
+  /** When the task row was last written — SEP-1686 `Task.lastUpdatedAt`. */
+  updatedAt: Date;
 }
 
 export interface PutTaskInput {
@@ -50,6 +54,10 @@ export interface TaskPatch {
 export interface TaskStateStore {
   /** Create or fully replace a task row. */
   put(input: PutTaskInput): Promise<TaskRecord>;
+  /** Insert-only create: returns the new row, or `null` if a task with that `runId`
+   *  already exists (leaving it untouched). The atomic primitive idempotent run
+   *  submission builds on — dedupe by the caller's idempotency key = runId. */
+  create(input: PutTaskInput): Promise<TaskRecord | null>;
   get(runId: string): Promise<TaskRecord | null>;
   /** Patch the provided fields; returns the new row, or null if the task is absent. */
   update(runId: string, patch: TaskPatch): Promise<TaskRecord | null>;
@@ -73,6 +81,8 @@ function toRecord(row: Row): TaskRecord {
     error: row.error,
     cancelRequested: row.cancelRequested,
     expiresAt: row.expiresAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -82,28 +92,42 @@ function resolveExpiry(input: Pick<PutTaskInput, "expiresAt" | "ttlMs">): Date |
   return null;
 }
 
+/** The column values a task row is written with (shared by `put` and `create`). `updatedAt`
+ *  is appended only by the upsert path; on insert the column default fills it. */
+function rowValues(input: PutTaskInput) {
+  return {
+    runId: input.runId,
+    state: input.state,
+    progressPct: input.progressPct ?? null,
+    currentNode: input.currentNode ?? null,
+    resultRef: input.resultRef ?? null,
+    error: input.error ?? null,
+    cancelRequested: input.cancelRequested ?? false,
+    expiresAt: resolveExpiry(input),
+  };
+}
+
 export class PostgresTaskStore implements TaskStateStore {
   constructor(private readonly db: Db) {}
 
   async put(input: PutTaskInput): Promise<TaskRecord> {
-    const expiresAt = resolveExpiry(input);
-    const values = {
-      runId: input.runId,
-      state: input.state,
-      progressPct: input.progressPct ?? null,
-      currentNode: input.currentNode ?? null,
-      resultRef: input.resultRef ?? null,
-      error: input.error ?? null,
-      cancelRequested: input.cancelRequested ?? false,
-      expiresAt,
-      updatedAt: sql`now()`,
-    };
+    const values = { ...rowValues(input), updatedAt: sql`now()` };
     const [row] = await this.db
       .insert(tasks)
       .values(values)
       .onConflictDoUpdate({ target: tasks.runId, set: values })
       .returning();
     return toRecord(row!);
+  }
+
+  async create(input: PutTaskInput): Promise<TaskRecord | null> {
+    const [row] = await this.db
+      .insert(tasks)
+      .values(rowValues(input))
+      // Insert-only: a runId that already exists is left untouched and yields no row.
+      .onConflictDoNothing({ target: tasks.runId })
+      .returning();
+    return row ? toRecord(row) : null;
   }
 
   async get(runId: string): Promise<TaskRecord | null> {

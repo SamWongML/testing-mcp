@@ -452,6 +452,33 @@ describe("runTest — cancellation", () => {
   });
 });
 
+describe("runTest — onProgress (P8 worker k/n progress)", () => {
+  it("fires onProgress once per executed step with completed/total and the step id", async () => {
+    const pool = agent.get("https://api.example.com");
+    pool.intercept({ path: "/one", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
+    pool.intercept({ path: "/two", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
+
+    const test = defineTest({
+      id: "two-step",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      steps: [
+        { id: "one", request: { method: "GET", url: "{{env.baseUrl}}/one" } },
+        { id: "two", request: { method: "GET", url: "{{env.baseUrl}}/two" } },
+      ],
+    });
+
+    const updates: { completed: number; total: number; nodeId: string }[] = [];
+    const result = await runTest(test, { onProgress: (u) => updates.push(u) });
+
+    expect(result.status).toBe("passed");
+    expect(updates).toEqual([
+      { completed: 1, total: 2, nodeId: "one" },
+      { completed: 2, total: 2, nodeId: "two" },
+    ]);
+  });
+});
+
 describe("runTest — matrix cell execution (§7.3)", () => {
   it("runs one cell with {{matrix.*}} populated and the per-cell env applied", async () => {
     agent

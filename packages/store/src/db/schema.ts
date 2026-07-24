@@ -123,5 +123,6 @@ export const tasks = pgTable("tasks", {
   error: text("error"),
   cancelRequested: boolean("cancel_requested").notNull().default(false),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

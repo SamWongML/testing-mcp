@@ -101,24 +101,41 @@ export interface TestSut {
   close: () => Promise<void>;
 }
 
-/** A tiny mock SUT covering the routes the corpus tests hit, so an inline `run_test`
- *  executes offline. Ephemeral loopback port; inject its URL as `{{env.baseUrl}}`. */
-export function startTestSut(): Promise<TestSut> {
+export interface TestSutOptions {
+  /** When false, the ledger route never returns `settled`, so `billing.e2e-refund`'s
+   *  polling `verify` node stays in flight — the deterministic window a cancel test needs. */
+  ledgerSettles?: boolean;
+}
+
+/** A tiny mock SUT covering the routes the corpus tests + the `billing.e2e-refund` suite
+ *  hit, so an inline `run_test` or a worker-run suite executes offline. Ephemeral loopback
+ *  port; inject its URL as `{{env.baseUrl}}`. */
+export function startTestSut(opts: TestSutOptions = {}): Promise<TestSut> {
+  const ledgerSettles = opts.ledgerSettles ?? true;
   const server: Server = createServer((req, res) => {
     req.resume();
     req.on("end", () => {
+      const method = req.method ?? "GET";
       const { pathname } = new URL(req.url ?? "/", "http://127.0.0.1");
       const send = (status: number, body: unknown): void => {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(JSON.stringify(body));
       };
-      if (req.method === "POST" && pathname === "/auth/login") {
+      const seg = pathname.split("/").filter(Boolean);
+      if (method === "POST" && pathname === "/auth/login") {
         send(200, { token: "tok-abc123", user: { id: "user-1" }, expiresIn: 3600 });
-      } else if (req.method === "GET" && pathname.startsWith("/invoices/")) {
-        const id = pathname.slice("/invoices/".length);
-        send(200, { id, amount: 4200, currency: "usd", status: "paid" });
+      } else if (method === "GET" && seg[0] === "invoices") {
+        send(200, { id: seg[1], amount: 4200, currency: "usd", status: "paid" });
+      } else if (method === "POST" && pathname === "/orders") {
+        send(201, { orderId: "order-1", paymentId: "pay-1" });
+      } else if (method === "POST" && seg[0] === "payments" && seg[2] === "capture") {
+        send(200, { paymentId: seg[1], status: "captured" });
+      } else if (method === "POST" && seg[0] === "payments" && seg[2] === "refund") {
+        send(202, { id: "refund-1", paymentId: seg[1], status: "pending" });
+      } else if (method === "GET" && seg[0] === "ledger" && seg[1] === "refunds") {
+        send(200, { refundId: seg[2], status: ledgerSettles ? "settled" : "pending" });
       } else {
-        send(404, { error: `no route for ${req.method} ${pathname}` });
+        send(404, { error: `no route for ${method} ${pathname}` });
       }
     });
   });

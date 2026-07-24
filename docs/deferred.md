@@ -25,14 +25,40 @@ doing them out of order.
   top-level authored object (it validates per-node + matrix + the emitted entry, not e.g.
   duplicate matrix **values** → duplicate cell ids). Consider a top-level authored parse if a
   gap bites.
-- **Per-node params representation for P4 (from P3 review):** the engine's runtime
-  `PlanNode` carries a per-node `params` bag, but the normalized `suiteNodeSchema`
+- **Per-node params representation for P4 (from P3 review) — still open after P8:** the engine's
+  runtime `PlanNode` carries a per-node `params` bag, but the normalized `suiteNodeSchema`
   (= `stepSchema`) has no `params` field and `AuthoredSuite` has no `params` builder.
-  So (a) `run_suite {params}` (research §8.2) has no wiring into individual nodes yet,
-  and (b) P4's compile step must decide how each node's resolved `params`/`with`
-  bindings land in the *serializable* manifest — most likely by resolving `{{params.*}}`
-  into the node's request templates at normalize time (baking), since the manifest
-  carries no params builder. Settle this before the compile step hard-codes an assumption.
+  **P8 update:** `run_suite`/`run_selection` now *accept* a `params` input (and `executeEntry`
+  passes it to `runTest`), but `runSuite` has no `params` option, so **suite-level `params` are
+  currently silently ignored for suites** — only single-test runs honor them. Wiring suite-level
+  params into individual nodes (baking `{{params.*}}` at normalize time, since the manifest
+  carries no params builder) is still unbuilt; close it when a suite actually needs run-time
+  params. `run_test` (single test) params work end-to-end.
+- **`TaskStateStore` grew in P8 → P11 `DynamoTaskStore` must match:** the interface the P11
+  Dynamo adapter implements now also has `create()` (insert-only, `attribute_not_exists(run_id)`
+  in Dynamo terms) and `TaskRecord` carries `createdAt`/`updatedAt`; the `tasks` table gained a
+  `created_at` column. P11's `idempotency` table (§16.2) can replace the stage-1
+  "idempotency-key == runId" dedupe that `submitRun` uses today.
+- **Two P8 review notes (from P8 re-review) → future session, not defects:** (a) the
+  trace-less branch of `SdkTaskStore.getTaskResult` (cancelled/failed task fetched via the raw
+  SEP-1686 `tasks/result` call) is only covered indirectly — via `getRunResult`'s direct tests
+  and the happy-path `callToolStream` — because `callToolStream` only fetches `tasks/result` on
+  `completed`; add a test that calls `client.experimental.tasks.getTaskResult()` on a
+  non-passed task if a client ever depends on it. (b) `run_selection` fans out submits with
+  `Promise.all`; a very large tag match opens more concurrent transactions than the pg pool
+  `max` (they queue, not fail) — bound the concurrency if selections ever get large.
+- **Task-row TTL sweep not scheduled (from P8) → P10/P11 operational:** `PostgresTaskStore`
+  sets `expiresAt` and implements `deleteExpired()` (the SEP-1686 "results retained for a
+  server-defined duration" GC), but **nothing calls it yet**, so terminal `tasks` rows accumulate
+  forever. Wire a periodic sweep into the worker loop (or a scheduled job) when adding operational
+  hardening; it's a background-GC concern, not a P8 exit-criteria item.
+- **SDK Tasks augmentation scope (from P8) → revisit if a client needs it:** only `run_suite` is
+  task-augmented (`registerToolTask`, `taskSupport:'required'`). `run_selection` (batch) and
+  `run_test`'s long-running auto-task use the plain durable path (poll via the mirror tools).
+  The server advertises only `tasks:{cancel,requests:{tools:{call}}}` — `list` is **not**
+  advertised and `SdkTaskStore.listTasks` returns `[]`; implement real listing + the `list`
+  capability if an agent needs task enumeration. The SDK API is experimental ("may change
+  without notice") — re-verify against the installed source on the next SDK bump.
 - **S3ArtifactStore (from P6) → P11:** the `ArtifactStore` interface + `LocalArtifactStore`
   landed in P6; the S3 implementation (`@aws-sdk/client-s3` put/get + presigned URLs via
   `@aws-sdk/s3-request-presigner`) is deferred to P11 (the AWS phase), behind the same

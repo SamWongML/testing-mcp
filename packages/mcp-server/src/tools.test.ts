@@ -164,7 +164,10 @@ describe("run_test", () => {
     expect(JSON.stringify(res.content).toLowerCase()).toContain("suite");
   });
 
-  it("rejects long-running tests — they exceed the sync budget (async path is P8)", async () => {
+  it("auto-tasks long-running tests, but errors without a run database (async needs durable state)", async () => {
+    // No db is configured here, so the auto-task path can't enqueue — run_test surfaces a
+    // clear error pointing at the async/database requirement (the enqueue path itself is
+    // covered end-to-end by the pg-gated async-lifecycle suite).
     const base = await makeTestContext();
     const manifest = {
       ...base.manifest,
@@ -178,7 +181,9 @@ describe("run_test", () => {
       arguments: { id: "identity.login", env: { baseUrl: sut.url } },
     });
     expect(res.isError).toBe(true);
-    expect(JSON.stringify(res.content).toLowerCase()).toContain("long-running");
+    const msg = JSON.stringify(res.content).toLowerCase();
+    expect(msg).toContain("long-running");
+    expect(msg).toContain("database");
     await c.close();
   });
 });

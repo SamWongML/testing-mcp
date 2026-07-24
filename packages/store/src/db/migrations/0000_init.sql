@@ -87,5 +87,6 @@ CREATE TABLE tasks (
   error            text,
   cancel_requested boolean NOT NULL DEFAULT false,
   expires_at       timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
