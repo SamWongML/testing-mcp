@@ -7,3 +7,4 @@ export * from "./queue";
 export * from "./tasks";
 export * from "./artifacts";
 export * from "./runs";
+export * from "./manifests";

@@ -21,9 +21,10 @@ The platform is built in sequential phases (P0–P11) tracked in `docs/PROGRESS.
    `PROGRESS.md`; don't do it now.
 5. Update `docs/PROGRESS.md` (status, checklist, handoff notes), then commit and push.
 
-**Current state:** P0–P6 done; P7 (MCP server — stateless sync surface) next.
-`@atp/schema`, `@atp/engine`, `@atp/reporting`, `@atp/store`, `@atp/cli`, and `tools/compile`
-are implemented, and a sample corpus lives in `tests/`; `mcp-server` is still a one-line stub.
+**Current state:** P0–P7 done; P8 (worker + MCP Tasks — async lifecycle) next.
+`@atp/schema`, `@atp/engine`, `@atp/reporting`, `@atp/store`, `@atp/cli`, `@atp/mcp-server`
+(stateless sync surface — `pnpm dev:server`), and `tools/compile` are implemented, and a
+sample corpus lives in `tests/`.
 `@atp/store` needs Postgres for its integration tests — they gate on `ATP_TEST_DATABASE_URL`
 (see `docker-compose.dev.yml`) and skip without it, so `pnpm test` stays green offline.
 

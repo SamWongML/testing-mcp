@@ -15,7 +15,8 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "compile": "tsx tools/compile/src/index.ts",
-    "atp": "tsx packages/cli/src/index.ts"
+    "atp": "tsx packages/cli/src/index.ts",
+    "dev:server": "tsx watch packages/mcp-server/src/main.ts"
   },
   "devDependencies": {
     "@atp/engine": "workspace:*",

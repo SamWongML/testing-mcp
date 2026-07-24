@@ -10,5 +10,19 @@
     }
   },
   "main": "./src/index.ts",
-  "types": "./src/index.ts"
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run --root ../.. packages/mcp-server/"
+  },
+  "dependencies": {
+    "@atp/compile": "workspace:*",
+    "@atp/engine": "workspace:*",
+    "@atp/reporting": "workspace:*",
+    "@atp/schema": "workspace:*",
+    "@atp/store": "workspace:*",
+    "@hono/node-server": "^1.19.9",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "hono": "^4.11.4",
+    "zod": "^4.0.0"
+  }
 }
