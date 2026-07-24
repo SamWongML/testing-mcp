@@ -18,6 +18,16 @@ function userPrompt(text: string): GetPromptResult {
   return { messages: [{ role: "user", content: { type: "text", text } }] };
 }
 
+/** A `list_tests` example clause from a comma-separated tags arg, or "" when none was given. */
+function tagsHint(tags: string | undefined): string {
+  if (!tags?.trim()) return "";
+  const arr = tags
+    .split(",")
+    .map((t) => JSON.stringify(t.trim()))
+    .join(", ");
+  return ` (e.g. \`{ tags: [${arr}] }\`)`;
+}
+
 /** `import_insomnia_collection` — Insomnia YAML → compiling `defineTest`/`defineSuite` drafts. */
 function registerImportInsomnia(server: McpServer): void {
   server.registerPrompt(
@@ -127,14 +137,7 @@ function registerGenerateSuite(server: McpServer): void {
       userPrompt(
         `Compose a suite for: ${goal} (research §7.2, §12).
 
-1. Reuse first (this is mandatory — do not copy-paste request logic): call \`list_tests\`${
-          tags
-            ? ` (e.g. \`{ tags: [${tags
-                .split(",")
-                .map((t) => JSON.stringify(t.trim()))
-                .join(", ")}] }\`)`
-            : ""
-        } to find existing tests/steps that cover parts of the scenario. Inspect candidates with \`describe_test\`.
+1. Reuse first (this is mandatory — do not copy-paste request logic): call \`list_tests\`${tagsHint(tags)} to find existing tests/steps that cover parts of the scenario. Inspect candidates with \`describe_test\`.
 2. Create \`tests/<domain>/<name>.suite.ts\` exporting \`export default defineSuite({ ... })\`. Compose existing pieces by reference — \`useTest(loginTest, { params })\` for a whole test, \`useStep(sharedStep, { with })\` for a shared step — and only write an inline node for genuinely new requests.
 3. Make the DAG explicit with \`needs\`; publish values with \`extract\` and address them downstream as \`{{nodes.<id>.<var>}}\` (reliable across parallel branches, unlike \`{{vars.*}}\`). Use \`poll: { untilAssertPasses: true, ... }\` for eventual consistency.
 4. Gate: \`pnpm compile\` + \`pnpm typecheck\`. A suite whose \`timeoutMs\` exceeds 30s is long-running and runs via \`run_suite\` (an async MCP Task).`,
