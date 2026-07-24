@@ -27,11 +27,26 @@ Handoff notes for `✅ done` phases live in `docs/phases/P<n>.md` — read one *
 phase revisits that work. **Never let `PROGRESS.md` grow past 150 lines**: it is read in full every
 session and is the largest fixed context cost of a session start.
 
-**Current state:** P0–P7 done; P8 (worker + MCP Tasks — async lifecycle) next. `@atp/schema`,
-`@atp/engine`, `@atp/reporting`, `@atp/store`, `@atp/cli`, `@atp/mcp-server` (stateless sync surface
-— `pnpm dev:server`), and `tools/compile` are implemented, with a sample corpus in `tests/`.
-`@atp/store`'s integration tests gate on `ATP_TEST_DATABASE_URL` (see `docker-compose.dev.yml`) and
-skip without it — the 27 skips in a local `pnpm test` are expected, not a regression.
+**Current state:** P0–P8 done; P9 (prompts + Insomnia migration) next. `@atp/schema`,
+`@atp/engine`, `@atp/reporting`, `@atp/store`, `@atp/cli`, `@atp/mcp-server`, and `tools/compile`
+are implemented, with a sample corpus in `tests/`. The MCP server has a stateless **sync** surface
+(`pnpm dev:server`) and, when a run database is configured, an **async** surface: `run_suite` (an
+SEP-1686 MCP Task), `run_selection`, and the `get_run`/`get_run_result`/`cancel_run` mirror tools,
+executed by a separate worker (`pnpm dev:worker`). DB-backed tests gate on `ATP_TEST_DATABASE_URL`
+(see `docker-compose.dev.yml`) and skip without it — the ~36 skips in a local `pnpm test` are
+expected, not a regression.
+
+**Two-process local dev (async runs).** Async execution needs a durable queue, so bring up
+Postgres and run the server and worker as two processes sharing one `DATABASE_URL`:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d                        # Postgres 16
+export DATABASE_URL=postgresql://atp:atp@localhost:5432/atp
+pnpm dev:server   # terminal 1 — MCP HTTP surface (enqueues async runs, serves tasks/*)
+pnpm dev:worker   # terminal 2 — claims jobs, runs the engine, drives task state
+```
+
+Without `DATABASE_URL` the server is synchronous-only (P7 surface) and `pnpm dev:worker` fails fast.
 
 ## Commands
 
@@ -44,6 +59,8 @@ pnpm test                    # vitest run, full reporter — use when something 
 pnpm format                  # prettier --write .   (Markdown is intentionally excluded)
 pnpm compile                 # discovery → dist/manifest.json
 pnpm atp list|run|validate   # local dev CLI over the tests/ corpus (P4)
+pnpm dev:server              # MCP HTTP surface (needs DATABASE_URL for the async path)
+pnpm dev:worker              # async run worker (requires DATABASE_URL)
 ```
 
 CI (`.github/workflows/ci.yml`) runs — and must stay green on — install → typecheck → lint → test.

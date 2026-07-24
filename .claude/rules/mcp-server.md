@@ -20,12 +20,23 @@ paths:
 
 - `context.ts` — `ServerContext`, the composition root (manifest, sourceRoot, artifacts,
   artifactEnv, optional `db`, optional `auth`). Injected, never per-request.
-- `server.ts` — `buildMcpServer(ctx)`: pure/stateless registration of tools + resources.
-- `tools.ts`, `resources.ts` — the surface itself.
+- `server.ts` — `buildMcpServer(ctx)`: pure/stateless registration of tools + resources;
+  enables the async task surface + `SdkTaskStore` + Tasks capability when `ctx.db` is present.
+- `tools.ts`, `resources.ts` — the sync surface itself.
+- `execute.ts` — `executeEntry`: the shared test/suite executor (signal + `onProgress` +
+  `runId`) used by both the inline `run_test` and the worker.
+- `tasks.ts` — async lifecycle glue over the P6 queue + `PostgresTaskStore`: `submitRun`
+  (atomic create-task + enqueue, idempotent), `getRun`/`getRunResult`/`cancelRun`.
+- `worker.ts` — the `MODE=worker` claim→execute→reap loop (`pnpm dev:worker`).
+- `sdk-tasks.ts` — `SdkTaskStore`: bridges the experimental MCP Tasks protocol onto the same
+  durable rows (keyed `runId == taskId`).
+- `task-tools.ts` — `run_suite` (task-augmented) + `run_selection` + the
+  `get_run`/`get_run_result`/`cancel_run` mirror tools.
 - `bootstrap.ts` — `buildContext(config)`: manifest from `MANIFEST_PATH` (schema-validated)
-  else `compile({ root: TESTS_ROOT })`. **Does not create the db** — `main.ts` injects it, so
-  `buildContext` stays offline and free of pool lifecycle (mirrors the test DI seam).
-- `main.ts` — `MODE=server` entrypoint (`pnpm dev:server`, `tsx watch`).
+  else `compile({ root: TESTS_ROOT })`. **Does not create the db** — `main.ts`/`main-worker.ts`
+  inject it, so `buildContext` stays offline and free of pool lifecycle (mirrors the test seam).
+- `main.ts` / `main-worker.ts` — `MODE=server` / `MODE=worker` entrypoints
+  (`pnpm dev:server` / `pnpm dev:worker`, `tsx watch`).
 - `testkit.ts` — shared test seam: `makeTestContext`, `connectClient` (in-memory transport
   pair), `startHttpServer`, `startTestSut`, `makeTestDb`/`pgAvailable` (skips offline).
 

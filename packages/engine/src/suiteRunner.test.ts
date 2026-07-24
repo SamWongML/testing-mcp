@@ -409,6 +409,64 @@ describe("runSuite — concurrency, skip cascade & redaction", () => {
   });
 });
 
+describe("runSuite — onProgress (P8 worker k/n progress)", () => {
+  it("fires onProgress once per settled node with monotonic completed/total and the node id", async () => {
+    const pool = agent.get("https://api.example.com");
+    pool.intercept({ path: "/a", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
+    pool.intercept({ path: "/b", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
+    pool.intercept({ path: "/c", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
+
+    const suite = defineSuite({
+      id: "progress-chain",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      nodes: {
+        a: { request: { method: "GET", url: "{{env.baseUrl}}/a" } },
+        b: { needs: ["a"], request: { method: "GET", url: "{{env.baseUrl}}/b" } },
+        c: { needs: ["b"], request: { method: "GET", url: "{{env.baseUrl}}/c" } },
+      },
+    });
+
+    const updates: { completed: number; total: number; nodeId: string }[] = [];
+    const result = await runSuite(suite, { onProgress: (u) => updates.push(u) });
+
+    expect(result.status).toBe("passed");
+    // One callback per node, in dependency order, each carrying the total and a rising count.
+    expect(updates).toEqual([
+      { completed: 1, total: 3, nodeId: "a" },
+      { completed: 2, total: 3, nodeId: "b" },
+      { completed: 3, total: 3, nodeId: "c" },
+    ]);
+  });
+
+  it("reports progress for skipped nodes too, so the count always reaches total", async () => {
+    const pool = agent.get("https://api.example.com");
+    pool.intercept({ path: "/a", method: "GET" }).reply(500, "boom");
+    // No intercept for /b — it depends on the failed node and is skipped, not requested.
+
+    const suite = defineSuite({
+      id: "progress-skip",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      nodes: {
+        a: {
+          request: { method: "GET", url: "{{env.baseUrl}}/a" },
+          assert: [{ path: "status", op: "eq", value: 200 }],
+        },
+        b: { needs: ["a"], request: { method: "GET", url: "{{env.baseUrl}}/b" } },
+      },
+    });
+
+    const updates: { completed: number; total: number; nodeId: string }[] = [];
+    const result = await runSuite(suite, { onProgress: (u) => updates.push(u) });
+
+    expect(result.status).toBe("failed");
+    // The skipped dependent still advances progress — the worker's k/n reaches n.
+    expect(updates.map((u) => u.completed)).toEqual([1, 2]);
+    expect(updates.at(-1)).toEqual({ completed: 2, total: 2, nodeId: "b" });
+  });
+});
+
 describe("runSuite — matrix cell execution (§7.3)", () => {
   it("populates {{matrix.*}} across suite nodes and applies the per-cell env", async () => {
     agent

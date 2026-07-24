@@ -30,6 +30,22 @@ describe.skipIf(!pgAvailable)("PostgresTaskStore", () => {
     expect(await store.get("nope")).toBeNull();
   });
 
+  it("records createdAt on put and exposes it via get", async () => {
+    await store.put({ runId: "r1", state: "working" });
+    expect((await store.get("r1"))?.createdAt).toBeInstanceOf(Date);
+  });
+
+  it("create inserts once and returns null on a duplicate runId (idempotency primitive)", async () => {
+    const first = await store.create({ runId: "r1", state: "working", ttlMs: 60_000 });
+    expect(first).toMatchObject({ runId: "r1", state: "working" });
+    expect(first?.createdAt).toBeInstanceOf(Date);
+
+    // A second create for the same runId is a no-op → null, and must not disturb the row.
+    const dup = await store.create({ runId: "r1", state: "failed", error: "should not apply" });
+    expect(dup).toBeNull();
+    expect(await store.get("r1")).toMatchObject({ state: "working", error: null });
+  });
+
   it("put upserts (replaces) an existing task", async () => {
     await store.put({ runId: "r1", state: "working", progressPct: 10, currentNode: "a" });
     await store.put({ runId: "r1", state: "completed", resultRef: "run://r1/trace.json" });

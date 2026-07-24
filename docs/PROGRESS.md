@@ -26,8 +26,8 @@
 | P5 | Reporting renderers | ✅ | 2026-07-23 | ✅ | [phases/P5.md](./phases/P5.md) |
 | P6 | Store — Postgres record + queue + artifacts | ✅ | 2026-07-23 | ✅ | [phases/P6.md](./phases/P6.md) |
 | P7 | MCP server — sync surface | ✅ | 2026-07-24 | ✅ | [phases/P7.md](./phases/P7.md) |
-| P8 | Worker + MCP Tasks — async lifecycle | ⬜ | — | — | ← **current** |
-| P9 | Prompts + Insomnia migration | ⬜ | — | — | |
+| P8 | Worker + MCP Tasks — async lifecycle | ✅ | 2026-07-24 | ✅ | [phases/P8.md](./phases/P8.md) |
+| P9 | Prompts + Insomnia migration | ⬜ | — | — | ← **current** |
 | P10 | AuthN/Z + observability | ⬜ | — | — | |
 | P11 | CDK infra + DynamoDB adapter | ⬜ | — | — | |
 
@@ -35,32 +35,21 @@
 
 ## Current phase
 
-### P8 — Worker + Tasks (async)
-- [ ] `tasks.ts` lifecycle glue (SEP-1686 mapping onto TaskStateStore + queue)
-- [ ] `worker.ts` (claim loop, heartbeat, progress, artifacts, terminal state)
-- [ ] Tools: `run_suite` `run_selection` auto-task `run_test`; `get_run` `get_run_result` `cancel_run`
-- [ ] Cancellation end-to-end (flag → AbortSignal)
-- [ ] Reaper wired; idempotency keys
-- [ ] Integration tests: complete / cancel / crash-requeue / non-Task client path
-- [ ] `pnpm dev:worker`; two-process dev flow documented
-
-**Handoff notes:** _none yet_
-
-**Entering P8, read:** plan §P8 · research §11, §8.2/§8.5, ADR-004 · [docs/deferred.md](./deferred.md)
-(it carries P2/P3 items P8 inherits) · [phases/P7.md](./phases/P7.md) for the exact next step
-left by P7. **The SDK Task API is experimental — verify it against the installed SDK source /
-Context7, not memory (§23).**
-
----
-
-## Upcoming phases
-
 ### P9 — Prompts + migration
 - [ ] Prompts: `import_insomnia_collection` `author_new_test` `triage_failure` `generate_suite` `regenerate_reports`
 - [ ] `atp import` deterministic scaffolder (§13.1 mapping) + fixture tests
 - [ ] Golden-master parity helper
 - [ ] `MIGRATION.md` template; `regenerate_reports` impl
 - [ ] `CLAUDE.md` finalized (recipes + full surface reference)
+
+**Handoff notes:** _none yet_
+
+**Entering P9, read:** plan §P9 · research §13 (all), §19 (all), §8.3 · [docs/deferred.md](./deferred.md) ·
+[phases/P8.md](./phases/P8.md) for the exact next step + the full async tool/prompt surface P9 documents.
+
+---
+
+## Upcoming phases
 
 ### P10 — Auth + observability
 - [ ] OAuth 2.1 (`jose`, RFC 9728/8707), `test:read`/`test:run` scopes, dev-off flag

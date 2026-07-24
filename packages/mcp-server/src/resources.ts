@@ -5,6 +5,7 @@ import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ServerContext } from "./context";
 import { loadTrace } from "./run-store";
+import { findEntry } from "./tools";
 
 /**
  * The read-only resource surface (research §8). Resources mirror the tools as addressable,
@@ -47,9 +48,7 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       mimeType: "application/json",
     },
     (uri, variables) => {
-      const id = scalar(variables.id);
-      const entry = ctx.manifest.entries.find((e) => e.id === id);
-      if (!entry) throw new Error(`No test or suite with id "${id}"`);
+      const entry = findEntry(ctx, scalar(variables.id));
       return jsonContents(uri, { entry });
     },
   );

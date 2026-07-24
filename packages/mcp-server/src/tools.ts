@@ -1,7 +1,3 @@
-import { resolve } from "node:path";
-
-import { importDef } from "@atp/compile";
-import { expandUnits, isSuite, runTest } from "@atp/engine";
 import { renderReport, REPORT_FORMATS, type ReportFormat } from "@atp/reporting";
 import { executionStatusSchema, type ExecutionResult, type ManifestEntry } from "@atp/schema";
 import { listRuns, type Run } from "@atp/store";
@@ -10,12 +6,14 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import type { ServerContext } from "./context";
+import { executeEntry } from "./execute";
 import { loadTrace, persistRun } from "./run-store";
+import { submitRun } from "./tasks";
 
 /** A tool result: the structured payload plus a JSON text mirror. Every tool returns
  *  both — `structuredContent` for programmatic clients, `text` for ones that only read
  *  `content` (and for our own tests, which parse either). */
-function jsonResult(payload: Record<string, unknown>): CallToolResult {
+export function jsonResult(payload: Record<string, unknown>): CallToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(payload) }],
     structuredContent: payload,
@@ -24,13 +22,13 @@ function jsonResult(payload: Record<string, unknown>): CallToolResult {
 
 /** A tool result whose primary payload is rendered text (a report), with structured
  *  metadata alongside for programmatic clients. */
-function textResult(text: string, meta: Record<string, unknown>): CallToolResult {
+export function textResult(text: string, meta: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text }], structuredContent: meta };
 }
 
 /** Look an entry up by id, throwing a client-facing error if absent. A thrown `Error`
  *  is turned by the SDK into an `isError` tool result carrying the message. */
-function findEntry(ctx: ServerContext, id: string): ManifestEntry {
+export function findEntry(ctx: ServerContext, id: string): ManifestEntry {
   const entry = ctx.manifest.entries.find((e) => e.id === id);
   if (!entry) throw new Error(`No test or suite with id "${id}"`);
   return entry;
@@ -49,6 +47,28 @@ function catalogView(entry: ManifestEntry): Record<string, unknown> {
     isLongRunning: entry.isLongRunning,
     paramsSchema: entry.paramsSchema,
   };
+}
+
+/** The catalog filter shared by `list_tests` and `run_selection`: tag/owner/kind plus a
+ *  free-text `query` over id+title. Returns matching entries, id-sorted. */
+export interface EntryFilter {
+  tags?: string[];
+  owner?: string;
+  kind?: "test" | "suite";
+  query?: string;
+}
+
+export function selectEntries(ctx: ServerContext, filter: EntryFilter): ManifestEntry[] {
+  const q = filter.query?.toLowerCase();
+  return ctx.manifest.entries
+    .filter((e) => (filter.tags ? filter.tags.every((t) => e.tags.includes(t)) : true))
+    .filter((e) => (filter.owner ? e.owner === filter.owner : true))
+    .filter((e) => (filter.kind ? e.kind === filter.kind : true))
+    .filter((e) =>
+      q ? e.id.toLowerCase().includes(q) || (e.title?.toLowerCase().includes(q) ?? false) : true,
+    )
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** `list_tests` — the catalog query. Filters the boot manifest by tag/owner/kind and a
@@ -71,19 +91,7 @@ export function registerListTests(server: McpServer, ctx: ServerContext): void {
       },
     },
     ({ tags, owner, kind, query }) => {
-      const q = query?.toLowerCase();
-      const entries = ctx.manifest.entries
-        .filter((e) => (tags ? tags.every((t) => e.tags.includes(t)) : true))
-        .filter((e) => (owner ? e.owner === owner : true))
-        .filter((e) => (kind ? e.kind === kind : true))
-        .filter((e) =>
-          q
-            ? e.id.toLowerCase().includes(q) || (e.title?.toLowerCase().includes(q) ?? false)
-            : true,
-        )
-        .slice()
-        .sort((a, b) => a.id.localeCompare(b.id))
-        .map(catalogView);
+      const entries = selectEntries(ctx, { tags, owner, kind, query }).map(catalogView);
       return jsonResult({ entries });
     },
   );
@@ -105,8 +113,9 @@ export function registerDescribeTest(server: McpServer, ctx: ServerContext): voi
 }
 
 /** The client-facing summary of a completed run — status + metrics for a verdict, plus
- *  the trace uri so the caller can fetch the full report (`get_report`, `run://` resources). */
-function runSummary(result: ExecutionResult, artifactUri: string): Record<string, unknown> {
+ *  the trace uri so the caller can fetch the full report (`get_report`, `run://` resources).
+ *  Shared by the sync `run_test` result and the async task-result payload so both match. */
+export function runSummary(result: ExecutionResult, artifactUri: string): Record<string, unknown> {
   return {
     runId: result.runId,
     entryId: result.entryId,
@@ -120,40 +129,17 @@ function runSummary(result: ExecutionResult, artifactUri: string): Record<string
   };
 }
 
-/** Import the authored definition (which carries the functions the manifest strips) and
- *  execute it in-process, merging the caller's `env` over the entry's baked-in env. */
-async function executeInline(
-  ctx: ServerContext,
-  entry: ManifestEntry,
-  args: { params?: Record<string, unknown>; env?: Record<string, string> },
-): Promise<ExecutionResult> {
-  const def = await importDef(resolve(ctx.sourceRoot, entry.sourcePath));
-  // The caller already gated on `entry.kind === "test"`; this narrows the imported union
-  // and catches a manifest/module mismatch rather than casting past it.
-  if (isSuite(def)) throw new Error(`"${entry.id}" resolved to a suite, not a test`);
-  const unit = expandUnits(def).find((u) => u.id === entry.id);
-  return runTest(def, {
-    env: { ...(unit?.env ?? {}), ...(args.env ?? {}) },
-    matrix: unit?.matrix ?? {},
-    auth: ctx.auth,
-    params: args.params,
-    entryId: entry.id,
-    envName: "mcp",
-    manifestHash: ctx.manifest.manifestHash,
-    gitSha: ctx.manifest.gitSha,
-  });
-}
-
-/** `run_test` — execute one test **synchronously** and persist its trace. Rejects suites
- *  and long-running tests: those need the asynchronous task path (P8). The caller supplies
- *  `params` and an `env` override (e.g. `baseUrl` pointing at the system under test). */
+/** `run_test` — execute one test and return its verdict. A fast test runs **synchronously**
+ *  and persists its trace; a long-running test is **auto-enqueued** as a durable async run
+ *  (returning a `runId` to poll via `get_run`/`get_run_result`). Suites always use the async
+ *  path (`run_suite`). The caller supplies `params` and an `env` override (e.g. `baseUrl`). */
 export function registerRunTest(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     "run_test",
     {
       title: "Run test",
       description:
-        "Execute a single test synchronously against the given env and return its verdict. Persists the run's trace for later reporting. Suites and long-running tests are rejected (they use the asynchronous path).",
+        "Execute a single test against the given env. Fast tests run synchronously and return a verdict; long-running tests are enqueued as an async run (poll get_run / get_run_result by the returned runId). Suites use run_suite.",
       inputSchema: {
         id: z.string().describe('The test id to run, e.g. "identity.login".'),
         params: z
@@ -169,16 +155,22 @@ export function registerRunTest(server: McpServer, ctx: ServerContext): void {
     async ({ id, params, env }) => {
       const entry = findEntry(ctx, id);
       if (entry.kind !== "test") {
-        throw new Error(
-          `"${id}" is a suite; run_test executes a single test. Suite execution is asynchronous (P8).`,
-        );
+        throw new Error(`"${id}" is a suite; use run_suite (suite execution is asynchronous).`);
       }
       if (entry.isLongRunning) {
-        throw new Error(
-          `"${id}" is long-running; run_test is the synchronous path. Long-running execution is asynchronous (P8).`,
-        );
+        // Auto-task: a long-running test is enqueued for the worker rather than blocking the
+        // request. Requires a configured run database (the async path is durable).
+        if (!ctx.db) {
+          throw new Error(
+            `"${id}" is long-running and needs the asynchronous path, which requires a configured run database (set DATABASE_URL).`,
+          );
+        }
+        const submitted = await submitRun(ctx, { entryId: id, params, env });
+        return jsonResult({
+          run: { runId: submitted.runId, state: submitted.state, async: true },
+        });
       }
-      const result = await executeInline(ctx, entry, { params, env });
+      const result = await executeEntry(ctx, entry, { params, env });
       const { traceUri } = await persistRun(ctx, result);
       return jsonResult({ run: runSummary(result, traceUri) });
     },

@@ -12,7 +12,9 @@ import { createHttpApp } from "./http";
  * builds the stateless context, optionally wires Postgres history — recording the catalog
  * snapshot at boot so run rows join back to their manifest — and serves the MCP + health
  * surface over HTTP. `tsx watch` restarts on source change, so the manifest hot-reloads in
- * dev. Async/long-running execution is the P8 worker; this surface is synchronous only.
+ * dev. When `DATABASE_URL` is set this also enables the async task surface (`run_suite`,
+ * `run_selection`, `get_run`/`get_run_result`/`cancel_run`); the runs themselves execute in
+ * the separate `pnpm dev:worker` process. Without a db, the surface is synchronous only.
  */
 async function main(): Promise<void> {
   const config = loadConfig();
