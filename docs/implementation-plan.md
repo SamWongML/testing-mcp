@@ -15,21 +15,28 @@ should complete one phase (occasionally two small adjacent ones), verify it, upd
 ## How to run a session (read this first, every session)
 
 1. **Read, in this order (and nothing else up front):**
-   - `docs/PROGRESS.md` — find the first phase not marked `done`, read its notes/handoff.
+   - `docs/PROGRESS.md` — the index. Find the current phase; its checklist and handoff
+     notes are in the file itself. It stays under 150 lines, so read it whole.
    - This file — only the section for that phase.
    - `docs/research.md` — **only the sections referenced by the phase** (listed per phase).
      Do NOT read the whole research doc; it alone is ~30k tokens.
-   - `CLAUDE.md` at repo root — the agent guide (conventions, architecture, invariants).
+   - `docs/deferred.md` — parked items a later phase inherits.
+   - `CLAUDE.md` at repo root — the agent guide (conventions, architecture, invariants);
+     it loads automatically, so don't re-read it. Per-package detail lives in
+     `.claude/rules/*.md` and loads by itself when you open a file that rule covers.
+   - `docs/phases/P<n>.md` — archived notes for a **finished** phase. Read one **only** if
+     the current phase revisits that work. These are not session-start reading.
 2. **Verify the previous phase's exit criteria still pass** (run the commands listed
    under its "Exit criteria") before building on it. If broken, fix first — that is the
    session's real starting point.
 3. **Build the phase.** Stay inside the phase's file scope. If you discover work that
-   belongs to a later phase, write a note in `PROGRESS.md` under that phase instead of
-   doing it now.
+   belongs to a later phase, park it in `docs/deferred.md` instead of doing it now.
 4. **Verify** the phase's exit criteria.
-5. **Close out:** update `PROGRESS.md` (status, checklist, handoff notes for the next
-   session), commit with a message like `P3: engine composition (DAG, suites, auth)`,
-   and `git push -u origin claude/multi-session-plan-133pzy`.
+5. **Close out:** update `docs/PROGRESS.md` (status, checklist, handoff notes for the next
+   session) and follow its *Archiving a finished phase* steps — move the completed phase's
+   notes to `docs/phases/P<n>.md` and append one row to `docs/phases/session-log.md`, so the
+   index stays flat. Then commit with a message like
+   `P3: engine composition (DAG, suites, auth)` and `git push -u origin <branch>`.
 
 **Context-budget rules of thumb**
 - Prefer `Grep`/targeted `Read` with offsets over reading whole files.
