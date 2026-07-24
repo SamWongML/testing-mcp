@@ -21,6 +21,7 @@
     "@atp/compile": "workspace:*",
     "@atp/engine": "workspace:*",
     "@atp/reporting": "workspace:*",
-    "@atp/schema": "workspace:*"
+    "@atp/schema": "workspace:*",
+    "yaml": "^2.9.0"
   }
 }

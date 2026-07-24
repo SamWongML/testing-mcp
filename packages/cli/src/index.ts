@@ -3,9 +3,12 @@ import { compileToFile, CompileError } from "@atp/compile";
 import { isReportFormat, REPORT_FORMATS } from "@atp/reporting";
 
 import { formatList, formatResult, listEntries, runById, validate, writeReport } from "./commands";
+import { writeImport } from "./import";
 
 export const CLI_PACKAGE = "@atp/cli";
 export * from "./commands";
+export * from "./golden";
+export * from "./import";
 export * from "./mock-sut";
 
 const USAGE = `atp — API testing platform CLI
@@ -15,6 +18,7 @@ Usage:
   atp list [--tags a,b] [--owner o] [--kind test|suite]
   atp run <id> [--params '<json>'] [--env name] [--report md|html|junit|json|summary] [--out path]
   atp validate                      compile in-memory; fail on any error
+  atp import <insomnia.yaml>        scaffold defineTest/defineSuite drafts + MIGRATION.md
 `;
 
 interface ParsedArgs {
@@ -70,6 +74,24 @@ export async function run(argv: string[], root: string = process.cwd()): Promise
         return 0;
       }
 
+      case "import": {
+        const yamlPath = positional[0];
+        if (!yamlPath) {
+          console.error("atp import: missing <insomnia.yaml>\n");
+          console.error(USAGE);
+          return 1;
+        }
+        const { written, mapping } = await writeImport(yamlPath, root);
+        console.log(
+          `[import] ${mapping.length} entr${mapping.length === 1 ? "y" : "ies"} → ${written.length} file(s):`,
+        );
+        for (const path of written) console.log(`  ${path}`);
+        console.log(
+          "Review the drafts (wire __TODO_CHAIN__ refs + parity assertions), then `atp compile`.",
+        );
+        return 0;
+      }
+
       case "run": {
         const id = positional[0];
         if (!id) {
@@ -78,7 +100,9 @@ export async function run(argv: string[], root: string = process.cwd()): Promise
           return 1;
         }
         if (flags.report && !isReportFormat(flags.report)) {
-          console.error(`atp run: unknown --report format "${flags.report}" (expected: ${REPORT_FORMATS.join(", ")})`);
+          console.error(
+            `atp run: unknown --report format "${flags.report}" (expected: ${REPORT_FORMATS.join(", ")})`,
+          );
           return 1;
         }
         const result = await runById(id, {

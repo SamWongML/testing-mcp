@@ -1,0 +1,68 @@
+# A representative Insomnia v5 YAML export (type: collection.insomnia.rest/5.0).
+# Exercises every branch of the `atp import` mapping (research §13.1):
+#   - a top-level request (→ defineTest) with a JSON body, headers, bearer auth,
+#     and {{ _.var }} template tags
+#   - a folder / request group (→ defineSuite) with two child requests
+#   - an environment (→ tests/_shared/env/*), auth (→ tests/_shared/auth/*)
+#   - an Insomnia response-ref tag ({% response ... %}) — the "messy remainder"
+#     the deterministic importer leaves as a TODO for the agent/prompt to wire.
+type: collection.insomnia.rest/5.0
+name: Petstore
+meta:
+  id: wrk_petstore
+  created: 1710000000000
+  modified: 1710000000000
+collection:
+  - name: Login
+    url: "{{ _.baseUrl }}/auth/login"
+    method: POST
+    meta:
+      id: req_login
+      sortKey: -1000
+    headers:
+      - name: Content-Type
+        value: application/json
+    authentication:
+      type: bearer
+      token: "{{ _.apiToken }}"
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "email": "{{ _.email }}",
+          "password": "{{ _.password }}"
+        }
+  - name: Billing
+    meta:
+      id: fld_billing
+      sortKey: -900
+    children:
+      - name: Get Invoice
+        url: "{{ _.baseUrl }}/invoices/{{ _.invoiceId }}"
+        method: GET
+        meta:
+          id: req_get_invoice
+      - name: Refund Invoice
+        url: "{{ _.baseUrl }}/invoices/{{ _.invoiceId }}/refund"
+        method: POST
+        meta:
+          id: req_refund
+        headers:
+          - name: Content-Type
+            value: application/json
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "reason": "duplicate",
+              "captureId": "{% response 'body', 'req_get_invoice', 'b64::JC5jYXB0dXJlSWQ=::46b', 'never' %}"
+            }
+environments:
+  name: Base Environment
+  meta:
+    id: env_base
+  data:
+    baseUrl: https://api.petstore.example
+    email: qa@example.com
+    password: qa-password
+    invoiceId: inv_123

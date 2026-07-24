@@ -1,10 +1,18 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { run } from "./index";
+
+/** True if `path` exists on disk. */
+async function exists(path: string): Promise<boolean> {
+  return stat(path).then(
+    () => true,
+    () => false,
+  );
+}
 
 // `run(argv, root)` is the CLI dispatcher. Pin root to the repo (see commands.test.ts) and
 // silence the console so the exit-code contract can be asserted without noise.
@@ -85,5 +93,32 @@ describe("run --report (artifact writing)", () => {
     const out = join(dir, "report.html");
     expect(await run(["run", "identity.login", "--report=html", `--out=${out}`], repoRoot)).toBe(0);
     expect(await readFile(out, "utf8")).toContain("<!DOCTYPE html>");
+  });
+});
+
+describe("import (Insomnia scaffolder)", () => {
+  const fixture = resolve(__dirname, "__fixtures__/petstore.insomnia.yaml");
+  let dir: string;
+  beforeEach(async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    dir = await mkdtemp(join(tmpdir(), "atp-import-"));
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("scaffolds the corpus and a MIGRATION.md under the root → 0", async () => {
+    expect(await run(["import", fixture], dir)).toBe(0);
+    expect(await exists(join(dir, "tests/petstore/login.test.ts"))).toBe(true);
+    expect(await exists(join(dir, "tests/petstore/billing.suite.ts"))).toBe(true);
+    const migration = await readFile(join(dir, "MIGRATION.md"), "utf8");
+    expect(migration).toContain("petstore.login");
+    expect(migration).toContain("req_login");
+  });
+
+  it("missing <insomnia.yaml> → 1", async () => {
+    expect(await run(["import"], dir)).toBe(1);
   });
 });
