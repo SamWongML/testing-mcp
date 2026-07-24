@@ -14,6 +14,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "test:quiet": "vitest run --reporter=dot",
     "compile": "tsx tools/compile/src/index.ts",
     "atp": "tsx packages/cli/src/index.ts",
     "dev:server": "tsx watch packages/mcp-server/src/main.ts"
