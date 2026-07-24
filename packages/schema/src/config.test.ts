@@ -29,4 +29,35 @@ describe("loadConfig", () => {
   it("fails fast on a non-numeric PORT", () => {
     expect(() => loadConfig({ PORT: "not-a-port" })).toThrow();
   });
+
+  it("defaults auth and observability off (dev-off flags)", () => {
+    const config = loadConfig({});
+    expect(config.AUTH_ENABLED).toBe(false);
+    expect(config.OTEL_ENABLED).toBe(false);
+    expect(config.SERVICE_NAME).toBe("atp");
+    expect(config.AUTH_ISSUER).toBeUndefined();
+    expect(config.AUTH_JWKS_URI).toBeUndefined();
+    expect(config.AUTH_RESOURCE).toBeUndefined();
+  });
+
+  it("reads the P10 auth + observability fields, coercing boolean flags", () => {
+    const config = loadConfig({
+      AUTH_ENABLED: "true",
+      AUTH_ISSUER: "https://auth.example.com",
+      AUTH_JWKS_URI: "https://auth.example.com/.well-known/jwks.json",
+      AUTH_RESOURCE: "https://atp.example.com/mcp",
+      OTEL_ENABLED: "true",
+      SERVICE_NAME: "atp-worker",
+    });
+    expect(config.AUTH_ENABLED).toBe(true);
+    expect(config.AUTH_ISSUER).toBe("https://auth.example.com");
+    expect(config.AUTH_JWKS_URI).toBe("https://auth.example.com/.well-known/jwks.json");
+    expect(config.AUTH_RESOURCE).toBe("https://atp.example.com/mcp");
+    expect(config.OTEL_ENABLED).toBe(true);
+    expect(config.SERVICE_NAME).toBe("atp-worker");
+  });
+
+  it("fails fast on a non-boolean AUTH_ENABLED", () => {
+    expect(() => loadConfig({ AUTH_ENABLED: "maybe" })).toThrow();
+  });
 });

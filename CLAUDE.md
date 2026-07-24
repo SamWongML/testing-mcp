@@ -27,15 +27,19 @@ Handoff notes for `✅ done` phases live in `docs/phases/P<n>.md` — read one *
 phase revisits that work. **Never let `PROGRESS.md` grow past 150 lines**: it is read in full every
 session and is the largest fixed context cost of a session start.
 
-**Current state:** P0–P9 done; P10 (auth + observability) next. `@atp/schema`,
+**Current state:** P0–P10 done; P11 (CDK infra + DynamoDB adapter) next. `@atp/schema`,
 `@atp/engine`, `@atp/reporting`, `@atp/store`, `@atp/cli`, `@atp/mcp-server`, and `tools/compile`
 are implemented, with a sample corpus in `tests/`. The MCP server has a stateless **sync** surface
 (`pnpm dev:server`) and, when a run database is configured, an **async** surface: `run_suite` (an
 SEP-1686 MCP Task), `run_selection`, and the `get_run`/`get_run_result`/`cancel_run` mirror tools,
 executed by a separate worker (`pnpm dev:worker`). It also exposes the five workflow **prompts**
-(§8.3) and the `atp import` Insomnia scaffolder (see *MCP surface & agent recipes* below).
+(§8.3) and the `atp import` Insomnia scaffolder (see *MCP surface & agent recipes* below). P10
+added an **OAuth 2.1 gate** (jose JWT validation, RFC 9728 metadata, RFC 8707 audience,
+`test:read`/`test:run` scopes, audit log) and **observability** (Pino structured logs + OTel
+traces/metrics incl. `queue_depth`) — **all off by default** via `AUTH_ENABLED`/`OTEL_ENABLED`, so
+dev/test run unauthenticated and quiet unless configured (ADR-007 internal-deployment path).
 DB-backed tests gate on `ATP_TEST_DATABASE_URL` (see `docker-compose.dev.yml`) and skip without
-it — the ~37 skips in a local `pnpm test` are expected, not a regression.
+it — the ~43 skips in a local `pnpm test` are expected, not a regression.
 
 **Two-process local dev (async runs).** Async execution needs a durable queue, so bring up
 Postgres and run the server and worker as two processes sharing one `DATABASE_URL`:

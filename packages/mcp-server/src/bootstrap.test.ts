@@ -6,7 +6,7 @@ import { compile } from "@atp/compile";
 import { loadConfig } from "@atp/schema";
 import { describe, expect, it } from "vitest";
 
-import { buildContext } from "./bootstrap";
+import { buildAuthContext, buildContext } from "./bootstrap";
 import { repoRoot } from "./testkit";
 
 describe("buildContext", () => {
@@ -37,5 +37,34 @@ describe("buildContext", () => {
     await writeFile(path, JSON.stringify({ not: "a manifest" }));
 
     await expect(buildContext(loadConfig({ MANIFEST_PATH: path }))).rejects.toThrow();
+  });
+
+  it("wires no auth context by default (dev-off), so the surface is unauthenticated", async () => {
+    const ctx = await buildContext(loadConfig({ TESTS_ROOT: repoRoot }));
+    expect(ctx.authn).toBeUndefined();
+  });
+});
+
+describe("buildAuthContext", () => {
+  it("returns undefined when auth is disabled (the default)", () => {
+    expect(buildAuthContext(loadConfig({}))).toBeUndefined();
+  });
+
+  it("builds an auth context from the issuer/resource/jwks config when enabled", () => {
+    const ac = buildAuthContext(
+      loadConfig({
+        AUTH_ENABLED: "true",
+        AUTH_ISSUER: "https://auth.example.com",
+        AUTH_RESOURCE: "https://atp.example.com/mcp",
+        AUTH_JWKS_URI: "https://auth.example.com/jwks.json",
+      }),
+    );
+    expect(ac?.issuer).toBe("https://auth.example.com");
+    expect(ac?.resource).toBe("https://atp.example.com/mcp");
+    expect(typeof ac?.authenticator.verify).toBe("function");
+  });
+
+  it("fails fast when auth is enabled without issuer/resource/jwks", () => {
+    expect(() => buildAuthContext(loadConfig({ AUTH_ENABLED: "true" }))).toThrow();
   });
 });

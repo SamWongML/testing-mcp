@@ -125,6 +125,19 @@ export async function requestCancel(db: Db, runId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/**
+ * The number of ready-to-claim jobs — `queued` and past their `run_after`. This is the
+ * `queue_depth` metric (§15) that drives worker autoscaling: it counts work waiting for a
+ * worker, excluding claimed (`running`) and future-scheduled jobs.
+ */
+export async function queueDepth(db: Db): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(jobs)
+    .where(and(eq(jobs.status, "queued"), sql`${jobs.runAfter} <= now()`));
+  return rows[0]?.n ?? 0;
+}
+
 /** Whether the worker should abort — polled between nodes. */
 export async function isCancelRequested(db: Db, jobId: string): Promise<boolean> {
   const rows = await db

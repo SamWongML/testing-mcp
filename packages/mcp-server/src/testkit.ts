@@ -10,7 +10,9 @@ import { compile } from "@atp/compile";
 import { createStore, LocalArtifactStore, migrate, type StoreClient } from "@atp/store";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 
+import { createAuthenticator, SCOPES, type Authenticator } from "./auth";
 import type { ServerContext } from "./context";
 import { createHttpApp } from "./http";
 import { buildMcpServer } from "./server";
@@ -76,6 +78,53 @@ export async function makeTestDb(): Promise<StoreClient> {
       await store.close();
     },
   };
+}
+
+/** Options for minting a test access token — defaults produce a valid token for `makeTestAuth`'s
+ *  issuer/resource; overrides force the failure cases (wrong issuer/audience, expired). */
+export interface MintOptions {
+  scopes?: string[];
+  clientId?: string;
+  issuer?: string;
+  audience?: string;
+  expired?: boolean;
+}
+
+export interface TestAuth {
+  /** Authenticator whose JWKS is the keypair `mint` signs with — verifies its own tokens. */
+  authenticator: Authenticator;
+  issuer: string;
+  resource: string;
+  mint: (opts?: MintOptions) => Promise<string>;
+}
+
+/**
+ * A self-contained OAuth test fixture: an in-memory RS256 keypair, a local JWKS, an
+ * {@link Authenticator} bound to that JWKS, and a `mint` that signs valid (or deliberately
+ * invalid) access tokens. No authorization server or network — the offline seam for the
+ * auth + scope-gating tests.
+ */
+export async function makeTestAuth(): Promise<TestAuth> {
+  const issuer = "https://auth.test.atp";
+  const resource = "https://atp.test/mcp";
+  const { publicKey, privateKey } = await generateKeyPair("RS256");
+  const kid = "test-key-1";
+  const jwk = { ...(await exportJWK(publicKey)), kid, alg: "RS256", use: "sig" };
+  const keys = createLocalJWKSet({ keys: [jwk] });
+  const authenticator = createAuthenticator({ issuer, resource, keys });
+
+  const mint = (opts: MintOptions = {}): Promise<string> => {
+    const jwt = new SignJWT({ scope: (opts.scopes ?? [SCOPES.READ]).join(" ") })
+      .setProtectedHeader({ alg: "RS256", kid })
+      .setSubject(opts.clientId ?? "test-client")
+      .setIssuer(opts.issuer ?? issuer)
+      .setAudience(opts.audience ?? resource)
+      .setIssuedAt();
+    jwt.setExpirationTime(opts.expired ? "-1m" : "5m");
+    return jwt.sign(privateKey);
+  };
+
+  return { authenticator, issuer, resource, mint };
 }
 
 export interface HttpHandle {

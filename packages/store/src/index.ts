@@ -8,3 +8,4 @@ export * from "./tasks";
 export * from "./artifacts";
 export * from "./runs";
 export * from "./manifests";
+export * from "./audit";
