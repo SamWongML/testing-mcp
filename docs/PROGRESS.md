@@ -20,7 +20,7 @@
 | P4 | Compile + CLI + sample corpus | ✅ | 2026-07-23 | ✅ |
 | P5 | Reporting renderers | ✅ | 2026-07-23 | ✅ |
 | P6 | Store — Postgres record + queue + artifacts | ✅ | 2026-07-23 | ✅ |
-| P7 | MCP server — sync surface | ⬜ | — | — |
+| P7 | MCP server — sync surface | ✅ | 2026-07-24 | ✅ |
 | P8 | Worker + MCP Tasks — async lifecycle | ⬜ | — | — |
 | P9 | Prompts + Insomnia migration | ⬜ | — | — |
 | P10 | AuthN/Z + observability | ⬜ | — | — |
@@ -885,14 +885,90 @@ the only memory that crosses sessions.
   research §8.1–8.4, §8.6, ADR-002.
 
 ### P7 — MCP server (sync)
-- [ ] Stateless Streamable HTTP via Hono; `/healthz` `/readyz`; fail-fast config
-- [ ] Manifest load at boot (+dev hot-reload)
-- [ ] Tools: `list_tests` `describe_test` `run_test`(inline) `get_report` `list_runs`
-- [ ] Resources: `test://catalog` `test://{id}` `run://{id}/report.md` `run://{id}/trace.json`
-- [ ] Inline runs persist history + artifacts
-- [ ] In-memory MCP client integration tests; `pnpm dev:server`
+- [x] Stateless Streamable HTTP via Hono; `/healthz` `/readyz`; fail-fast config
+- [x] Manifest load at boot (+dev hot-reload)
+- [x] Tools: `list_tests` `describe_test` `run_test`(inline) `get_report` `list_runs`
+- [x] Resources: `test://catalog` `test://{id}` `run://{id}/report.md` `run://{id}/trace.json`
+- [x] Inline runs persist history + artifacts
+- [x] In-memory MCP client integration tests; `pnpm dev:server`
 
-**Handoff notes:** _none yet_
+**Handoff notes (P7 — 2026-07-24):**
+- **Package `@atp/mcp-server`** (was a one-line stub). Files under `packages/mcp-server/src/`:
+  - `context.ts` — `ServerContext` (the composition root: manifest, sourceRoot, artifacts,
+    artifactEnv, optional `db`, optional `auth`). Injected at boot; never per-request state.
+  - `server.ts` — `buildMcpServer(ctx)`: fresh `McpServer` with all tools + resources
+    registered against the injected ctx. **Pure/stateless** — a fresh one is built per
+    HTTP request in the stateless path (and once per in-memory test client).
+  - `tools.ts` — the five tools. `run_test` executes **inline** (`importDef` the authored
+    source via `ctx.sourceRoot`, `expandUnits`→`runTest`) and **rejects suites +
+    `isLongRunning`** (async path is P8). `list_runs` returns `[]` when `ctx.db` is absent.
+    `get_report` renders via `@atp/reporting` from the persisted trace.
+  - `run-store.ts` — inline-run persistence. Trace blob → `artifactKey` (§16.3) via
+    `ArtifactStore`; a **pointer index** `{env}/index/run/{runId}` → traceKey makes
+    runId→trace resolvable statelessly (ArtifactStore has no `list()`, runId is a random
+    UUID). History → `recordRun` **only when `ctx.db` present**. Engine already redacts
+    snapshots, so no extra redaction here.
+  - `resources.ts` — `test://catalog`, `test://{id}`, `run://{runId}/report.md`,
+    `run://{runId}/trace.json` (templates use `{ list: undefined }`).
+  - `http.ts` — `createHttpApp(ctx)`: Hono + `hono/cors`; `/healthz` (liveness),
+    `/readyz` (readiness + test count); `/mcp` (all methods) builds a **fresh server +
+    `WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined })` per
+    request** (stateless), `handleRequest(c.req.raw)`.
+  - `bootstrap.ts` — `buildContext(config)`: resolves the manifest source
+    (`MANIFEST_PATH` prebuilt JSON → schema-validated, else `compile({ root: TESTS_ROOT })`),
+    builds `LocalArtifactStore`, sets `artifactEnv:"mcp"`. **db is injected by `main.ts`**,
+    not created here (keeps it offline + free of pool lifecycle — mirrors the test DI seam).
+  - `main.ts` — `MODE=server` entrypoint: `loadConfig` (fail fast) → `buildContext` →
+    if `DATABASE_URL`: `createStore` + `recordManifest` + inject `db` → `serve` on `PORT` →
+    SIGINT/SIGTERM graceful shutdown. Invoked by `pnpm dev:server` (root script,
+    `tsx watch` ⇒ manifest hot-reload). Never imported ⇒ unconditional invoke, no self-guard.
+  - `index.ts` — public exports (`buildContext`, `buildMcpServer`, `createHttpApp`, types).
+  - `testkit.ts` — shared test seam: `makeTestContext` (real corpus + throwaway
+    `LocalArtifactStore`, no db), `connectClient` (in-memory `InMemoryTransport` pair),
+    `startHttpServer` (`@hono/node-server` on port 0), `startTestSut` (mock SUT),
+    `makeTestDb`/`pgAvailable` (per-schema Postgres, skips offline).
+- **Config (schema-first):** added optional `MANIFEST_PATH` + `TESTS_ROOT` to
+  `@atp/schema` `configSchema` (additive; existing `config.test.ts` still green).
+- **`recordManifest` (P6→P7 deferral, done):** `packages/store/src/manifests.ts` +
+  `manifests.test.ts` — snapshots the manifest (`manifests` row) + one `catalog_entries`
+  row per entry, **idempotent** (`onConflictDoNothing` on both PKs; hash is content-addressed).
+  Called by `main.ts` at boot when a db is configured. **pg-gated ⇒ skips offline** (Docker
+  daemon down + no local pg here); typecheck validated every Drizzle column, and it mirrors
+  `recordRun`'s proven idiom, but it has **not** run against a live Postgres this session —
+  same posture as the P6 store tests. Verify it under `ATP_TEST_DATABASE_URL` when a db is up.
+- **Verified live:** booted `PORT=8799 pnpm dev:server`; a real SDK
+  `StreamableHTTPClientTransport` client ran the full exit-criteria path —
+  `list_tests` (3 entries) → `run_test identity.login` (**passed**) → `get_report md`
+  (`# Report — identity.login`). `/healthz`→`{status:"ok"}`, `/readyz`→`{status:"ready",tests:3}`.
+- **Deliberate minimal-scope cuts (all P8+, per the phase boundary):** no `run_suite`/
+  `run_selection`/`get_run`/`cancel_run`, no worker/Tasks, no OAuth (P10), no S3 store (P11),
+  no `matrix` input on `run_test` (add additively when the corpus needs it). The dev
+  entrypoint is **server-only** — it does **not** bundle a mock SUT, because that lives in
+  `@atp/cli` and `mcp-server → cli` would invert the dependency layering; a caller supplies
+  `env.baseUrl` per `run_test` call (as the live smoke did). P10 middleware seam: `ctx.auth`
+  exists; HTTP auth/scopes slot into `http.ts`'s `/mcp` handler later.
+- **Post-review (completeness + simplicity, 2 subagents):** completeness verdict
+  **COMPLETE — no blockers** (all 6 checklist items + every invariant traced correct; SDK
+  usage cross-checked against the installed `.d.ts`; the lone sub-threshold note — `run_test`
+  doesn't resolve a matrix cell — is the documented scope cut and surfaces as a *visibly
+  failed* step, not a silent wrong-pass). Simplicity flagged **2 Minors**, both applied:
+  - **Dropped the package-level `dev` script** (`packages/mcp-server/package.json`) — it was an
+    exact duplicate of the root `dev:server` (and would resolve `TESTS_ROOT` from the package
+    dir, not the repo root); no sibling package has a `dev` script and nothing referenced it.
+  - **Dropped the unused `invokedBy` param** threaded through `persistRun` — the sole caller
+    never passed it and `recordRun`'s `meta.invokedBy` is optional, so behavior is unchanged
+    (caller-identity plumbing belongs to P10, not P7).
+  Gate re-run green after both edits.
+- **Gate:** `pnpm typecheck` / `lint` / `test` (331 passed | 27 skipped) / `compile` all green.
+- **Exact next step (P8): worker + MCP Tasks (async).** Add `tasks.ts` (SEP-1686 lifecycle
+  onto P6's `TaskStateStore` + queue) and `worker.ts` (`MODE=worker`: SKIP-LOCKED claim loop,
+  heartbeat, engine run under an `AbortSignal`, progress k/n, artifacts, terminal state).
+  Tools: `run_suite` (task by default), `run_test` **auto-task when `isLongRunning`** (the
+  sync path already rejects those — flip to enqueue), `run_selection`, `get_run`,
+  `get_run_result`, `cancel_run`. Cancellation `tasks/cancel`→`cancel_requested`→abort;
+  reaper in the worker loop; idempotency keys. `pnpm dev:worker` + two-process dev flow.
+  **The SDK Task API is experimental — verify it against installed SDK source / Context7,
+  not memory (§23).** Read plan §P8 + research §11, §8.2/§8.5, ADR-004.
 
 ### P8 — Worker + Tasks (async)
 - [ ] `tasks.ts` lifecycle glue (SEP-1686 mapping onto TaskStateStore + queue)
@@ -964,6 +1040,8 @@ Append one row per session. Newest at the bottom.
 | 2026-07-23 | P5 review | P5 | Completeness + simplicity review (2 subagents): gate green, design sound; completeness 1 Major, simplicity 0 Blockers/Majors. Fixed the Major — a whole-suite `timeoutMs` breach (engine: `errored` run + `cancelled` nodes) was diagnosed `cancelled`, never `timeout`; now `classifyErrorText(result.error)` routes it to `timeout` while a caller-cancel stays `cancelled` (+2 regression tests). Simplicity: hoisted the junit↔diagnose plain-text `assertionLine` into `util.ts` (output byte-identical, no golden changed); collapsed a redundant `badgeColors` union to `Record<StepStatus,string>`. +2 tests (303 total). Gate green. | _(this commit)_ |
 | 2026-07-23 | P6 | P6 | **P6 complete.** `@atp/store`: Drizzle schema (`db/schema.ts`) mirroring §16.1 + stage-1 `tasks` table (ids `text`, not `uuid`, to honor the string-id IR); hand-authored SQL migration + in-house `migrate()` (tracks `_migrations`, per-file txn — no drizzle-kit). `queue.ts` (§11.2): `claim` via `SELECT … FOR UPDATE SKIP LOCKED` + typed UPDATE-by-id, `heartbeat`/`reapExpired`(lease)/`markDone`/`requestCancel`/`isCancelRequested`. `TaskStateStore` interface + `PostgresTaskStore` (upsert/patch/progress/cancel/TTL sweep — the seam P11's Dynamo adapter implements). `ArtifactStore` interface + `LocalArtifactStore` (`node:fs`, traversal-guarded) + `artifactKey` §16.3 layout — **S3 → P11**. `runs.ts`: `recordRun` (run+steps+assertions, one txn) + `listRuns`(entryId/status/since) + `getRun`. Harness `db/test-db.ts` gated on `ATP_TEST_DATABASE_URL` (per-schema isolation; skips w/o a DB). CI gains a `postgres:16` service on the test step; `docker-compose.dev.yml` added. Deferred: catalog-snapshot writer → P7, S3ArtifactStore → P11. TDD, +26 tests (329 total), verified vs. real Postgres 16. All exit criteria green. | _(this commit)_ |
 | 2026-07-23 | P6 review | P6 | Completeness + simplicity review (2 subagents), gate green, **no Blockers**. Fixed: **(Major)** `recordRun` now persists `gitSha` (new denormalized `runs.git_sha` column) — the §21 `manifestHash`+`gitSha` invariant was unmet for a P6 run; **(Major, simplicity)** batched `recordRun`'s per-step inserts (`2n+1` → 2 statements); **(Minor)** `markDone` gained a worker-ownership + `running` guard (a reaped-then-reassigned job can't be finalized by the dead worker) and returns bool; **(Minor)** `listRuns` tiebreaks equal `started_at` by `id`; **(Nit)** dropped `satisfies JobStatus`. +coverage: `markDone` failed/guard, heartbeat-terminal, cancel-running, `isCancelRequested`-unknown, `setProgress`-no-node, empty-assertions/step-less run. Documented `recordRun` non-idempotency (dup `runId` → PK rollback; idempotency keys are P8). +2 tests (28 store / 331 total). Gate green. | _(this commit)_ |
+| 2026-07-24 | P7 | P7 | **P7 complete (minimal).** `@atp/mcp-server` (was a stub): stateless Streamable-HTTP MCP over Hono (`http.ts`: fresh `McpServer` + `WebStandardStreamableHTTPServerTransport({sessionIdGenerator:undefined})` per `/mcp` request; `/healthz`+`/readyz`). Tools (`tools.ts`): `list_tests`/`describe_test`/`run_test`(inline; rejects suites + `isLongRunning`)/`get_report`/`list_runs`(empty w/o db). Resources (`resources.ts`): `test://catalog`, `test://{id}`, `run://{id}/report.md`, `run://{id}/trace.json`. Inline-run persistence (`run-store.ts`): trace→`artifactKey` blob + `{env}/index/run/{runId}` pointer index (stateless runId→trace w/o `list()`), history→`recordRun` when db present. Boot (`bootstrap.ts` `buildContext`): manifest from `MANIFEST_PATH` (prebuilt, schema-validated) else `compile({root:TESTS_ROOT})`; `main.ts` `MODE=server` entrypoint + `pnpm dev:server` (`tsx watch`⇒hot-reload). Schema-first: `+MANIFEST_PATH`/`+TESTS_ROOT` config. Closed P6 deferral: `recordManifest` catalog snapshot (idempotent; pg-gated). Integration tests via in-memory SDK client + real Streamable-HTTP round-trip. Verified live: `dev:server` → SDK client `list_tests`→`run_test identity.login`(passed)→`get_report`. TDD, +23 mcp tests (+2 pg-gated store). Gate green (331 passed \| 27 skipped). Scope cuts (all P8+): no suite/selection/get_run/cancel, no worker/Tasks, no OAuth, no S3, server-only dev entrypoint. | _(this commit)_ |
+| 2026-07-24 | P7 review | P7 | Completeness + simplicity review (2 subagents). Completeness **COMPLETE — no blockers**: all 6 checklist items + every invariant traced correct, SDK usage cross-checked against installed `.d.ts`; lone sub-threshold note (`run_test` doesn't resolve a matrix cell) is the documented scope cut and surfaces as a *visibly failed* step, not a silent wrong-pass. Simplicity **2 Minors, both applied**: dropped the package-level `dev` script (exact duplicate of root `dev:server`, wrong-cwd, no sibling has one) and the unused `invokedBy` param threaded through `persistRun` (sole caller never passed it; `recordRun.meta.invokedBy` optional — behavior unchanged; caller-identity is P10). Gate re-run green (331 passed \| 27 skipped). | _(this commit)_ |
 
 ## Deferred / discovered work
 
@@ -1003,10 +1081,11 @@ doing them out of order.
   `@aws-sdk/s3-request-presigner`) is deferred to P11 (the AWS phase), behind the same
   interface and alongside the `DynamoTaskStore` — there's no AWS to integration-test against
   before then, and the SDK deps are heavy. P7 uses `LocalArtifactStore` locally.
-- **Catalog snapshot writer (from P6) → P7:** the `manifests` + `catalog_entries` tables
-  exist (P6 schema + migration) but have no writer. `runs.manifest_hash` is an FK-free `text`
-  column (§16.1), so run history doesn't need them populated. P7 loads the manifest at boot —
-  the natural place to add `recordManifest(db, manifest)` snapshotting the catalog.
+- **Catalog snapshot writer (from P6) → P7 — ✅ done (2026-07-24):** `recordManifest(db, manifest)`
+  landed in `packages/store/src/manifests.ts` (idempotent; one `manifests` row + one
+  `catalog_entries` row per entry), called by `mcp-server` `main.ts` at boot when a db is
+  configured. pg-gated tests (`manifests.test.ts`) skip offline — **not yet run against a live
+  Postgres**; verify under `ATP_TEST_DATABASE_URL`.
 - **Migrations dir must be copied on `tsc` build (from P6) → P11:** `migrate()` resolves
   `db/migrations/*.sql` relative to `import.meta.url`, which works under `tsx`/`vitest` (no
   build). The P11 container build (`tsc` emit to `dist/`) must copy the `migrations` dir into

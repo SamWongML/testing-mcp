@@ -17,6 +17,12 @@ export const configSchema = z.object({
   S3_BUCKET: z.string().optional(),
   /** Local artifact directory (dev/tests fallback for the artifact store). */
   ARTIFACT_DIR: z.string().optional(),
+  /** Prebuilt manifest to load at boot (P7). When unset, the server compiles the corpus
+   *  from source at `TESTS_ROOT` — the dev path (hot-reload via `tsx watch`). */
+  MANIFEST_PATH: z.string().optional(),
+  /** Root the corpus is compiled from and `ManifestEntry.sourcePath` resolves against, so
+   *  `run_test` can import the authored definition (P7). Defaults to the process cwd. */
+  TESTS_ROOT: z.string().optional(),
 });
 export type Config = z.infer<typeof configSchema>;
 
