@@ -18,7 +18,8 @@ read it whole. There is no "next phase" to read into; new work comes from
 2. Read **only** the `docs/research.md` sections the work touches. `research.md` is ~30k
    tokens; never read it whole. `docs/implementation-plan.md` holds the original per-phase
    scope and exit criteria if you need to know why something is the way it is.
-3. Verify the gate before building on it: `pnpm typecheck && pnpm lint && pnpm test`.
+3. Verify the gate before building on it: `pnpm typecheck && pnpm lint && pnpm test &&
+   pnpm validate`.
 4. Close out by appending one row to `docs/phases/session-log.md`, then commit and push.
 
 Handoff notes for each finished phase live in `docs/phases/P<n>.md` — read one **only** if you
@@ -44,7 +45,7 @@ test run exactly as before (ADR-007 internal-deployment path).
 stays green offline: `ATP_TEST_DATABASE_URL` (Postgres), `ATP_TEST_DYNAMO_ENDPOINT`
 (dynamodb-local), `ATP_TEST_S3_ENDPOINT` (MinIO) — all three in `docker-compose.dev.yml`. Skips
 in a local run are expected, not a regression; with all three services up the suite is
-**503 passed | 0 skipped**.
+**535 passed | 0 skipped**.
 
 **Two-process local dev (async runs).** Async execution needs a durable queue, so bring up
 Postgres and run the server and worker as two processes sharing one `DATABASE_URL`:
@@ -73,8 +74,10 @@ pnpm test:quiet              # vitest run --reporter=dot — the in-loop default
 pnpm test                    # vitest run, full reporter — use when something fails
 pnpm format                  # prettier --write .   (Markdown is intentionally excluded)
 pnpm compile                 # discovery → dist/manifest.json
+pnpm validate                # compile + §19 strictness: no unwired __TODO_CHAIN__, no `status lt 500`-only node
 pnpm atp list|run|validate   # local dev CLI over the tests/ corpus (P4)
 pnpm atp import <file.yaml>  # scaffold defineTest/defineSuite drafts + MIGRATION.md from Insomnia v5 (P9)
+pnpm atp golden <id> --base-url <url>   # run once against a real SUT → paste-ready parity asserts
 pnpm dev:server              # MCP HTTP surface (needs DATABASE_URL for the async path)
 pnpm dev:worker              # async run worker (requires DATABASE_URL)
 pnpm synth                   # cdk synth for all four stacks (no AWS creds, no Docker) (P11)
@@ -82,8 +85,8 @@ docker build -t atp:dev .    # the deployment image: MODE=server|worker|migrate
 ```
 
 CI (`.github/workflows/ci.yml`) runs — and must stay green on — install → typecheck → lint →
-test (with Postgres, dynamodb-local, and MinIO service containers) → compile → `pnpm synth` →
-`docker build`.
+test (with Postgres, dynamodb-local, and MinIO service containers) → compile → validate →
+`pnpm synth` → `docker build`.
 
 Narrow the test run while iterating: `pnpm exec vitest run <path>` (one file), `pnpm exec vitest run
 -t "<substring>"` (by name), `pnpm --filter @atp/engine test` (one package).
@@ -128,8 +131,12 @@ entry) · `run://{runId}/report.md` · `run://{runId}/trace.json`.
 - *Compose a suite* → `generate_suite`: reuse first (`list_tests` → `useTest`/`useStep`), explicit
   `needs`, `{{nodes.X.var}}` across branches.
 - *Migrate from Insomnia* → `atp import <file.yaml>` scaffolds drafts + `MIGRATION.md`; the
-  `import_insomnia_collection` prompt drives wiring the `__TODO_CHAIN__` response-refs + golden-master
-  parity assertions (`goldenAssertions`, §19). Deterministic transform in `packages/cli/src/import.ts`.
+  `import_insomnia_collection` prompt drives wiring the `__TODO_CHAIN__` response-refs, then
+  `atp golden <id> --base-url <url>` captures parity assertions from the real SUT (§19 step 4).
+  **`atp validate` is the definition of "migration finished"** — it fails while a `__TODO_CHAIN__`
+  survives or a node still carries only the scaffolded `status lt 500` (the pair that makes an
+  unfinished migration pass while being incapable of failing). Deterministic transform in
+  `packages/cli/src/import.ts`; rules in `strict.ts`; capture in `golden.ts` + `commands.ts`.
 - *Triage a failure* → `triage_failure {runId}`: `get_report` + `run://{id}/trace.json` → hypothesis
   (auth vs schema-drift vs timeout) → fix or quarantine → re-run.
 - *Regenerate reports* → `regenerate_reports {format}`: `list_runs` → `get_report {runId, format}` per

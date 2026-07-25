@@ -1,8 +1,16 @@
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { formatList, formatResult, listEntries, runById, validate } from "./commands";
+import {
+  captureGolden,
+  formatList,
+  formatResult,
+  listEntries,
+  runById,
+  validate,
+} from "./commands";
+import { startMockSut } from "./mock-sut";
 
 // The CLI commands operate on the real sample corpus. Pin the root to the repo (relative
 // to this file) rather than `process.cwd()`, so the suite passes under both the root
@@ -38,6 +46,12 @@ describe("listEntries", () => {
 describe("validate", () => {
   it("reports the corpus compiles", async () => {
     expect((await validate(repoRoot)).entries).toBe(3);
+  });
+
+  it("finds no strictness violations in the sample corpus", async () => {
+    // Every corpus node pins an exact status or a body field, so the §19 rules are green on
+    // `main` — the check imposes no migration burden on the existing tests.
+    expect((await validate(repoRoot)).violations).toEqual([]);
   });
 });
 
@@ -80,5 +94,43 @@ describe("formatting", () => {
     const text = formatResult(await runById("identity.login", { root: repoRoot }));
     expect(text).toContain("identity.login");
     expect(text).toContain("passed");
+  });
+});
+
+describe("captureGolden", () => {
+  // `runById` starts a local mock SUT when no base URL is around. Capturing a golden baseline
+  // against *that* would emit parity assertions describing fixture data — coverage that looks
+  // real and proves nothing. These tests pin that it cannot happen.
+  const preset = process.env.ATP_BASE_URL;
+  beforeEach(() => delete process.env.ATP_BASE_URL);
+  afterEach(() => {
+    if (preset === undefined) delete process.env.ATP_BASE_URL;
+    else process.env.ATP_BASE_URL = preset;
+  });
+
+  it("refuses to run with no base URL rather than falling back to the mock SUT", async () => {
+    await expect(captureGolden("billing.get-invoice", { root: repoRoot })).rejects.toThrow(
+      /--base-url/,
+    );
+  });
+
+  it("captures parity assertions from the SUT it was explicitly pointed at", async () => {
+    const sut = await startMockSut(); // the test's chosen SUT, not a silent fallback
+    try {
+      const { blocks, missing } = await captureGolden("billing.get-invoice", {
+        root: repoRoot,
+        baseUrl: sut.url,
+      });
+
+      expect(missing).toEqual([]);
+      expect(blocks.map((b) => b.nodeId)).toEqual(["get-invoice"]);
+      // The mock answers GET /invoices/:id with { id, amount, currency, status }.
+      const source = blocks[0]!.source;
+      expect(source).toContain('{ path: "status", op: "eq", value: 200 }');
+      expect(source).toContain('{ path: "body.amount", op: "isNumber" }');
+      expect(source).toContain('{ path: "body.currency", op: "isString" }');
+    } finally {
+      await sut.close();
+    }
   });
 });

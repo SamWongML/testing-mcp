@@ -40,8 +40,10 @@ describe("MCP prompts (research §8.3, §13)", () => {
     const text = promptText(res);
     expect(text).toContain("insomnia/petstore.yaml");
     expect(text).toContain("atp import");
-    // The prompt must point at the golden-master parity + compile gate.
-    expect(text).toMatch(/golden|parity/i);
+    // Parity assertions are *captured*, not hand-written: the prompt must send the agent to
+    // `atp golden`, and name `atp validate` as the definition of "migration finished".
+    expect(text).toContain("atp golden");
+    expect(text).toContain("atp validate");
     expect(text).toContain("compile");
   });
 

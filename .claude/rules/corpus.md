@@ -19,9 +19,16 @@ unit tests. Platform unit tests belong beside their source under `src/`.
 ```bash
 pnpm compile                 # discovery → dist/manifest.json
 pnpm atp list                # what the manifest contains
-pnpm atp validate            # structural checks
-pnpm atp run <id>            # execute one entry
+pnpm atp validate            # structural checks + strictness (also a CI step)
+pnpm atp run <id>            # execute one entry against the local mock SUT
+pnpm atp golden <id> --base-url <url>   # real SUT → paste-ready parity assertions
 ```
+
+**Strictness (`atp validate`, §19).** It fails on a node that no response could make fail —
+an `assert` that is empty, or whose only entries are *range* ops on `status` (`lt`/`gt`) — and
+on any surviving `__TODO_CHAIN__` from `atp import`. Pin an exact status (`op: "eq"`) plus at
+least one body assertion. A status-only `{ path: "status", op: "eq", value: 204 }` is fine (a
+204 DELETE has no body); `status lt 500` is not, because a 404 satisfies it.
 
 ## Layout
 

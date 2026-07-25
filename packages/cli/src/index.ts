@@ -2,7 +2,16 @@
 import { compileToFile, CompileError } from "@atp/compile";
 import { isReportFormat, REPORT_FORMATS } from "@atp/reporting";
 
-import { formatList, formatResult, listEntries, runById, validate, writeReport } from "./commands";
+import {
+  captureGolden,
+  formatGolden,
+  formatList,
+  formatResult,
+  listEntries,
+  runById,
+  validate,
+  writeReport,
+} from "./commands";
 import { writeImport } from "./import";
 
 export const CLI_PACKAGE = "@atp/cli";
@@ -10,6 +19,7 @@ export * from "./commands";
 export * from "./golden";
 export * from "./import";
 export * from "./mock-sut";
+export * from "./strict";
 
 const USAGE = `atp — API testing platform CLI
 
@@ -17,8 +27,11 @@ Usage:
   atp compile                       build dist/manifest.json from tests/
   atp list [--tags a,b] [--owner o] [--kind test|suite]
   atp run <id> [--params '<json>'] [--env name] [--report md|html|junit|json|summary] [--out path]
-  atp validate                      compile in-memory; fail on any error
+  atp validate                      compile in-memory; fail on a compile error, an unwired
+                                    __TODO_CHAIN__, or a node asserting nothing (or only a
+                                    range op on status, the atp import placeholder)
   atp import <insomnia.yaml>        scaffold defineTest/defineSuite drafts + MIGRATION.md
+  atp golden <id> --base-url <url>  run once against a real SUT; print parity assertions
 `;
 
 interface ParsedArgs {
@@ -69,8 +82,18 @@ export async function run(argv: string[], root: string = process.cwd()): Promise
       }
 
       case "validate": {
-        const { entries } = await validate(root);
-        console.log(`ok — ${entries} entries compile cleanly`);
+        const { entries, violations } = await validate(root);
+        if (violations.length > 0) {
+          for (const v of violations) {
+            console.error(`${v.entryId}#${v.nodeId} [${v.rule}] ${v.detail}`);
+          }
+          console.error(
+            `\n${violations.length} violation(s) — finish the migration (wire the chain refs, ` +
+              `then \`atp golden <id>\` for real parity assertions).`,
+          );
+          return 1;
+        }
+        console.log(`ok — ${entries} entries compile cleanly and assert strictly`);
         return 0;
       }
 
@@ -87,8 +110,33 @@ export async function run(argv: string[], root: string = process.cwd()): Promise
         );
         for (const path of written) console.log(`  ${path}`);
         console.log(
-          "Review the drafts (wire __TODO_CHAIN__ refs + parity assertions), then `atp compile`.",
+          "Next: wire the __TODO_CHAIN__ refs, capture parity assertions with " +
+            "`atp golden <id> --base-url <url>`, then `atp validate` until it is clean.",
         );
+        return 0;
+      }
+
+      case "golden": {
+        const id = positional[0];
+        if (!id) {
+          console.error("atp golden: missing <id>\n");
+          console.error(USAGE);
+          return 1;
+        }
+        const { blocks, missing } = await captureGolden(id, {
+          root,
+          baseUrl: flags["base-url"] || undefined,
+          params: flags.params ? (JSON.parse(flags.params) as Record<string, unknown>) : undefined,
+          envName: flags.env || undefined,
+        });
+        console.log(formatGolden(blocks));
+        if (missing.length > 0) {
+          console.error(
+            `\natp golden: ${missing.length} node(s) never executed, so no baseline exists ` +
+              `for them: ${missing.join(", ")}. Fix the run, then capture again.`,
+          );
+          return 1;
+        }
         return 0;
       }
 

@@ -65,13 +65,29 @@ doing them out of order.
   `catalog_entries` row per entry), called by `mcp-server` `main.ts` at boot when a db is
   configured. pg-gated tests (`manifests.test.ts`) skip offline — **not yet run against a live
   Postgres**; verify under `ATP_TEST_DATABASE_URL`.
-- **Golden-master live-capture CLI (from P9) → when a real migration needs it:** `goldenAssertions`/
-  `renderAssertions` (`packages/cli/src/golden.ts`) are the pure core (baseline response → parity
-  assertions), but nothing *captures* a live baseline yet. Wire an `atp golden <id>` command that runs
-  the migrated entry once against the SUT, feeds the recorded (redacted) response through
-  `goldenAssertions`, and prints/patches the `assert` block — the §19 step-4 "run once via Inso" step,
-  as a first-class CLI. The `import_insomnia_collection` prompt currently tells the agent to do this
-  by hand (`atp run <id>` → add assertions).
+- **Golden-master live-capture CLI (from P9) — ✅ done (2026-07-26):** `atp golden <id>
+  --base-url <url>` (`captureGolden` in `packages/cli/src/commands.ts` + `goldenFromResult` in
+  `golden.ts`) runs the entry once against a real SUT and prints a paste-ready `assert` block per
+  node. It **refuses** without an explicit base URL (capturing against `startMockSut()` would emit
+  assertions describing fixture data while looking like real coverage) and **refuses** to emit for
+  a node that did not execute, exiting non-zero and naming it. **Still open:** it prints rather
+  than patches — rewriting an authored TS `assert` block is a codemod and belongs in its own change.
+- **`non-pinning-assert` is a scaffolder check, not an assertion-quality linter (from the
+  2026-07-26 review) → if agent-authored tests start gaming it:** `strictViolations` flags only
+  an empty `assert` or *range* ops on `status` — deliberately, so it needs no opt-out (§19). The
+  review confirmed several genuinely unfailable nodes pass it: `status neq 500`, a lone
+  `headers.content-type isString`, `body.<missing> eq undefined` (tautological — an unresolved
+  path is `undefined`), `matches ".*"`, a valueless `jsonpath` on an always-present path, and
+  `contains ""`. Harmless for hand-authored tests; the risk is an agent silencing a violation
+  with one of these instead of understanding the endpoint. Broadening the rule means accepting
+  false positives on legitimate assertions — revisit only with real evidence of the failure mode,
+  and prefer a separate `atp lint`-style check over loosening the strict rule.
+- **`atp import` doesn't scan `authentication.token` for response-ref tags (from the 2026-07-26
+  review) → when a real collection chains its bearer token:** `hasResponseTag` (`import.ts`)
+  checks url/headers/query/body but not `req.authentication?.token`, so an Insomnia bearer token
+  chained from a prior response (a common pattern — login → use the token) is silently scaffolded
+  as a static `{{secrets.*}}` with no `__TODO_CHAIN__` and therefore no `atp validate` signal.
+  Pre-dates the strictness work; the fix is one more field in `hasResponseTag` + a fixture.
 - **Importer: per-request env override + params vs env split (from P9) → if a migration needs it:**
   `atp import` maps every `{{ _.x }}` to `{{env.x}}` against a single collection-level environment and
   ignores Insomnia sub-environments; it never emits a Zod `params` builder (auth tokens are the only
