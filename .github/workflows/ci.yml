@@ -29,21 +29,28 @@ jobs:
         image: amazon/dynamodb-local:2.5.2
         ports:
           - 8000:8000
-      # S3-compatible artifact store (P11, §16.3), incl. presigned-URL fetches.
-      minio:
-        image: bitnami/minio:2025.4.22
-        env:
-          MINIO_ROOT_USER: atp
-          MINIO_ROOT_PASSWORD: atpsecret
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     steps:
       - uses: actions/checkout@v4
+      # MinIO is started here rather than as a `services:` container: the official image's
+      # entrypoint needs a `server /data` argument, and service containers expose only
+      # image/env/ports/options — no command. Using the same pinned tag as
+      # docker-compose.dev.yml keeps local and CI on one image. Readiness is polled from the
+      # runner, so it doesn't depend on which binaries the image happens to ship.
+      - name: Start MinIO (S3 artifact store, §16.3)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=atp -e MINIO_ROOT_PASSWORD=atpsecret \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:9000/minio/health/live >/dev/null 2>&1; then
+              echo "MinIO ready after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MinIO did not become ready" >&2
+          docker logs minio >&2
+          exit 1
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
