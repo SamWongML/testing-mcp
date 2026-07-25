@@ -92,7 +92,7 @@ export async function buildContext(config: Config): Promise<ServerContext> {
   return {
     manifest,
     sourceRoot,
-    artifacts: artifacts.store,
+    artifacts,
     artifactEnv: ARTIFACT_ENV,
     authn: buildAuthContext(config),
     runTaskLauncher: buildRunTaskLauncher(config),

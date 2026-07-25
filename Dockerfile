@@ -50,13 +50,17 @@ ENV NODE_ENV=production
 RUN apk add --no-cache tini && corepack enable
 WORKDIR /app
 
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/packages ./packages
-COPY --from=build /app/tools ./tools
-COPY --from=build /app/tests ./tests
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/tsconfig.base.json /app/tsconfig.json ./
+# `--chown` matters: the default ARTIFACT_STORE=local writes under /app/.atp/artifacts, and
+# a root-owned tree would make the first run fail with EACCES under `USER node`. ECS itself
+# uses S3, but bare `docker run` / compose / k8s deployments hit the local path.
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/packages ./packages
+COPY --from=build --chown=node:node /app/tools ./tools
+COPY --from=build --chown=node:node /app/tests ./tests
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/package.json /app/pnpm-workspace.yaml /app/tsconfig.base.json /app/tsconfig.json ./
 COPY docker-entrypoint.sh /usr/local/bin/
+RUN mkdir -p /app/.atp/artifacts && chown -R node:node /app/.atp
 
 ENV MODE=server
 ENV MANIFEST_PATH=/app/dist/manifest.json
@@ -66,5 +70,8 @@ EXPOSE 3000
 USER node
 ENTRYPOINT ["/sbin/tini", "--", "docker-entrypoint.sh"]
 
+# Only server mode serves HTTP; a worker/migrate container has no port to probe, so an
+# unconditional probe would mark a perfectly healthy worker `unhealthy`. ECS ignores image
+# HEALTHCHECKs (the ALB target group checks the server), but `docker run`/compose honour it.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD sh -c '[ "$MODE" != server ] || node -e "fetch(\"http://127.0.0.1:\"+(process.env.PORT||3000)+\"/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"'

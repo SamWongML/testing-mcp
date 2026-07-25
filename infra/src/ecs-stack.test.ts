@@ -6,7 +6,7 @@ import { DataStack } from "./data-stack";
 import { EcsStack } from "./ecs-stack";
 import { NetworkStack } from "./network-stack";
 
-function synth(props: { enableRunTask?: boolean } = {}): Template {
+function synth(props: { enableRunTask?: boolean; certificateArn?: string } = {}): Template {
   const app = new App();
   const network = new NetworkStack(app, "TestNetwork", { envName: "test" });
   const data = new DataStack(app, "TestData", {
@@ -155,5 +155,20 @@ describe("EcsStack", () => {
       );
     expect(hasRunTask(template)).toBe(false);
     expect(hasRunTask(synth({ enableRunTask: true }))).toBe(true);
+  });
+
+  it("terminates TLS at the ALB and redirects plain HTTP when a certificate is supplied", () => {
+    const withTls = synth({
+      certificateArn: "arn:aws:acm:us-east-1:123456789012:certificate/abc",
+    });
+    const listeners = Object.values(withTls.findResources("AWS::ElasticLoadBalancingV2::Listener"));
+    const protocols = listeners.map((l) => l.Properties?.Protocol);
+    expect(protocols).toContain("HTTPS");
+
+    // Without the redirect, an agent that forgets the scheme sends its OAuth bearer token
+    // (ADR-007) over cleartext and the ALB happily serves it.
+    const http = listeners.find((l) => l.Properties?.Protocol === "HTTP");
+    expect(http?.Properties?.DefaultActions?.[0]?.Type).toBe("redirect");
+    expect(http?.Properties?.DefaultActions?.[0]?.RedirectConfig?.Protocol).toBe("HTTPS");
   });
 });

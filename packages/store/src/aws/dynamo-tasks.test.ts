@@ -106,4 +106,28 @@ describe.skipIf(!dynamoAvailable)("DynamoTaskStore", () => {
     expect(await store.get("fresh")).not.toBeNull();
     expect(await store.get("no-ttl")).not.toBeNull();
   });
+
+  it("reaps across Scan pages, not just the first one", async () => {
+    // `deleteExpired` paginates on `LastEvaluatedKey`. With a handful of small items a Scan
+    // returns everything in one page, so the loop's second iteration never runs and the
+    // production reaper — which faces a real backlog — is effectively untested. A small page
+    // size forces the multi-page path deterministically.
+    const paged = new DynamoTaskStore({
+      client: tables.client,
+      tableName: tables.tasksTable,
+      scanPageSize: 1,
+    });
+    const expired = new Date(Date.now() - 1000);
+    for (const runId of ["a", "b", "c", "d", "e"]) {
+      await paged.put({ runId, state: "completed", expiresAt: expired });
+    }
+    await paged.put({ runId: "keep", state: "working", ttlMs: 60_000 });
+
+    // All five, summed across pages — a single-page implementation would report 1.
+    expect(await paged.deleteExpired()).toBe(5);
+    for (const runId of ["a", "b", "c", "d", "e"]) {
+      expect(await paged.get(runId)).toBeNull();
+    }
+    expect(await paged.get("keep")).not.toBeNull();
+  });
 });

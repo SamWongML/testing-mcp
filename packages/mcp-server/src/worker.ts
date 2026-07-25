@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import type { ManifestEntry } from "@atp/schema";
+import type { Config, ManifestEntry } from "@atp/schema";
 import type { ExecutionResult } from "@atp/schema";
 import {
   claim,
@@ -45,6 +45,26 @@ export interface WorkerOptions {
   /** Stop after this many runs. `1` is the one-shot mode an `ecs:RunTask`-launched task uses
    *  (§11.3 mode 2): claim one job, finish it, exit. Unset ⇒ run until stopped. */
   maxRuns?: number;
+  /** Claim only this run's job (§11.3 mode 2). The one-off task was launched for one
+   *  specific run and must not drain arbitrary queue head. */
+  runId?: string;
+  /** Stop after this long with nothing claimed. Bounds a one-off task whose run was already
+   *  taken by a pooled worker, so it exits instead of idling as billable capacity. */
+  idleTimeoutMs?: number;
+}
+
+/**
+ * Map validated config onto {@link WorkerOptions}. This is the *only* thing connecting the
+ * environment the `ecs:RunTask` launcher sets (`WORKER_ONCE`, `ATP_RUN_ID`) to the worker
+ * loop — without it those variables are decorative and a launched task runs forever.
+ */
+export function workerOptionsFromConfig(config: Config): WorkerOptions {
+  if (!config.WORKER_ONCE) return {};
+  return {
+    maxRuns: 1,
+    runId: config.ATP_RUN_ID,
+    idleTimeoutMs: config.WORKER_IDLE_TIMEOUT_MS,
+  };
 }
 
 const DEFAULTS = {
@@ -220,7 +240,7 @@ export async function claimAndRun(
 ): Promise<boolean> {
   const db = requireDb(ctx);
   if (ctx.telemetry) ctx.telemetry.metrics.setQueueDepth(await queueDepth(db));
-  const job = await claim(db, workerId);
+  const job = await claim(db, workerId, { runId: opts.runId });
   if (!job) return false;
   await runClaimedJob(ctx, job, workerId, opts);
   return true;
@@ -265,6 +285,7 @@ export function startWorker(ctx: ServerContext, opts: WorkerOptions = {}): Worke
   let lastReap = 0;
   let lastSweep = Date.now();
   let completed = 0;
+  let idleSince = Date.now();
 
   const loop = (async () => {
     while (running) {
@@ -279,8 +300,19 @@ export function startWorker(ctx: ServerContext, opts: WorkerOptions = {}): Worke
           if (swept > 0) ctx.logger?.debug({ swept }, "swept expired task rows");
         }
         const ran = await claimAndRun(ctx, workerId, opts);
-        if (ran && opts.maxRuns !== undefined && ++completed >= opts.maxRuns) running = false;
-        else if (!ran) await sleep(pollMs);
+        if (ran) {
+          idleSince = Date.now();
+          if (opts.maxRuns !== undefined && ++completed >= opts.maxRuns) running = false;
+        } else if (
+          opts.idleTimeoutMs !== undefined &&
+          Date.now() - idleSince >= opts.idleTimeoutMs
+        ) {
+          // Nothing left to do (typically: the pool claimed this run first). Exiting frees
+          // the task rather than leaving it idling as billable capacity.
+          running = false;
+        } else {
+          await sleep(pollMs);
+        }
       } catch (err) {
         console.error(`[worker ${workerId}] loop error:`, errorMessage(err));
         await sleep(pollMs);

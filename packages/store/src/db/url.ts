@@ -56,9 +56,15 @@ export function resolveDatabaseUrl(config: DatabaseUrlConfig): string | undefine
   if (!config.DATABASE_SECRET) return undefined;
 
   const { username, password, host, port, dbname } = parseSecret(config.DATABASE_SECRET);
-  // Generated passwords contain punctuation that is structural in a URL (`#`, `/`, `?`, `:`),
-  // so both credentials are percent-encoded rather than trusted to be URL-safe.
+  // Every interpolated field is percent-encoded, not just the credentials: `#`, `/`, `?` and
+  // `@` are all structural in a URL, and a parser silently truncates rather than erroring —
+  // `dbname: "atp#staging"` would connect to database `atp`, and an `@` in the host would
+  // re-point the connection at whatever followed it. Silent mis-routing, not a crash.
   const user = encodeURIComponent(username);
   const pass = encodeURIComponent(password);
-  return `postgresql://${user}:${pass}@${host}:${port}/${dbname ?? "atp"}`;
+  const database = encodeURIComponent(dbname ?? "atp");
+  if (/[@/?#\\]/.test(host)) {
+    throw new Error(`DATABASE_SECRET host contains a URL-structural character: ${host}`);
+  }
+  return `postgresql://${user}:${pass}@${host}:${port}/${database}`;
 }

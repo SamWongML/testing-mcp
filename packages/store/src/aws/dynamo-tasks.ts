@@ -1,8 +1,15 @@
 import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { DeleteCommand, GetCommand, PutCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  DeleteCommand,
+  GetCommand,
+  PutCommand,
+  ScanCommand,
+  UpdateCommand,
+} from "@aws-sdk/lib-dynamodb";
 
 import type { PutTaskInput, TaskPatch, TaskRecord, TaskState, TaskStateStore } from "../tasks";
+import { resolveExpiry } from "../tasks";
 import { TASK_ATTRS, TASK_KEY_ATTR, fromEpochSeconds, toEpochSeconds } from "./attributes";
 
 /**
@@ -20,9 +27,15 @@ import { TASK_ATTRS, TASK_KEY_ATTR, fromEpochSeconds, toEpochSeconds } from "./a
 export interface DynamoTaskStoreOptions {
   client: DynamoDBDocumentClient;
   tableName: string;
+  /** Max items per `Scan` page in {@link DynamoTaskStore.deleteExpired}. Bounds the working
+   *  set per round-trip; tests set it small to exercise the pagination loop deterministically. */
+  scanPageSize?: number;
 }
 
 type Item = Record<string, unknown>;
+
+/** Items per `Scan` page during the TTL sweep. */
+const DEFAULT_SCAN_PAGE_SIZE = 250;
 
 function toRecord(item: Item): TaskRecord {
   const ttl = item[TASK_ATTRS.expiresAt];
@@ -38,12 +51,6 @@ function toRecord(item: Item): TaskRecord {
     createdAt: new Date(item[TASK_ATTRS.createdAt] as string),
     updatedAt: new Date(item[TASK_ATTRS.updatedAt] as string),
   };
-}
-
-function resolveExpiry(input: Pick<PutTaskInput, "expiresAt" | "ttlMs">): Date | undefined {
-  if (input.expiresAt) return input.expiresAt;
-  if (input.ttlMs !== undefined) return new Date(Date.now() + input.ttlMs);
-  return undefined;
 }
 
 interface UpdateParts {
@@ -94,10 +101,12 @@ function buildUpdate(values: Item, rawSets: Record<string, string> = {}): Update
 export class DynamoTaskStore implements TaskStateStore {
   private readonly client: DynamoDBDocumentClient;
   private readonly tableName: string;
+  private readonly scanPageSize: number;
 
   constructor(options: DynamoTaskStoreOptions) {
     this.client = options.client;
     this.tableName = options.tableName;
+    this.scanPageSize = options.scanPageSize ?? DEFAULT_SCAN_PAGE_SIZE;
   }
 
   private key(runId: string): Item {
@@ -128,7 +137,9 @@ export class DynamoTaskStore implements TaskStateStore {
     const parts = buildUpdate(
       { ...values, [TASK_ATTRS.updatedAt]: now },
       opts.preserveCreatedAt
-        ? { [TASK_ATTRS.createdAt]: `#${TASK_ATTRS.createdAt} = if_not_exists(#${TASK_ATTRS.createdAt}, :created)` }
+        ? {
+            [TASK_ATTRS.createdAt]: `#${TASK_ATTRS.createdAt} = if_not_exists(#${TASK_ATTRS.createdAt}, :created)`,
+          }
         : {},
     );
     if (opts.preserveCreatedAt) {
@@ -206,7 +217,9 @@ export class DynamoTaskStore implements TaskStateStore {
       if (value === undefined) continue; // patch semantics: absent ⇒ untouched
       values[attr] = value instanceof Date ? toEpochSeconds(value) : value;
     }
-    if (Object.keys(values).length === 0) return this.get(runId);
+    // NB: an empty patch still writes, because `PostgresTaskStore.update` always includes
+    // `updated_at = now()` in its SET. Short-circuiting to a read here would make the two
+    // backends observably different, which the store-selection contract forbids.
     // Absent task ⇒ null, matching the Postgres store's "no row updated" result.
     return this.write(runId, values, { condition: `attribute_exists(#${TASK_KEY_ATTR})` });
   }
@@ -241,12 +254,16 @@ export class DynamoTaskStore implements TaskStateStore {
           ExpressionAttributeNames: { "#ttl": TASK_ATTRS.expiresAt, "#pk": TASK_KEY_ATTR },
           ExpressionAttributeValues: { ":cutoff": cutoff },
           ProjectionExpression: "#pk",
+          Limit: this.scanPageSize,
           ExclusiveStartKey: startKey,
         }),
       );
       for (const item of page.Items ?? []) {
         await this.client.send(
-          new DeleteCommand({ TableName: this.tableName, Key: this.key(item[TASK_KEY_ATTR] as string) }),
+          new DeleteCommand({
+            TableName: this.tableName,
+            Key: this.key(item[TASK_KEY_ATTR] as string),
+          }),
         );
         deleted += 1;
       }

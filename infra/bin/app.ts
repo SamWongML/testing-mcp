@@ -21,6 +21,7 @@ const imageUri =
 const alarmEmail = app.node.tryGetContext("alarmEmail") as string | undefined;
 const otlpEndpoint = app.node.tryGetContext("otlpEndpoint") as string | undefined;
 const enableRunTask = app.node.tryGetContext("enableRunTask") === "true";
+const certificateArn = app.node.tryGetContext("certificateArn") as string | undefined;
 
 // Unset in CI so `cdk synth` stays region/account agnostic; set at deploy time.
 const env = {
@@ -61,6 +62,7 @@ new EcsStack(app, `${prefix}-Ecs`, {
   enableRunTask,
   auth,
   otlpEndpoint,
+  certificateArn,
 });
 
 new ObservabilityStack(app, `${prefix}-Observability`, { env, envName, alarmEmail });

@@ -57,4 +57,25 @@ describe("ObservabilityStack", () => {
     const alarms = Object.values(withEmail.findResources("AWS::CloudWatch::Alarm"));
     expect(alarms.every((a) => (a.Properties?.AlarmActions ?? []).length > 0)).toBe(true);
   });
+
+  it("queries runs_total on the dimension key the app actually publishes", () => {
+    // CloudWatch matches dimensions as an exact set: querying `state` when the app emits
+    // `status` yields no datapoints at all. The alarm does not error — it sits in
+    // INSUFFICIENT_DATA forever, so a collapsing pass rate pages nobody. The matching
+    // assertion on the emitting side lives in `packages/mcp-server/src/telemetry.test.ts`.
+    const alarms = Object.values(template.findResources("AWS::CloudWatch::Alarm"));
+    const dimensionKeys = new Set(
+      alarms.flatMap((a) => {
+        const direct = (a.Properties?.Dimensions ?? []) as { Name: string }[];
+        const viaMath = (
+          (a.Properties?.Metrics ?? []) as {
+            MetricStat?: { Metric?: { Dimensions?: { Name: string }[] } };
+          }[]
+        ).flatMap((m) => m.MetricStat?.Metric?.Dimensions ?? []);
+        return [...direct, ...viaMath].map((d) => d.Name);
+      }),
+    );
+    expect(dimensionKeys).toContain("status");
+    expect(dimensionKeys).not.toContain("state");
+  });
 });

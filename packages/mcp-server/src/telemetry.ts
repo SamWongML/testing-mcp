@@ -33,6 +33,13 @@ import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
  * console locally, OTLP (X-Ray/CloudWatch) in production, in-memory in tests.
  */
 
+/** The attribute key `runs_total`/`run_duration_ms` are dimensioned by. The CloudWatch alarms
+ *  in `infra/src/observability-stack.ts` query this exact key (`RUN_STATE_DIMENSION`), and
+ *  CloudWatch matches dimensions as an exact set — a mismatch silently yields no datapoints
+ *  and leaves the alarms in INSUFFICIENT_DATA forever rather than erroring. Tests on both
+ *  sides pin the literal. */
+export const RUN_STATE_ATTRIBUTE = "status";
+
 /** The run/queue metric instruments (§15). Thin wrappers so callers record intent, not OTel. */
 export interface RunMetrics {
   /** One run reached a terminal state — bumps `runs_total{status}` + records `run_duration_ms`. */
@@ -119,8 +126,8 @@ function createRunMetrics(meter: Meter): RunMetrics {
   });
   return {
     recordRun(status, durationMs) {
-      runsTotal.add(1, { status });
-      runDuration.record(durationMs, { status });
+      runsTotal.add(1, { [RUN_STATE_ATTRIBUTE]: status });
+      runDuration.record(durationMs, { [RUN_STATE_ATTRIBUTE]: status });
     },
     recordAssertionFailure(test, count = 1) {
       assertionFailures.add(count, { test });

@@ -8,6 +8,7 @@ import type { Construct } from "constructs";
 import {
   ASSERTION_FAILURES_METRIC,
   METRIC_NAMESPACE,
+  RUN_STATE_DIMENSION,
   QUEUE_DEPTH_METRIC,
   RUN_DURATION_METRIC,
   RUNS_TOTAL_METRIC,
@@ -64,8 +65,12 @@ export class ObservabilityStack extends Stack {
       statistic: "p95",
       period: Duration.minutes(5),
     });
-    const runsCompleted = metric(RUNS_TOTAL_METRIC, { dimensions: { state: "completed" } });
-    const runsFailed = metric(RUNS_TOTAL_METRIC, { dimensions: { state: "failed" } });
+    const runsCompleted = metric(RUNS_TOTAL_METRIC, {
+      dimensions: { [RUN_STATE_DIMENSION]: "completed" },
+    });
+    const runsFailed = metric(RUNS_TOTAL_METRIC, {
+      dimensions: { [RUN_STATE_DIMENSION]: "failed" },
+    });
     const assertionFailures = metric(ASSERTION_FAILURES_METRIC);
 
     const alarm = (

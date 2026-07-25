@@ -53,4 +53,32 @@ describe("resolveDatabaseUrl", () => {
       /DATABASE_SECRET/,
     );
   });
+
+  it("percent-encodes the database name too", () => {
+    // `#` starts a URL fragment, so an unencoded dbname silently truncates and the app
+    // connects to the wrong database without any error.
+    const secret = JSON.stringify({
+      username: "atp",
+      password: "pw",
+      host: "db.internal",
+      port: 5432,
+      dbname: "atp#staging",
+    });
+    const url = resolveDatabaseUrl({ DATABASE_SECRET: secret })!;
+    expect(url).toBe("postgresql://atp:pw@db.internal:5432/atp%23staging");
+    expect(decodeURIComponent(new URL(url).pathname.slice(1))).toBe("atp#staging");
+  });
+
+  it("refuses a host carrying URL-structural characters", () => {
+    // `host: "real.example.com@evil.example.com"` would otherwise parse as userinfo +
+    // host, silently re-pointing the connection at the attacker-controlled tail.
+    const secret = JSON.stringify({
+      username: "atp",
+      password: "pw",
+      host: "real.example.com@evil.example.com",
+      port: 5432,
+      dbname: "atp",
+    });
+    expect(() => resolveDatabaseUrl({ DATABASE_SECRET: secret })).toThrow(/URL-structural/);
+  });
 });

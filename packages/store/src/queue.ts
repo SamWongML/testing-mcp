@@ -42,17 +42,31 @@ export async function enqueue(db: Db, input: EnqueueInput = {}): Promise<Job> {
   return row!;
 }
 
+export interface ClaimOptions {
+  /** Claim only this run's job. Used by the §11.3 mode-2 one-off worker, which exists to
+   *  give one *particular* run a dedicated container — an untargeted claim would let it
+   *  pick up whatever is at the head of the queue instead. `null` if that job is no longer
+   *  claimable (a pooled worker got there first), which is a clean exit, not an error. */
+  runId?: string;
+}
+
 /**
  * Claim the highest-priority ready job, or `null` if none. The `SELECT … FOR UPDATE
  * SKIP LOCKED` inside the transaction row-locks the pick so concurrent claimers skip
  * it and take the next one — no job is ever claimed twice. The follow-up UPDATE returns
  * the fully typed row.
  */
-export async function claim(db: Db, workerId: string): Promise<Job | null> {
+export async function claim(
+  db: Db,
+  workerId: string,
+  opts: ClaimOptions = {},
+): Promise<Job | null> {
   return db.transaction(async (tx) => {
+    const targeted = opts.runId !== undefined;
     const picked = await tx.execute<{ id: string }>(sql`
       SELECT id FROM jobs
       WHERE status = 'queued' AND run_after <= now()
+        ${targeted ? sql`AND run_id = ${opts.runId}` : sql``}
       ORDER BY priority DESC, created_at
       FOR UPDATE SKIP LOCKED
       LIMIT 1

@@ -31,7 +31,7 @@ jobs:
           - 8000:8000
       # S3-compatible artifact store (P11, §16.3), incl. presigned-URL fetches.
       minio:
-        image: bitnami/minio:latest
+        image: bitnami/minio:2025.4.22
         env:
           MINIO_ROOT_USER: atp
           MINIO_ROOT_PASSWORD: atpsecret

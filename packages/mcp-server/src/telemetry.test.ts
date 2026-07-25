@@ -6,7 +6,7 @@ import {
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { initTelemetry, withSpan, type Telemetry } from "./telemetry";
+import { initTelemetry, RUN_STATE_ATTRIBUTE, withSpan, type Telemetry } from "./telemetry";
 
 /**
  * Tracing + metrics (research §15). Spans nest MCP-call → run → SUT-call so a run is traceable
@@ -92,5 +92,11 @@ describe("telemetry", () => {
 
     expect(byName("assertion_failures_total")).toBeDefined();
     expect(byName("run_duration_ms")).toBeDefined();
+  });
+
+  it("dimensions runs_total by `status` — the key the CloudWatch alarms query", () => {
+    // Paired with the assertion in `infra/src/observability-stack.test.ts`. These two must
+    // agree on the literal or the alarms silently never fire; nothing else couples them.
+    expect(RUN_STATE_ATTRIBUTE).toBe("status");
   });
 });

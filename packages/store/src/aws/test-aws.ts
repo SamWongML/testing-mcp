@@ -7,7 +7,7 @@ import {
   waitUntilTableExists,
 } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { GetCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { CreateBucketCommand, DeleteBucketCommand, S3Client } from "@aws-sdk/client-s3";
 
 import { createDocumentClient } from "./client";
@@ -40,6 +40,8 @@ export interface TestTables {
   /** Raw item read, bypassing `DynamoTaskStore` — lets a test prove state really landed
    *  in DynamoDB rather than trusting the adapter it is exercising. */
   taskItem: (runId: string) => Promise<Record<string, unknown> | null>;
+  /** Raw scan of the tasks table, for assertions where the runId isn't known up front. */
+  scanTasks: () => Promise<Record<string, unknown>[]>;
   close: () => Promise<void>;
 }
 
@@ -101,6 +103,10 @@ export async function makeTestTables(): Promise<TestTables> {
         }),
       );
       return Item ?? null;
+    },
+    scanTasks: async () => {
+      const { Items } = await client.send(new ScanCommand({ TableName: tasksTable }));
+      return Items ?? [];
     },
     close: async () => {
       await raw.send(new DeleteTableCommand({ TableName: tasksTable }));

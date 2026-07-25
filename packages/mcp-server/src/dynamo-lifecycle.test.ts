@@ -91,4 +91,47 @@ describe.skipIf(!pgAvailable || !dynamoAvailable)("async lifecycle on DynamoDB t
     expect(await claimAndRun(ctx, "worker-1")).toBe(true);
     expect(await claimAndRun(ctx, "worker-1")).toBe(false);
   });
+
+  it("adopts an orphaned idempotency claim instead of reporting a run that does not exist", async () => {
+    // Crash window: the idempotency key is claimed, then the process dies before the task
+    // item is created. Every later resubmission finds `claimed: false` pointing at a runId
+    // with no task — if we trust the claim blindly we answer "working" for a run that was
+    // never created, never enqueued, and never fails. `get_run` on that id throws, so the
+    // client is told two contradictory things.
+    const orphanRunId = "orphaned-run-id";
+    await ctx.taskStore!.idempotency!.claim("stranded", orphanRunId);
+    expect(await tables.taskItem(orphanRunId)).toBeNull();
+
+    const submitted = await submitRun(ctx, {
+      entryId: "identity.login",
+      env: { baseUrl: sut.url },
+      idempotencyKey: "stranded",
+    });
+
+    // The key still resolves to the original run id (idempotency holds)…
+    expect(submitted.runId).toBe(orphanRunId);
+    // …but the strand is healed: the task exists and the job is runnable.
+    expect(await tables.taskItem(orphanRunId)).toMatchObject({ state: "working" });
+    expect(await claimAndRun(ctx, "worker-heal")).toBe(true);
+    expect((await getRun(ctx, orphanRunId))?.state).toBe("completed");
+  });
+
+  it("fails the task when the job cannot be enqueued, rather than leaving it working forever", async () => {
+    // The DynamoDB path is not transactional: the task item is created before the job row.
+    // If the enqueue throws, a client would otherwise poll a `working` task no worker will
+    // ever pick up. Closing the pool makes the enqueue fail for real.
+    await store.close();
+
+    await expect(
+      submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } }),
+    ).rejects.toThrow();
+
+    const items = await tables.scanTasks();
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ state: "failed" });
+    expect(items[0]?.error).toMatch(/enqueue/i);
+
+    // afterEach closes the store again; make that a no-op rather than a double-close throw.
+    store = { ...store, close: async () => {} };
+  });
 });

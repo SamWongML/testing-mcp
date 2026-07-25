@@ -159,7 +159,12 @@ export async function submitRun(ctx: ServerContext, input: SubmitRunInput): Prom
       const claimed = await provider.idempotency.claim(input.idempotencyKey, runId, ttlMs);
       if (!claimed.claimed) {
         const existing = await tasks.get(claimed.runId);
-        return { runId: claimed.runId, state: existing?.state ?? "working", deduped: true };
+        if (existing) return { runId: claimed.runId, state: existing.state, deduped: true };
+        // Claimed, but no task exists: the earlier submitter died between claiming the key
+        // and creating the task. Trusting the claim here would report `working` for a run
+        // that was never created, never enqueued, and can never fail — while `get_run` on
+        // that same id throws "no run". Adopt the id instead and finish what it started;
+        // idempotency still holds (the key keeps resolving to one run id).
       }
       runId = claimed.runId;
     } else {

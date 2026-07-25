@@ -4,6 +4,7 @@ import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ecsp from "aws-cdk-lib/aws-ecs-patterns";
+import * as acm from "aws-cdk-lib/aws-certificatemanager";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
@@ -52,6 +53,10 @@ export interface EcsStackProps extends StackProps {
   auth?: { issuer: string; resource: string; jwksUri: string };
   /** OTLP collector endpoint for traces/metrics (P10 `initTelemetry` exporter selection). */
   otlpEndpoint?: string;
+  /** ACM certificate for the ALB. **Strongly recommended**: without it the listener is plain
+   *  HTTP, so OAuth bearer tokens (ADR-007) would cross the network in cleartext. Only omit
+   *  for a private, non-authenticated deployment behind another TLS boundary. */
+  certificateArn?: string;
 }
 
 const CONTAINER_PORT = DEFAULT_CONTAINER_PORT;
@@ -127,6 +132,14 @@ export class EcsStack extends Stack {
       memoryLimitMiB: 1024,
       desiredCount: props.serverDesiredCount ?? 2,
       loadBalancer,
+      ...(props.certificateArn
+        ? {
+            certificate: acm.Certificate.fromCertificateArn(this, "Cert", props.certificateArn),
+            protocol: elbv2.ApplicationProtocol.HTTPS,
+            // Anything arriving on :80 is bounced to :443 rather than served in the clear.
+            redirectHTTP: true,
+          }
+        : {}),
       // Never drop below the desired count mid-deploy: the surface must stay servable.
       minHealthyPercent: 100,
       taskSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
@@ -242,10 +255,18 @@ export class EcsStack extends Stack {
 
     if (props.enableRunTask) {
       // §11.3 mode 2: the server may launch a one-off Fargate task for a very long run.
+      // The app launches by *family* (`RUN_TASK_DEFINITION` below), so the grant must cover
+      // every revision of that family — a grant pinned to one revision breaks the next deploy.
       serverRole.addToPrincipalPolicy(
         new iam.PolicyStatement({
           actions: ["ecs:RunTask"],
-          resources: [workerTaskDef.taskDefinitionArn],
+          resources: [
+            Stack.of(this).formatArn({
+              service: "ecs",
+              resource: "task-definition",
+              resourceName: `${workerTaskDef.family}:*`,
+            }),
+          ],
           conditions: { ArnEquals: { "ecs:cluster": this.cluster.clusterArn } },
         }),
       );
@@ -254,6 +275,9 @@ export class EcsStack extends Stack {
         new iam.PolicyStatement({
           actions: ["iam:PassRole"],
           resources: [workerTaskDef.taskRole.roleArn, workerTaskDef.executionRole!.roleArn],
+          // Without this the server could hand these roles to any service that accepts a
+          // PassRole, not just ECS.
+          conditions: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
         }),
       );
     }

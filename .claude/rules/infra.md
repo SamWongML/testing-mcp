@@ -28,15 +28,26 @@ Reintroducing an asset would make every PR need a Docker daemon.
 `data` and `ecs` both build on `network`, and `ecs` reads `data`'s table/bucket names. So any
 construct that makes `data` or `network` reference something **defined in `ecs`** is a
 dependency cycle CDK rejects at synth. That is why `NetworkStack` owns *both* the app and ALB
-security groups, and why the ALB is constructed explicitly rather than by the
-`ApplicationLoadBalancedFargateService` pattern. Grant ingress **downward** (data ← network's
-SG), never upward.
+security groups, and why the ALB **instance** is constructed here and handed to the
+`ApplicationLoadBalancedFargateService` pattern via its `loadBalancer` prop — the pattern is
+still used, it just no longer creates the security group that caused the cycle. Grant ingress
+**downward** (data ← network's SG), never upward.
 
 ## Names that must match the application
 
 - DynamoDB keys/attributes (`run_id`, `idem_key`, `ttl`) mirror `packages/store/src/aws/attributes.ts`.
 - Metric names live in `infra/src/metrics.ts` and mirror `mcp-server/src/telemetry.ts`. A
   rename on one side silently breaks worker autoscaling — change both.
+- **Dimension keys too, and this one has already bitten.** `runs_total` is emitted with the
+  attribute key `RUN_STATE_ATTRIBUTE` (`telemetry.ts`) and queried with `RUN_STATE_DIMENSION`
+  (`metrics.ts`). CloudWatch matches dimensions as an **exact set**: a mismatch does not error,
+  it returns no datapoints, so the alarm sits in `INSUFFICIENT_DATA` forever and reads as
+  healthy. P11 shipped `status` vs `state` and disabled two alarms. Tests on both sides pin the
+  literal — keep them.
+- **Metrics only reach CloudWatch through a collector you must run yourself.** The app exports
+  OTLP; nothing in `infra/` provisions an ADOT collector. Until one translates OTLP →
+  `PutMetricData` in namespace `ATP`, the dashboard is blank and `queue_depth` autoscaling
+  never fires.
 - `CONTAINER_PORT` is re-exported from `network-stack.ts` so the SG rule and the target group
   cannot drift apart.
 

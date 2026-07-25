@@ -114,3 +114,33 @@ doing them out of order.
   P8 review items; P11's `isolated` flag makes a large tagged selection able to launch many
   one-off Fargate tasks at once, so bound the concurrency before using `isolated` with a broad
   selection.
+- **No OTel collector is provisioned (from the P11 review) → required before the alarms or
+  worker autoscaling do anything:** the app exports OTLP only, and `infra/` ships no ADOT
+  collector. Until one translates OTLP → CloudWatch `PutMetricData` in namespace `ATP`,
+  preserving `infra/src/metrics.ts`'s metric names and the `status` dimension on `runs_total`,
+  no metric reaches CloudWatch — the dashboard is blank, every alarm sits in
+  `INSUFFICIENT_DATA`, and the worker's `queue_depth` step-scaling never fires. Add an ADOT
+  sidecar to both task definitions (plus its config in SSM) or point `otlpEndpoint` at a
+  central gateway. Documented in `docs/deploy.md`; deliberately not folded into P11.
+- **Worker SIGTERM drain is unbounded (from the P11 review) → if suites outgrow `stopTimeout`:**
+  `stop()` stops claiming new work and waits for the in-flight run to finish naturally; it never
+  aborts the in-flight HTTP request (only a cancel request does). ECS SIGKILLs after
+  `stopTimeout` (120s), after which the lease reaper requeues the run and it re-executes from
+  the start. Either raise `stopTimeout` past the longest suite or add a bounded drain that
+  converts to a cancel once the budget lapses.
+- **No sweep for orphaned idempotency claims (from the P11 review) → low priority:** a crash
+  between claiming the key and creating the task is now *self-healing* (the next submission
+  adopts the claim), but if no resubmission ever arrives the key sits until DynamoDB's native
+  TTL reaps it — up to ~48h past expiry, since `DynamoIdempotencyStore` has no `deleteExpired`
+  of its own unlike the tasks table. Harmless (it strands a key, not a run), but a periodic
+  sweep would make expiry deterministic the way the task sweep does.
+- **`submitRun`/`SdkTaskStore.createTask` still branch on `provider.transactional` (from the
+  P11 simplicity review) → if this code is touched again:** the create-or-dedupe → enqueue body
+  is repeated across both, and `select.ts`'s doc comment claims callers never see the backend
+  choice, which is not quite true. The clean fix is to move create+enqueue **into** the provider
+  (`submit(db, {...})`, one implementation per backend). Note if extracting a shared helper: the
+  transactional path must **not** catch the enqueue error — calling `tasks.update()` inside an
+  already-poisoned Postgres transaction would itself throw — so the asymmetry is load-bearing,
+  not laziness. The orphan-adoption fix has since made the two branches *more* different, which
+  weakens the extraction case further; revisit only alongside other work here.
+

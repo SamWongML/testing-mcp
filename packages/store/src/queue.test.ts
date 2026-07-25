@@ -160,4 +160,26 @@ describe.skipIf(!pgAvailable)("queue", () => {
     expect(await requestCancel(tdb.db, "nonexistent")).toBe(false);
     expect(await isCancelRequested(tdb.db, "no-such-job")).toBe(false);
   });
+
+  it("claims a specific run when targeted, ignoring higher-priority work", async () => {
+    // The §11.3 mode-2 one-off task exists to give *one particular* run a dedicated
+    // container. An untargeted claim would let it pick up whatever is at the head of the
+    // queue instead — the beefy isolated task running a trivial job while the long run it
+    // was launched for goes to a pooled worker.
+    await enqueue(tdb.db, { runId: "other", priority: 10 });
+    await enqueue(tdb.db, { runId: "mine", priority: 0 });
+
+    const claimed = await claim(tdb.db, "one-shot", { runId: "mine" });
+    expect(claimed?.runId).toBe("mine");
+
+    // The untargeted job is untouched and still claimable by the pool.
+    expect((await claim(tdb.db, "pool"))?.runId).toBe("other");
+  });
+
+  it("returns null when the targeted run is no longer claimable", async () => {
+    await enqueue(tdb.db, { runId: "taken" });
+    expect((await claim(tdb.db, "pool"))?.runId).toBe("taken");
+    // A pooled worker got there first: the one-shot task must not block or steal it.
+    expect(await claim(tdb.db, "one-shot", { runId: "taken" })).toBeNull();
+  });
 });

@@ -62,18 +62,17 @@ export function createTaskStoreProvider(config: Config): TaskStoreProvider {
   };
 }
 
-export interface ArtifactStoreSelection {
-  store: ArtifactStore;
-  close: () => void;
-}
-
-/** The artifact-store equivalent (§16.3): filesystem in dev/test, S3 in a deployment. */
-export function createArtifactStore(
-  config: Config,
-  fallbackDir: string,
-): ArtifactStoreSelection {
+/**
+ * The artifact-store equivalent (§16.3): filesystem in dev/test, S3 in a deployment.
+ *
+ * Unlike {@link createTaskStoreProvider} this returns the store directly, with no `close`.
+ * There is nowhere meaningful to call one from — `ServerContext` holds the store for the
+ * process's whole life and both entrypoints `process.exit()` immediately after shutdown, so
+ * the S3 client's sockets go with the process. A `close` nobody calls is worse than none.
+ */
+export function createArtifactStore(config: Config, fallbackDir: string): ArtifactStore {
   if (config.ARTIFACT_STORE === "local") {
-    return { store: new LocalArtifactStore(config.ARTIFACT_DIR ?? fallbackDir), close: () => {} };
+    return new LocalArtifactStore(config.ARTIFACT_DIR ?? fallbackDir);
   }
   if (!config.S3_BUCKET) {
     throw new Error("ARTIFACT_STORE=s3 requires S3_BUCKET");
@@ -81,8 +80,5 @@ export function createArtifactStore(
   const client: S3Client = new S3({
     ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT, forcePathStyle: true } : {}),
   });
-  return {
-    store: new S3ArtifactStore({ client, bucket: config.S3_BUCKET }),
-    close: () => client.destroy(),
-  };
+  return new S3ArtifactStore({ client, bucket: config.S3_BUCKET });
 }
