@@ -6,7 +6,9 @@ import { expandUnits, isSuite, runSuite, runTest, type RunOptionsBase } from "@a
 import { renderReport, reportExtension, type ReportFormat } from "@atp/reporting";
 import type { ExecutionResult, ManifestEntry, StepStatus } from "@atp/schema";
 
+import { goldenFromResult, type GoldenBlock, type GoldenCapture } from "./golden";
 import { startMockSut, type MockSut } from "./mock-sut";
+import { strictViolations, type Violation } from "./strict";
 
 /**
  * The `atp` CLI's command layer (research §P4). `list`/`validate` are thin views over an
@@ -34,16 +36,26 @@ export async function listEntries(opts: ListOptions = {}): Promise<ManifestEntry
   );
 }
 
-/** Compile the corpus and report how many entries it produced (throws on failure). */
-export async function validate(root: string = process.cwd()): Promise<{ entries: number }> {
+export interface ValidateResult {
+  entries: number;
+  violations: Violation[];
+}
+
+/**
+ * Compile the corpus (throws on a compile error) and check it against the §19 strictness
+ * rules. Violations are returned, not thrown, so the caller can print every one of them.
+ */
+export async function validate(root: string = process.cwd()): Promise<ValidateResult> {
   const manifest = await compile({ root });
-  return { entries: manifest.entries.length };
+  return { entries: manifest.entries.length, violations: strictViolations(manifest) };
 }
 
 export interface RunOptions {
   root?: string;
   params?: Record<string, unknown>;
   envName?: string;
+  /** An explicit SUT base URL. When set, the local mock is never started. */
+  baseUrl?: string;
 }
 
 /**
@@ -66,7 +78,7 @@ export async function runById(id: string, opts: RunOptions = {}): Promise<Execut
   // lose the authored value types and mishandle separators inside a dimension value).
   const unit = expandUnits(def).find((u) => u.id === id);
 
-  const preset = process.env.ATP_BASE_URL;
+  const preset = opts.baseUrl ?? process.env.ATP_BASE_URL;
   let sut: MockSut | undefined;
   const baseUrl = preset ?? (sut = await startMockSut()).url;
   try {
@@ -83,6 +95,26 @@ export async function runById(id: string, opts: RunOptions = {}): Promise<Execut
   } finally {
     await sut?.close();
   }
+}
+
+/**
+ * Run `id` once against a **real** SUT and derive golden-master parity assertions from what
+ * it answered (research §19 step 4) — the capture step that replaces `atp import`'s
+ * deliberately weak `status lt 500` scaffold.
+ *
+ * The base URL must be explicit (`--base-url` or `ATP_BASE_URL`). `runById` starts a local
+ * mock when neither is present, and assertions captured from the mock would describe fixture
+ * data while looking exactly like real coverage — so this refuses rather than falls back.
+ */
+export async function captureGolden(id: string, opts: RunOptions = {}): Promise<GoldenCapture> {
+  const baseUrl = opts.baseUrl ?? process.env.ATP_BASE_URL;
+  if (!baseUrl) {
+    throw new Error(
+      "atp golden: no SUT base URL — pass --base-url <url> or set ATP_BASE_URL. Parity " +
+        "assertions must be captured from the real service, never the local mock.",
+    );
+  }
+  return goldenFromResult(await runById(id, { ...opts, baseUrl }));
 }
 
 /**
@@ -126,6 +158,11 @@ export function formatList(entries: ManifestEntry[]): string {
       return `${e.id}\t${e.kind}\t${tags}\t${e.owner ?? ""}`.trimEnd();
     })
     .join("\n");
+}
+
+/** Golden blocks as pasteable source, one labelled `assert` per node. */
+export function formatGolden(blocks: GoldenBlock[]): string {
+  return blocks.map((b) => `// ${b.nodeId}\nassert: ${b.source},`).join("\n\n");
 }
 
 /** A human-readable run summary: a status headline, then one line per step. */

@@ -1,4 +1,4 @@
-import type { DeclarativeAssertion } from "@atp/schema";
+import type { DeclarativeAssertion, ExecutionResult } from "@atp/schema";
 
 /**
  * Golden-master parity helper (research §19 step 4). Migration is only trustworthy once a
@@ -47,4 +47,40 @@ export function renderAssertions(asserts: DeclarativeAssertion[]): string {
     return `  { ${parts.join(", ")} },`;
   });
   return `[\n${lines.join("\n")}\n]`;
+}
+
+/** One node's rendered parity assertions, ready to paste over its scaffolded `assert`. */
+export interface GoldenBlock {
+  nodeId: string;
+  /** TS source: the `assert` array literal derived from that node's captured response. */
+  source: string;
+}
+
+export interface GoldenCapture {
+  blocks: GoldenBlock[];
+  /** Nodes that did not execute, so no baseline exists to derive assertions from. */
+  missing: string[];
+}
+
+/**
+ * Derive per-node parity blocks from one captured run.
+ *
+ * A node that did not execute — skipped because an upstream node failed, cancelled, or
+ * errored before a response arrived — yields **no** assertions and is reported in `missing`
+ * instead. Emitting from a partial run would silently pin the wrong thing, which is worse
+ * than emitting nothing. A node that ran and *failed* is still a real baseline: its response
+ * is what the SUT actually does, and that is exactly what golden-master parity captures.
+ */
+export function goldenFromResult(result: ExecutionResult): GoldenCapture {
+  const blocks: GoldenBlock[] = [];
+  const missing: string[] = [];
+  for (const step of result.steps) {
+    if (!step.response) {
+      missing.push(step.id);
+      continue;
+    }
+    const { status, body } = step.response;
+    blocks.push({ nodeId: step.id, source: renderAssertions(goldenAssertions({ status, body })) });
+  }
+  return { blocks, missing };
 }

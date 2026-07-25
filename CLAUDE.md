@@ -73,8 +73,10 @@ pnpm test:quiet              # vitest run --reporter=dot — the in-loop default
 pnpm test                    # vitest run, full reporter — use when something fails
 pnpm format                  # prettier --write .   (Markdown is intentionally excluded)
 pnpm compile                 # discovery → dist/manifest.json
+pnpm validate                # compile + §19 strictness: no unwired __TODO_CHAIN__, no unfailable node
 pnpm atp list|run|validate   # local dev CLI over the tests/ corpus (P4)
 pnpm atp import <file.yaml>  # scaffold defineTest/defineSuite drafts + MIGRATION.md from Insomnia v5 (P9)
+pnpm atp golden <id> --base-url <url>   # run once against a real SUT → paste-ready parity asserts
 pnpm dev:server              # MCP HTTP surface (needs DATABASE_URL for the async path)
 pnpm dev:worker              # async run worker (requires DATABASE_URL)
 pnpm synth                   # cdk synth for all four stacks (no AWS creds, no Docker) (P11)
@@ -82,8 +84,8 @@ docker build -t atp:dev .    # the deployment image: MODE=server|worker|migrate
 ```
 
 CI (`.github/workflows/ci.yml`) runs — and must stay green on — install → typecheck → lint →
-test (with Postgres, dynamodb-local, and MinIO service containers) → compile → `pnpm synth` →
-`docker build`.
+test (with Postgres, dynamodb-local, and MinIO service containers) → compile → validate →
+`pnpm synth` → `docker build`.
 
 Narrow the test run while iterating: `pnpm exec vitest run <path>` (one file), `pnpm exec vitest run
 -t "<substring>"` (by name), `pnpm --filter @atp/engine test` (one package).
@@ -128,8 +130,12 @@ entry) · `run://{runId}/report.md` · `run://{runId}/trace.json`.
 - *Compose a suite* → `generate_suite`: reuse first (`list_tests` → `useTest`/`useStep`), explicit
   `needs`, `{{nodes.X.var}}` across branches.
 - *Migrate from Insomnia* → `atp import <file.yaml>` scaffolds drafts + `MIGRATION.md`; the
-  `import_insomnia_collection` prompt drives wiring the `__TODO_CHAIN__` response-refs + golden-master
-  parity assertions (`goldenAssertions`, §19). Deterministic transform in `packages/cli/src/import.ts`.
+  `import_insomnia_collection` prompt drives wiring the `__TODO_CHAIN__` response-refs, then
+  `atp golden <id> --base-url <url>` captures parity assertions from the real SUT (§19 step 4).
+  **`atp validate` is the definition of "migration finished"** — it fails while a `__TODO_CHAIN__`
+  survives or a node still carries only the scaffolded `status lt 500` (the pair that makes an
+  unfinished migration pass while being incapable of failing). Deterministic transform in
+  `packages/cli/src/import.ts`; rules in `strict.ts`; capture in `golden.ts` + `commands.ts`.
 - *Triage a failure* → `triage_failure {runId}`: `get_report` + `run://{id}/trace.json` → hypothesis
   (auth vs schema-drift vs timeout) → fix or quarantine → re-run.
 - *Regenerate reports* → `regenerate_reports {format}`: `list_runs` → `get_report {runId, format}` per

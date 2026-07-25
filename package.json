@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:quiet": "vitest run --reporter=dot",
     "compile": "tsx tools/compile/src/index.ts",
+    "validate": "tsx packages/cli/src/index.ts validate",
     "synth": "pnpm --filter @atp/infra synth",
     "atp": "tsx packages/cli/src/index.ts",
     "dev:server": "tsx watch packages/mcp-server/src/main.ts",

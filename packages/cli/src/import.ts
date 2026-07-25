@@ -52,7 +52,8 @@ const INSOMNIA_VAR_TAG = /\{\{\s*_\.([a-zA-Z0-9_]+)\s*\}\}/;
 /** An Insomnia response-ref / request tag (`{% response ... %}`) — the chaining "messy
  *  remainder" the deterministic importer cannot resolve; it becomes a TODO placeholder. */
 const RESPONSE_TAG = /\{%[\s\S]*?%\}/;
-const CHAIN_PLACEHOLDER = "__TODO_CHAIN__";
+/** Marks a request the importer could not resolve. `atp validate` fails while one survives. */
+export const CHAIN_PLACEHOLDER = "__TODO_CHAIN__";
 /** The placeholder assertion every scaffolded request carries until golden-master parity
  *  assertions replace it (a request that merely didn't 5xx — deliberately weak, see §19). */
 const STATUS_ASSERT = `[{ path: "status", op: "lt", value: 500 }]`;

@@ -48,9 +48,9 @@ function registerImportInsomnia(server: McpServer): void {
 2. Refine each generated draft under \`tests/<domain>/\`:
    - Wire every \`__TODO_CHAIN__\`: add an \`extract\` (e.g. \`{ as: "id", from: "body.id" }\`) on the source node and reference it here as \`{{nodes.<sourceNodeId>.<var>}}\`, and add the \`needs\` edge. Prefer \`{{nodes.X.var}}\` over \`{{vars.*}}\` across parallel branches.
    - Reuse before authoring: if a request already exists as a test, compose it with \`useTest\`/\`useStep\` rather than duplicating.
-   - Replace the placeholder \`assert: [{ path: "status", op: "lt", value: 500 }]\` with real parity assertions (next step).
-3. Golden-master parity (regression safety): run each migrated entry once against the SUT (\`atp run <id>\`), capture the baseline response, and add assertions that prove it reproduces the baseline — the exact status plus a shape check per key field. Do not over-assert run-to-run-variable values (tokens, ids, timestamps): assert their type, not their value.
-4. Validation gate: \`pnpm compile\` and \`pnpm typecheck\` must pass. Record the Insomnia-id → IR-id mapping in \`MIGRATION.md\` and retire the Insomnia file once the namespace reaches parity.`,
+   - Leave the placeholder \`assert: [{ path: "status", op: "lt", value: 500 }]\` alone for now — the next step replaces it with captured assertions.
+3. Golden-master parity (regression safety): run \`atp golden <id> --base-url <url>\` once per migrated entry. It executes the entry against the **real** SUT and prints a paste-ready \`assert\` block per node — the exact status plus a shape check per key field, so run-to-run-variable values (tokens, ids, timestamps) are asserted by type, not value. Paste each block over that node's placeholder \`assert\`. The command refuses to run without an explicit base URL, and refuses to emit for a node that did not execute — do not hand-write parity assertions to work around either refusal; fix the run and capture again.
+4. Validation gate: \`pnpm compile\`, \`pnpm typecheck\`, and \`atp validate\` must pass. \`atp validate\` is the definition of "migration finished": it fails while any \`__TODO_CHAIN__\` survives or any node still carries only the non-pinning \`status lt 500\` placeholder — the combination that makes an unfinished migration look green while being incapable of failing. Record the Insomnia-id → IR-id mapping in \`MIGRATION.md\` and retire the Insomnia file once the namespace reaches parity.`,
       ),
   );
 }
