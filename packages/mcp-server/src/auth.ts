@@ -25,6 +25,44 @@ export type Scope = (typeof SCOPES)[keyof typeof SCOPES];
  *  target of the `WWW-Authenticate` challenge on a 401. */
 export const PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
 
+/**
+ * Scope required by each SEP-1686 `tasks/*` JSON-RPC method.
+ *
+ * These methods are **not** ours to guard in a handler: the SDK's `Protocol` registers generic
+ * handlers for them the moment a `taskStore` is configured, dispatching straight into
+ * `SdkTaskStore` without passing through any tool callback — so `guardScope` never sees them
+ * (the `TaskStore` interface isn't even given the caller's `AuthInfo`). They are therefore gated
+ * at the HTTP layer by method name, which is the only place the request is both authenticated
+ * and still inspectable. Read methods mirror `get_run`/`get_run_result`; `tasks/cancel` mutates
+ * a run, so it mirrors `cancel_run` and requires `test:run`.
+ */
+export const TASK_METHOD_SCOPES: Readonly<Record<string, Scope>> = {
+  "tasks/get": SCOPES.READ,
+  "tasks/result": SCOPES.READ,
+  "tasks/list": SCOPES.READ,
+  "tasks/cancel": SCOPES.RUN,
+};
+
+/** The scopes a JSON-RPC payload requires at the HTTP layer, deduped. Accepts a single message
+ *  or a batch array; methods with no HTTP-layer requirement (`tools/call` etc., gated in their
+ *  handlers instead) contribute nothing. */
+export function requiredScopesFor(body: unknown): Scope[] {
+  const messages = Array.isArray(body) ? body : [body];
+  const required = new Set<Scope>();
+  for (const message of messages) {
+    const method = (message as { method?: unknown } | null)?.method;
+    if (typeof method === "string" && method in TASK_METHOD_SCOPES) {
+      required.add(TASK_METHOD_SCOPES[method]!);
+    }
+  }
+  return [...required];
+}
+
+/** The RFC 6750 §3.1 `insufficient_scope` challenge accompanying a 403. */
+export function insufficientScopeChallenge(scope: Scope): string {
+  return `Bearer error="insufficient_scope", error_description="requires scope ${scope}", scope="${scope}"`;
+}
+
 /** Extract the token from an `Authorization: Bearer <token>` header, or null if absent/other
  *  scheme. Case-insensitive on the scheme; a scheme with no token is treated as absent. */
 export function parseBearerToken(header: string | null | undefined): string | null {
@@ -99,12 +137,36 @@ export interface AuthenticatorConfig {
   keys?: JWTVerifyGetKey;
   /** JWKS endpoint (used when `keys` is not supplied). */
   jwksUri?: string;
+  /** Accepted signing algorithms; defaults to {@link ASYMMETRIC_ALGORITHMS}. */
+  algorithms?: string[];
 }
 
 /**
+ * The signing algorithms an access token may use. Deliberately **asymmetric only**: the server
+ * holds public keys from a JWKS, so an `HS*` (shared-secret) token is never legitimate here, and
+ * refusing them outright forecloses algorithm-confusion attacks should a JWKS ever be
+ * misconfigured to expose a symmetric key. (`alg: "none"` is separately impossible — jose
+ * rejects it unconditionally.)
+ */
+export const ASYMMETRIC_ALGORITHMS = [
+  "RS256",
+  "RS384",
+  "RS512",
+  "PS256",
+  "PS384",
+  "PS512",
+  "ES256",
+  "ES384",
+  "ES512",
+  "EdDSA",
+];
+
+/**
  * Build an {@link Authenticator}. Token verification enforces the signature (against the JWKS),
- * the issuer, the audience (RFC 8707 — the token must be minted for *this* resource), and
- * expiry; any failure rejects with a `jose` error the HTTP layer turns into a 401.
+ * an asymmetric algorithm, the issuer, the audience (RFC 8707 — the token must be minted for
+ * *this* resource), and expiry — `exp` is **required**, not merely validated when present, so a
+ * signed token that omits it cannot live forever. Any failure rejects with a `jose` error the
+ * HTTP layer turns into a 401.
  */
 export function createAuthenticator(config: AuthenticatorConfig): Authenticator {
   const keys = config.keys ?? createRemoteJWKSet(new URL(requireJwks(config.jwksUri)));
@@ -113,6 +175,8 @@ export function createAuthenticator(config: AuthenticatorConfig): Authenticator 
       const { payload } = await jwtVerify(token, keys, {
         issuer: config.issuer,
         audience: config.resource,
+        algorithms: config.algorithms ?? ASYMMETRIC_ALGORITHMS,
+        requiredClaims: ["exp"],
       });
       return {
         token,

@@ -88,6 +88,9 @@ export interface MintOptions {
   issuer?: string;
   audience?: string;
   expired?: boolean;
+  /** Omit the `exp` claim entirely — a validly-signed token that would never expire unless the
+   *  verifier explicitly requires the claim. */
+  noExpiry?: boolean;
 }
 
 export interface TestAuth {
@@ -96,6 +99,8 @@ export interface TestAuth {
   issuer: string;
   resource: string;
   mint: (opts?: MintOptions) => Promise<string>;
+  /** Mint an HS256-signed token with otherwise-valid claims — the algorithm-confusion probe. */
+  mintSymmetric: (opts?: MintOptions) => Promise<string>;
 }
 
 /**
@@ -120,11 +125,21 @@ export async function makeTestAuth(): Promise<TestAuth> {
       .setIssuer(opts.issuer ?? issuer)
       .setAudience(opts.audience ?? resource)
       .setIssuedAt();
-    jwt.setExpirationTime(opts.expired ? "-1m" : "5m");
+    if (!opts.noExpiry) jwt.setExpirationTime(opts.expired ? "-1m" : "5m");
     return jwt.sign(privateKey);
   };
 
-  return { authenticator, issuer, resource, mint };
+  const mintSymmetric = (opts: MintOptions = {}): Promise<string> =>
+    new SignJWT({ scope: (opts.scopes ?? [SCOPES.READ]).join(" ") })
+      .setProtectedHeader({ alg: "HS256", kid })
+      .setSubject(opts.clientId ?? "test-client")
+      .setIssuer(opts.issuer ?? issuer)
+      .setAudience(opts.audience ?? resource)
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(new Uint8Array(32)); // any symmetric key — it must be rejected on `alg` alone
+
+  return { authenticator, issuer, resource, mint, mintSymmetric };
 }
 
 export interface HttpHandle {

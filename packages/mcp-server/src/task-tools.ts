@@ -59,11 +59,22 @@ export function registerRunSuite(server: McpServer, ctx: ServerContext): void {
         const task = await extra.taskStore.createTask({ ttl: DEFAULT_TASK_TTL_MS });
         return { task };
       },
-      getTask: async (_args, extra) => extra.taskStore.getTask(extra.taskId),
+      // NOTE: the SDK never invokes these two — `executeToolHandler` calls only `createTask`,
+      // and all subsequent polling goes through the server-level `taskStore` via `Protocol`'s
+      // generic `tasks/get`/`tasks/result` handlers. They are required by `ToolTaskHandler` and
+      // kept correct in case that changes, but they are **not** where task reads are authorized:
+      // the real gate for `tasks/*` is by method name in `http.ts` (see `TASK_METHOD_SCOPES`).
+      // The `guardScope` calls here are belt-and-braces, not the load-bearing check.
+      getTask: async (_args, extra) => {
+        guardScope(ctx, extra, SCOPES.READ);
+        return extra.taskStore.getTask(extra.taskId);
+      },
       // The adapter's getTaskResult builds a CallToolResult (llm_summary + verdict); the
       // RequestTaskStore types it as the generic `Result`, so narrow it back here.
-      getTaskResult: async (_args, extra) =>
-        (await extra.taskStore.getTaskResult(extra.taskId)) as CallToolResult,
+      getTaskResult: async (_args, extra) => {
+        guardScope(ctx, extra, SCOPES.READ);
+        return (await extra.taskStore.getTaskResult(extra.taskId)) as CallToolResult;
+      },
     },
   );
 }

@@ -119,4 +119,29 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
       ),
     ).toBe(true);
   });
+
+  it("never persists a secret-shaped param to the audit log", async () => {
+    // `identity.login` really declares a `password` param, so this is the live leak path, not a
+    // hypothetical one (P10 review Major).
+    const conn = await connectClient(ctx);
+    try {
+      await conn.client.callTool({
+        name: "run_test",
+        arguments: {
+          id: "identity.login",
+          env: { baseUrl: sut.url },
+          params: { email: "qa@example.com", password: "s3cr3t-do-not-persist" },
+        },
+      });
+    } finally {
+      await conn.close();
+    }
+
+    const rows = await listAudit(store.db, { entryId: "identity.login" });
+    expect(rows.length).toBeGreaterThan(0);
+    const persisted = JSON.stringify(rows.map((r) => r.params));
+    expect(persisted).not.toContain("s3cr3t-do-not-persist");
+    expect(persisted).toContain("[REDACTED]");
+    expect(persisted).toContain("qa@example.com"); // non-secret params stay useful for audit
+  });
 });

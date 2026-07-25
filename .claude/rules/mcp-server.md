@@ -16,6 +16,21 @@ paths:
 - **Additive tool surface.** Never rename or remove a tool or a field; add optional fields.
   Existing clients must keep working across phases.
 
+## Authorization has two layers — know which one covers your code
+
+`guardScope` in a handler covers **only** requests the SDK routes through one of our callbacks:
+`tools/call` and `resources/read`. It does **not** and **cannot** cover the SEP-1686 `tasks/*`
+family (`tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel`): the SDK's `Protocol`
+registers its own generic handlers for those as soon as a `taskStore` is configured, dispatching
+straight into `SdkTaskStore` without a callback, and `TaskStore` is never given the caller's
+`AuthInfo`. Those methods are gated **by method name in `http.ts`** (`TASK_METHOD_SCOPES` +
+`requiredScopesFor` → 403 `insufficient_scope`).
+
+**So:** adding a tool ⇒ add `guardScope` in its handler. Adding or enabling any *protocol-level*
+method the SDK handles for us ⇒ add it to `TASK_METHOD_SCOPES`, because no handler guard will run.
+P10 shipped this bypass initially (any zero-scope token could cancel any run); `auth-http.test.ts`
+holds the regression tests.
+
 ## Layout
 
 - `context.ts` — `ServerContext`, the composition root (manifest, sourceRoot, artifacts,
@@ -30,6 +45,8 @@ paths:
   (jose JWT verify: signature/issuer/RFC 8707 audience/expiry → SDK `AuthInfo`). Side-effect free.
 - `guard.ts` — handler-side `guardScope` / `auditRun` / `principalOf`; both the scope check and
   the audit write **no-op** off the auth/db path, so handlers run unchanged in dev/test.
+  `redactAuditParams` masks secret-shaped **keys** before an audit row is written (the engine's
+  `redact()` is value-based and cannot cover an arbitrary caller-supplied params bag).
 - `logging.ts` — `createLogger` (Pino JSON + `REDACT_PATHS` secret scrub; `child({runId,…})`).
 - `telemetry.ts` — `initTelemetry` (OTel providers + undici auto-instrumentation for SUT spans),
   `withSpan` (active-span wrapper), `RunMetrics` (`runs_total`/`queue_depth`/…). Exporters

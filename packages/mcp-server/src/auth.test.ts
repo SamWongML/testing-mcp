@@ -118,4 +118,20 @@ describe("createAuthenticator.verify", () => {
     const token = await auth.mint({ scopes: [SCOPES.READ], expired: true });
     await expect(auth.authenticator.verify(token)).rejects.toBeInstanceOf(errors.JWTExpired);
   });
+
+  it("rejects a token with no exp claim — a non-expiring token must not be accepted", async () => {
+    // jose validates `exp` only when present, so without `requiredClaims` a signed token that
+    // simply omits `exp` would verify forever (P10 review Minor).
+    const token = await auth.mint({ scopes: [SCOPES.READ], noExpiry: true });
+    await expect(auth.authenticator.verify(token)).rejects.toBeInstanceOf(
+      errors.JWTClaimValidationFailed,
+    );
+  });
+
+  it("rejects a symmetric (HS256) token even when signed with a key the JWKS would accept", async () => {
+    // Defense in depth against algorithm confusion: only asymmetric algs are allowed, so a
+    // token whose header claims HS* is refused before any key matching happens.
+    const hs = await auth.mintSymmetric({ scopes: [SCOPES.READ] });
+    await expect(auth.authenticator.verify(hs)).rejects.toThrow();
+  });
 });

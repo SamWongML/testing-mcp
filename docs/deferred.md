@@ -100,10 +100,6 @@ doing them out of order.
   `PostgresTaskStore.deleteExpired()` exists but nothing calls it, so terminal `tasks` rows
   accumulate. P10 did not add it (not an exit-criterion item); wire a periodic sweep into the
   worker loop (alongside the reaper) or a scheduled job when adding P11 operational hardening.
-- **Audit `params` are stored raw (from P10) → revisit if a collection carries secret params:**
-  `auditRun` writes the tool-invocation `params` verbatim. Run params are test inputs (not the
-  `{{secrets.*}}` env, which never reaches audit), so this is fine today; if a test ever takes a
-  secret-shaped param, run it through the engine's `redact()` before the audit insert.
 - **Denied calls are not audited (from P10) → if security review needs attempt logging:**
   `guardScope` throws *before* `auditRun`, so the audit log records executed runs, not rejected
   attempts. Add a separate authz-failure audit path if failed-attempt visibility is required.

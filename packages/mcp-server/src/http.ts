@@ -4,9 +4,11 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 
 import {
+  insufficientScopeChallenge,
   parseBearerToken,
   PROTECTED_RESOURCE_PATH,
   protectedResourceMetadata,
+  requiredScopesFor,
   wwwAuthenticate,
 } from "./auth";
 import type { ServerContext } from "./context";
@@ -51,6 +53,11 @@ export function createHttpApp(ctx: ServerContext): Hono {
 
   app.all("/mcp", async (c) => {
     let authInfo: AuthInfo | undefined;
+    // Reading the body here consumes the request stream, so whatever we parse must be handed to
+    // the transport as `parsedBody` rather than re-read.
+    let parsedBody: unknown;
+    let bodyParsed = false;
+
     if (authn) {
       const metadataUrl = new URL(PROTECTED_RESOURCE_PATH, c.req.url).toString();
       const challenge = (): Response =>
@@ -66,6 +73,25 @@ export function createHttpApp(ctx: ServerContext): Hono {
       } catch {
         return challenge();
       }
+
+      // Authorize the JSON-RPC methods the SDK handles generically (the `tasks/*` family), which
+      // never reach a scope-guarded tool handler. Everything else is gated in its own handler.
+      if (c.req.method === "POST") {
+        try {
+          parsedBody = await c.req.json();
+        } catch {
+          return new Response("Bad Request", { status: 400 });
+        }
+        bodyParsed = true;
+        for (const scope of requiredScopesFor(parsedBody)) {
+          if (!authInfo.scopes.includes(scope)) {
+            return new Response("Forbidden", {
+              status: 403,
+              headers: { "WWW-Authenticate": insufficientScopeChallenge(scope) },
+            });
+          }
+        }
+      }
     }
 
     const handle = async (): Promise<Response> => {
@@ -74,7 +100,10 @@ export function createHttpApp(ctx: ServerContext): Hono {
         sessionIdGenerator: undefined,
       });
       await server.connect(transport);
-      return transport.handleRequest(c.req.raw, { authInfo });
+      return transport.handleRequest(
+        c.req.raw,
+        bodyParsed ? { authInfo, parsedBody } : { authInfo },
+      );
     };
 
     if (ctx.telemetry) {

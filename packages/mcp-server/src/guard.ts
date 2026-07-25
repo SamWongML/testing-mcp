@@ -35,6 +35,39 @@ export interface AuditRunInput {
   params?: Record<string, unknown>;
 }
 
+/** Keys whose values are masked before an audit row is written. Matched case-insensitively as a
+ *  substring, so `password`, `apiKey`, `access_token`, and `clientSecret` all hit. */
+const SECRET_KEY_PATTERN = /pass|secret|token|credential|api[-_]?key|authorization|cookie/i;
+
+const AUDIT_MASK = "[REDACTED]";
+
+function redactValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        SECRET_KEY_PATTERN.test(k) ? AUDIT_MASK : redactValue(v),
+      ]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Mask secret-shaped params before they are persisted to `audit_log` (§21 "redact before
+ * persist"). This is **key**-based on purpose: the engine's `redact()` masks known secret
+ * *values* inside request/response snapshots, but a tool-call `params` bag is arbitrary caller
+ * input whose secrets are only identifiable by name — the corpus's own `identity.login` takes a
+ * `password` param, which would otherwise land in Postgres in plaintext.
+ */
+export function redactAuditParams(
+  params: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!params) return undefined;
+  return redactValue(params) as Record<string, unknown>;
+}
+
 /** Record a run-invoking call in the audit log (§16.1). No-op without a db (the audit log lives
  *  in Postgres); the principal + scopes come from the validated token. */
 export async function auditRun(
@@ -47,7 +80,7 @@ export async function auditRun(
     principal: principalOf(extra),
     action: input.action,
     entryId: input.entryId,
-    params: input.params,
+    params: redactAuditParams(input.params),
     scopes: extra.authInfo?.scopes,
   });
 }
