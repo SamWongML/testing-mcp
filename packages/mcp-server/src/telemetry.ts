@@ -1,6 +1,9 @@
 import {
   type Attributes,
+  context as otelContext,
+  type Context,
   type Meter,
+  propagation,
   type Span,
   SpanStatusCode,
   type Tracer,
@@ -29,6 +32,13 @@ import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
  * signals that drive dashboards and worker autoscaling (`queue_depth`). Exporters are injectable:
  * console locally, OTLP (X-Ray/CloudWatch) in production, in-memory in tests.
  */
+
+/** The attribute key `runs_total`/`run_duration_ms` are dimensioned by. The CloudWatch alarms
+ *  in `infra/src/observability-stack.ts` query this exact key (`RUN_STATE_DIMENSION`), and
+ *  CloudWatch matches dimensions as an exact set — a mismatch silently yields no datapoints
+ *  and leaves the alarms in INSUFFICIENT_DATA forever rather than erroring. Tests on both
+ *  sides pin the literal. */
+export const RUN_STATE_ATTRIBUTE = "status";
 
 /** The run/queue metric instruments (§15). Thin wrappers so callers record intent, not OTel. */
 export interface RunMetrics {
@@ -116,8 +126,8 @@ function createRunMetrics(meter: Meter): RunMetrics {
   });
   return {
     recordRun(status, durationMs) {
-      runsTotal.add(1, { status });
-      runDuration.record(durationMs, { status });
+      runsTotal.add(1, { [RUN_STATE_ATTRIBUTE]: status });
+      runDuration.record(durationMs, { [RUN_STATE_ATTRIBUTE]: status });
     },
     recordAssertionFailure(test, count = 1) {
       assertionFailures.add(count, { test });
@@ -137,9 +147,12 @@ export async function withSpan<T>(
   tracer: Tracer,
   name: string,
   fn: (span: Span) => T | Promise<T>,
-  opts: { attributes?: Attributes } = {},
+  opts: { attributes?: Attributes; parent?: Context } = {},
 ): Promise<T> {
-  return tracer.startActiveSpan(name, { attributes: opts.attributes }, async (span) => {
+  // An explicit `parent` is how the worker re-parents a run span onto the trace the *server*
+  // process started; without one the ambient active context applies (normal nesting).
+  const parent = opts.parent ?? otelContext.active();
+  return tracer.startActiveSpan(name, { attributes: opts.attributes }, parent, async (span) => {
     try {
       const result = await fn(span);
       span.setStatus({ code: SpanStatusCode.OK });
@@ -152,4 +165,28 @@ export async function withSpan<T>(
       span.end();
     }
   });
+}
+
+/**
+ * Cross-process trace propagation (research §15). The server enqueues a job and a *different*
+ * process claims it, so the W3C `traceparent` has to travel with the job — otherwise the
+ * worker's run span starts a fresh trace and agent→server→worker→SUT is three disconnected
+ * traces. {@link injectTraceContext} serializes the active context into the job spec at
+ * submit; {@link extractTraceContext} restores it as the run span's parent at claim.
+ */
+export type TraceCarrier = Record<string, string>;
+
+/** Serialize the currently-active span context into a carrier, or `undefined` when there is
+ *  no active trace (telemetry off, or a submission outside any span). */
+export function injectTraceContext(): TraceCarrier | undefined {
+  const carrier: TraceCarrier = {};
+  propagation.inject(otelContext.active(), carrier);
+  return Object.keys(carrier).length > 0 ? carrier : undefined;
+}
+
+/** Rebuild the submitting process's context from a carrier; falls back to the active context
+ *  when the job carries none (older jobs, or telemetry disabled at submit time). */
+export function extractTraceContext(carrier: TraceCarrier | undefined): Context {
+  const active = otelContext.active();
+  return carrier ? propagation.extract(active, carrier) : active;
 }

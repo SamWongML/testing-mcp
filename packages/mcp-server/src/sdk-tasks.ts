@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { renderReport } from "@atp/reporting";
-import { type Db, enqueue, PostgresTaskStore, type TaskRecord } from "@atp/store";
+import { type Db, enqueue, type TaskRecord, type TaskStateStore } from "@atp/store";
 import type {
   CreateTaskOptions,
   TaskStore,
@@ -18,11 +18,14 @@ import type { ServerContext } from "./context";
 import {
   cancelRun,
   DEFAULT_TASK_TTL_MS,
+  launchIsolatedRun,
   getRun,
   getRunResult,
   requireDb,
   type RunSpec,
+  taskStoreFor,
 } from "./tasks";
+import { injectTraceContext } from "./telemetry";
 import { runSummary } from "./tools";
 
 /**
@@ -44,8 +47,8 @@ export class SdkTaskStore implements TaskStore {
     return requireDb(this.ctx, "no run database configured");
   }
 
-  private store(): PostgresTaskStore {
-    return new PostgresTaskStore(this.db());
+  private store(): TaskStateStore {
+    return taskStoreFor(this.ctx, this.db());
   }
 
   async createTask(
@@ -58,19 +61,34 @@ export class SdkTaskStore implements TaskStore {
     const ttl = taskParams.ttl === undefined ? DEFAULT_TASK_TTL_MS : taskParams.ttl; // null ⇒ no TTL
     const spec = runSpecFromRequest(request);
 
-    // Atomic: create the working task row and enqueue its job together, so a task is never
-    // minted without a job (which no worker would ever run).
-    const rec = await this.db().transaction(async (tx) => {
-      const created = await new PostgresTaskStore(tx).create({
+    // Create the working task and enqueue its job together, so a task is never minted
+    // without a job (which no worker would ever run). With the Postgres task store both
+    // writes share one transaction; with an external store (DynamoDB) the task item is
+    // created first and a failed enqueue fails the task — same guarantee, see `submitRun`.
+    const create = async (tasks: TaskStateStore, db: Db): Promise<TaskRecord> => {
+      const created = await tasks.create({
         runId,
         state: "working",
         progressPct: 0,
         ...(ttl === null ? {} : { ttlMs: ttl }),
       });
       if (!created) throw new Error(`task id collision for ${runId}`);
-      await enqueue(tx, { runId, spec });
+      try {
+        await enqueue(db, { runId, spec });
+      } catch (err) {
+        await tasks.update(runId, { state: "failed", error: "failed to enqueue run" });
+        throw err;
+      }
       return created;
-    });
+    };
+
+    const provider = this.ctx.taskStore;
+    const rec =
+      !provider || provider.transactional
+        ? await this.db().transaction((tx) => create(taskStoreFor(this.ctx, tx), tx))
+        : await create(provider.forDb(this.db()), this.db());
+    // §11.3 mode 2, after the job is durable — see `launchIsolated` in tasks.ts.
+    if (isIsolated(request)) await launchIsolatedRun(this.ctx, runId);
     return toSdkTask(rec);
   }
 
@@ -159,15 +177,21 @@ function toSdkTask(rec: TaskRecord): Task {
   return task;
 }
 
+/** Whether the caller asked for the isolated (`ecs:RunTask`) execution path. */
+function isIsolated(request: Request): boolean {
+  return (request.params?.arguments as { isolated?: boolean } | undefined)?.isolated === true;
+}
+
 /** Derive the run spec to enqueue from a task-augmented `tools/call` request's arguments. */
 function runSpecFromRequest(request: Request): RunSpec {
   const args = (request.params?.arguments ?? {}) as {
     id?: unknown;
     params?: Record<string, unknown>;
     env?: Record<string, string>;
+    isolated?: boolean;
   };
   if (typeof args.id !== "string") {
     throw new Error("task-augmented run requires a string `id` argument");
   }
-  return { entryId: args.id, params: args.params, env: args.env };
+  return { entryId: args.id, params: args.params, env: args.env, trace: injectTraceContext() };
 }

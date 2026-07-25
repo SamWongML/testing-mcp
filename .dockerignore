@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+.git
+.github
+dist
+cdk.out
+infra/cdk.out
+.atp
+docs
+*.md
+!README.md

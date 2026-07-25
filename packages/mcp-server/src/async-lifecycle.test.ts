@@ -14,7 +14,7 @@ import {
   type ConnectedClient,
   type TestSut,
 } from "./testkit";
-import { claimAndRun, reapOnce, startWorker } from "./worker";
+import { claimAndRun, reapOnce, startWorker, sweepExpiredTasks } from "./worker";
 
 /** Poll `fn` until it returns truthy or the deadline passes (integration timing helper). */
 async function waitFor<T>(fn: () => Promise<T>, timeoutMs = 4000): Promise<T> {
@@ -219,5 +219,36 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
       await worker.stop();
       await conn?.close();
     }
+  });
+
+  it("sweeps terminal tasks past their TTL, leaving live ones alone", async () => {
+    // SEP-1686 retains a result "for a server-defined duration"; without a sweep the rows
+    // accumulate forever (the P8 gap). Live and un-expired tasks must survive it.
+    const expired = await submitRun(ctx, {
+      entryId: "identity.login",
+      env: { baseUrl: sut.url },
+      ttlMs: -1000,
+    });
+    const live = await submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } });
+
+    expect(await sweepExpiredTasks(ctx)).toBe(1);
+    expect(await getRun(ctx, expired.runId)).toBeNull();
+    expect(await getRun(ctx, live.runId)).not.toBeNull();
+  });
+
+  it("a one-shot worker drains exactly one job and exits (the RunTask escape hatch, §11.3)", async () => {
+    const first = await submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } });
+    const second = await submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } });
+
+    // This is the mode an `ecs:RunTask`-launched task runs in: claim one job, finish it, exit.
+    // Without the self-stop it would be a second, unmanaged worker pool that never scales in.
+    const worker = startWorker(ctx, { pollMs: 20, heartbeatMs: 50, maxRuns: 1 });
+    await worker.done;
+
+    const states = await Promise.all(
+      [first.runId, second.runId].map(async (id) => (await getRun(ctx, id))?.state),
+    );
+    expect(states.filter((s) => s === "completed")).toHaveLength(1);
+    expect(states.filter((s) => s === "working")).toHaveLength(1);
   });
 });

@@ -1,9 +1,10 @@
 import type { AuthProvider } from "@atp/engine";
 import type { Manifest } from "@atp/schema";
-import type { ArtifactStore, Db } from "@atp/store";
+import type { ArtifactStore, Db, TaskStoreProvider } from "@atp/store";
 
 import type { Authenticator } from "./auth";
 import type { Logger } from "./logging";
+import type { RunTaskLauncher } from "./run-task";
 import type { Telemetry } from "./telemetry";
 
 /** OAuth gate for the MCP surface (P10, ADR-007). Present ⇒ auth is enabled: the HTTP layer
@@ -36,6 +37,14 @@ export interface ServerContext {
    *  when absent (offline/dev), runs still execute + persist artifacts and `list_runs`
    *  reports an empty history — so the surface is always callable. */
   db?: Db;
+  /** Which backing the hot task state uses (P11, §16.2/§18). Absent ⇒ the stage-1 Postgres
+   *  store, transactional with the queue. Present ⇒ whatever config selected, typically
+   *  DynamoDB. Nothing else in this package is backend-aware: it all goes through
+   *  `taskStoreFor(ctx, db)`. */
+  taskStore?: TaskStoreProvider;
+  /** Launches a dedicated Fargate task for an isolated run (§11.3 mode 2, P11). Present only
+   *  when the escape hatch is configured; absent ⇒ every run goes to the worker pool. */
+  runTaskLauncher?: RunTaskLauncher;
   /** Auth providers a step's `request.authRef` may select (research §10.3). */
   auth?: AuthProvider[];
   /** OAuth authN/Z gate (P10). When present, the surface is authenticated + scope-gated. */

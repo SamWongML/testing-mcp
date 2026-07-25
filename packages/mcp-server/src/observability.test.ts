@@ -1,4 +1,5 @@
 import { listAudit, type StoreClient } from "@atp/store";
+import { context, trace } from "@opentelemetry/api";
 import {
   AggregationTemporality,
   InMemoryMetricExporter,
@@ -98,6 +99,28 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
     expect(names.has("runs_total")).toBe(true);
     expect(names.has("queue_depth")).toBe(true);
     expect(names.has("run_duration_ms")).toBe(true);
+  });
+
+  it("links the worker's run span to the submitting request's trace (one trace, two processes)", async () => {
+    // The enqueue→claim hop crosses a process boundary, so without a W3C `traceparent` in the
+    // job spec the worker would start a brand-new trace and agent→server→worker→SUT would be
+    // three disconnected traces (the P10 gap).
+    const submitSpan = tel.tracer.startSpan("mcp submit");
+    const submitTraceId = submitSpan.spanContext().traceId;
+    const { runId } = await context.with(trace.setSpan(context.active(), submitSpan), () =>
+      submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } }),
+    );
+    submitSpan.end();
+
+    expect(await claimAndRun(ctx, "worker-trace")).toBe(true);
+    await tel.forceFlush();
+
+    const runSpan =
+      tel && spanExporter.getFinishedSpans().find((s) => s.name === "run identity.login");
+    expect(runSpan).toBeDefined();
+    expect(runSpan!.attributes["atp.run_id"]).toBe(runId);
+    expect(runSpan!.spanContext().traceId).toBe(submitTraceId);
+    expect(runSpan!.parentSpanContext?.spanId).toBe(submitSpan.spanContext().spanId);
   });
 
   it("writes an audit row on a run-invoking call", async () => {

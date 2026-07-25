@@ -7,5 +7,12 @@
     // without a per-file type annotation to name the nested `zod` path (research §7.1 DX).
     "declaration": false
   },
-  "include": ["packages/*/src/**/*", "tools/*/src/**/*", "tests/**/*", "vitest.config.ts"]
+  "include": [
+    "packages/*/src/**/*",
+    "tools/*/src/**/*",
+    "infra/src/**/*",
+    "infra/bin/**/*",
+    "tests/**/*",
+    "vitest.config.ts"
+  ]
 }

@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import type { ManifestEntry } from "@atp/schema";
+import type { Config, ManifestEntry } from "@atp/schema";
 import type { ExecutionResult } from "@atp/schema";
 import {
   claim,
@@ -9,7 +9,6 @@ import {
   isCancelRequested,
   type Job,
   markDone,
-  PostgresTaskStore,
   queueDepth,
   reapExpired,
   type Db,
@@ -18,9 +17,9 @@ import {
 
 import type { ServerContext } from "./context";
 import { executeEntry } from "./execute";
-import { parseSpec, requireDb as ensureDb, resultStateFor } from "./tasks";
+import { parseSpec, requireDb as ensureDb, resultStateFor, taskStoreFor } from "./tasks";
 import { persistRun } from "./run-store";
-import { withSpan } from "./telemetry";
+import { extractTraceContext, withSpan } from "./telemetry";
 
 /**
  * The async worker (research §11.2/§11.3, ADR-004). It claims queued jobs with
@@ -41,9 +40,42 @@ export interface WorkerOptions {
   pollMs?: number;
   /** How often the loop runs the reaper. */
   reapMs?: number;
+  /** How often the loop sweeps expired task rows (SEP-1686 result retention). */
+  sweepMs?: number;
+  /** Stop after this many runs. `1` is the one-shot mode an `ecs:RunTask`-launched task uses
+   *  (§11.3 mode 2): claim one job, finish it, exit. Unset ⇒ run until stopped. */
+  maxRuns?: number;
+  /** Claim only this run's job (§11.3 mode 2). The one-off task was launched for one
+   *  specific run and must not drain arbitrary queue head. */
+  runId?: string;
+  /** Stop after this long with nothing claimed. Bounds a one-off task whose run was already
+   *  taken by a pooled worker, so it exits instead of idling as billable capacity. */
+  idleTimeoutMs?: number;
 }
 
-const DEFAULTS = { heartbeatMs: 1000, leaseMs: 30_000, pollMs: 500, reapMs: 5_000 };
+/**
+ * Map validated config onto {@link WorkerOptions}. This is the *only* thing connecting the
+ * environment the `ecs:RunTask` launcher sets (`WORKER_ONCE`, `ATP_RUN_ID`) to the worker
+ * loop — without it those variables are decorative and a launched task runs forever.
+ */
+export function workerOptionsFromConfig(config: Config): WorkerOptions {
+  if (!config.WORKER_ONCE) return {};
+  return {
+    maxRuns: 1,
+    runId: config.ATP_RUN_ID,
+    idleTimeoutMs: config.WORKER_IDLE_TIMEOUT_MS,
+  };
+}
+
+const DEFAULTS = {
+  heartbeatMs: 1000,
+  leaseMs: 30_000,
+  pollMs: 500,
+  reapMs: 5_000,
+  // Result expiry is measured in hours, so sweeping every 5 minutes is ample and keeps the
+  // extra query off the hot claim path.
+  sweepMs: 300_000,
+};
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -66,7 +98,7 @@ export async function runClaimedJob(
   opts: WorkerOptions = {},
 ): Promise<TaskStateResult> {
   const db = requireDb(ctx);
-  const tasks = new PostgresTaskStore(db);
+  const tasks = taskStoreFor(ctx, db);
   const runId = job.runId ?? job.id;
   const heartbeatMs = opts.heartbeatMs ?? DEFAULTS.heartbeatMs;
   // Correlation ids thread through every line this run emits (§15).
@@ -132,6 +164,9 @@ export async function runClaimedJob(
     const result = ctx.telemetry
       ? await withSpan(ctx.telemetry.tracer, `run ${entry.id}`, execute, {
           attributes: { "atp.run_id": runId, "atp.entry_id": entry.id },
+          // Re-parent onto the submitting request's trace (§15) — the enqueue→claim hop
+          // crosses processes, so the context travels in the job spec.
+          parent: extractTraceContext(spec.trace),
         })
       : await execute();
     clearInterval(beat);
@@ -191,7 +226,7 @@ async function finalizeError(
   error: string,
 ): Promise<TaskStateResult> {
   const db = requireDb(ctx);
-  await new PostgresTaskStore(db).update(runId, { state: "failed", error });
+  await taskStoreFor(ctx, db).update(runId, { state: "failed", error });
   await markDone(db, job.id, workerId, "failed");
   return { runId, state: "failed" };
 }
@@ -205,10 +240,20 @@ export async function claimAndRun(
 ): Promise<boolean> {
   const db = requireDb(ctx);
   if (ctx.telemetry) ctx.telemetry.metrics.setQueueDepth(await queueDepth(db));
-  const job = await claim(db, workerId);
+  const job = await claim(db, workerId, { runId: opts.runId });
   if (!job) return false;
   await runClaimedJob(ctx, job, workerId, opts);
   return true;
+}
+
+/**
+ * Delete task rows past their TTL — the SEP-1686 "results retained for a server-defined
+ * duration" GC. It runs in the worker rather than as a separate scheduled job so the
+ * deployment stays two processes; on DynamoDB the native TTL reaps in parallel and this is
+ * the deterministic sweep alongside it. Returns how many rows were removed.
+ */
+export async function sweepExpiredTasks(ctx: ServerContext): Promise<number> {
+  return taskStoreFor(ctx, requireDb(ctx)).deleteExpired();
 }
 
 /** Requeue jobs whose lease expired (crashed workers). Returns the count requeued. */
@@ -220,6 +265,8 @@ export async function reapOnce(ctx: ServerContext, leaseMs: number): Promise<num
 export interface WorkerHandle {
   workerId: string;
   stop: () => Promise<void>;
+  /** Resolves when the loop ends — either via `stop()` or by hitting `maxRuns`. */
+  done: Promise<void>;
 }
 
 /**
@@ -232,9 +279,13 @@ export function startWorker(ctx: ServerContext, opts: WorkerOptions = {}): Worke
   const leaseMs = opts.leaseMs ?? DEFAULTS.leaseMs;
   const pollMs = opts.pollMs ?? DEFAULTS.pollMs;
   const reapMs = opts.reapMs ?? DEFAULTS.reapMs;
+  const sweepMs = opts.sweepMs ?? DEFAULTS.sweepMs;
 
   let running = true;
   let lastReap = 0;
+  let lastSweep = Date.now();
+  let completed = 0;
+  let idleSince = Date.now();
 
   const loop = (async () => {
     while (running) {
@@ -243,8 +294,25 @@ export function startWorker(ctx: ServerContext, opts: WorkerOptions = {}): Worke
           await reapOnce(ctx, leaseMs);
           lastReap = Date.now();
         }
+        if (Date.now() - lastSweep >= sweepMs) {
+          const swept = await sweepExpiredTasks(ctx);
+          lastSweep = Date.now();
+          if (swept > 0) ctx.logger?.debug({ swept }, "swept expired task rows");
+        }
         const ran = await claimAndRun(ctx, workerId, opts);
-        if (!ran) await sleep(pollMs);
+        if (ran) {
+          idleSince = Date.now();
+          if (opts.maxRuns !== undefined && ++completed >= opts.maxRuns) running = false;
+        } else if (
+          opts.idleTimeoutMs !== undefined &&
+          Date.now() - idleSince >= opts.idleTimeoutMs
+        ) {
+          // Nothing left to do (typically: the pool claimed this run first). Exiting frees
+          // the task rather than leaving it idling as billable capacity.
+          running = false;
+        } else {
+          await sleep(pollMs);
+        }
       } catch (err) {
         console.error(`[worker ${workerId}] loop error:`, errorMessage(err));
         await sleep(pollMs);
@@ -254,6 +322,7 @@ export function startWorker(ctx: ServerContext, opts: WorkerOptions = {}): Worke
 
   return {
     workerId,
+    done: loop,
     stop: async () => {
       running = false;
       await loop;

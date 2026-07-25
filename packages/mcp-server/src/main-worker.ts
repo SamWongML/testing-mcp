@@ -1,10 +1,17 @@
 import { loadConfig } from "@atp/schema";
-import { createStore, recordManifest, type StoreClient } from "@atp/store";
+import {
+  createStore,
+  createTaskStoreProvider,
+  recordManifest,
+  resolveDatabaseUrl,
+  type StoreClient,
+} from "@atp/store";
 
 import { buildContext } from "./bootstrap";
 import { createLogger } from "./logging";
+import { resolveExporters } from "./exporters";
 import { initTelemetry, type Telemetry } from "./telemetry";
-import { startWorker } from "./worker";
+import { startWorker, workerOptionsFromConfig } from "./worker";
 
 /**
  * The `MODE=worker` dev entrypoint (`pnpm dev:worker`). It shares the server's boot path —
@@ -15,7 +22,8 @@ import { startWorker } from "./worker";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
-  if (!config.DATABASE_URL) {
+  const databaseUrl = resolveDatabaseUrl(config);
+  if (!databaseUrl) {
     throw new Error("the worker requires DATABASE_URL (async runs need a durable queue)");
   }
 
@@ -24,27 +32,52 @@ async function main(): Promise<void> {
     base: { service: config.SERVICE_NAME, mode: "worker" },
   });
   const telemetry: Telemetry | undefined = config.OTEL_ENABLED
-    ? initTelemetry({ serviceName: config.SERVICE_NAME })
+    ? initTelemetry({ serviceName: config.SERVICE_NAME, ...resolveExporters(config) })
     : undefined;
 
   const base = await buildContext(config);
-  const store: StoreClient = createStore(config.DATABASE_URL);
+  const store: StoreClient = createStore(databaseUrl);
   await recordManifest(store.db, base.manifest);
 
-  const worker = startWorker({ ...base, db: store.db, logger, telemetry });
+  const taskStore = createTaskStoreProvider(config);
+  const options = workerOptionsFromConfig(config);
+  const worker = startWorker({ ...base, db: store.db, taskStore, logger, telemetry }, options);
   logger.info(
-    { workerId: worker.workerId, entries: base.manifest.entries.length },
+    {
+      workerId: worker.workerId,
+      entries: base.manifest.entries.length,
+      once: config.WORKER_ONCE,
+      runId: config.ATP_RUN_ID,
+    },
     "atp worker started",
   );
+
+  // A one-off task must exit on its own once its run is done (or its idle budget lapses),
+  // otherwise it lingers as an unmanaged worker the autoscaler never scales in.
+  if (options.maxRuns !== undefined) {
+    void worker.done.then(async () => {
+      logger.info({ workerId: worker.workerId }, "one-shot worker finished — exiting");
+      await Promise.allSettled([store.close(), taskStore.close(), telemetry?.shutdown()]);
+      process.exit(0);
+    });
+  }
 
   const shutdown = (): void => {
     void worker
       .stop()
-      .then(() => Promise.allSettled([store.close(), telemetry?.shutdown()]))
+      .then(() =>
+        // Own thunk each: a synchronous throw would otherwise escape before allSettled runs.
+        Promise.allSettled([
+          (async () => store.close())(),
+          (async () => taskStore.close())(),
+          (async () => telemetry?.shutdown())(),
+        ]),
+      )
       .finally(() => process.exit(0));
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  // `once`: a second signal mid-drain would otherwise re-enter shutdown concurrently.
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 }
 
 void main().catch((err: unknown) => {

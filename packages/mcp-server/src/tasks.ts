@@ -8,10 +8,12 @@ import {
   requestCancel as requestJobCancel,
   type TaskRecord,
   type TaskState,
+  type TaskStateStore,
 } from "@atp/store";
 
 import type { ServerContext } from "./context";
 import { loadTrace } from "./run-store";
+import { injectTraceContext, type TraceCarrier } from "./telemetry";
 
 /**
  * Task-lifecycle glue (SEP-1686 §11.1) mapping the async run surface onto P6's durable
@@ -32,6 +34,9 @@ export interface RunSpec {
   entryId: string;
   params?: Record<string, unknown>;
   env?: Record<string, string>;
+  /** W3C trace context of the submitting request, so the worker's run span joins the same
+   *  trace across the process boundary (§15). Absent when telemetry is off. */
+  trace?: TraceCarrier;
 }
 
 /** Narrow the opaque `jobs.spec` jsonb back to a `RunSpec` (defensive — a malformed spec is
@@ -46,6 +51,7 @@ export function parseSpec(spec: unknown): RunSpec {
     entryId: s.entryId,
     params: (s.params as Record<string, unknown> | undefined) ?? undefined,
     env: (s.env as Record<string, string> | undefined) ?? undefined,
+    trace: (s.trace as TraceCarrier | undefined) ?? undefined,
   };
 }
 
@@ -73,6 +79,15 @@ export function requireDb(
   return ctx.db;
 }
 
+/**
+ * Resolve the hot task store for this deployment (P11). Absent provider ⇒ the stage-1
+ * Postgres store bound to `db` (which may be a transaction). Every task read/write in this
+ * package goes through here, which is what makes Postgres↔DynamoDB a config switch.
+ */
+export function taskStoreFor(ctx: ServerContext, db: Db): TaskStateStore {
+  return ctx.taskStore ? ctx.taskStore.forDb(db) : new PostgresTaskStore(db);
+}
+
 export interface SubmitRunInput extends RunSpec {
   /** Dedupe key: a resubmission with the same key returns the original run instead of
    *  enqueuing a duplicate (idempotency, research §16.2). Becomes the `runId`. */
@@ -81,6 +96,10 @@ export interface SubmitRunInput extends RunSpec {
   priority?: number;
   /** Result-retention TTL; defaults to {@link DEFAULT_TASK_TTL_MS}. */
   ttlMs?: number;
+  /** Run this on a dedicated one-off Fargate task rather than the shared pool (§11.3 mode 2).
+   *  For very long or resource-hungry runs that would otherwise monopolise a pooled worker.
+   *  Requires the escape hatch to be configured; ignored (with a log) when it is not. */
+  isolated?: boolean;
 }
 
 export interface SubmittedRun {
@@ -91,36 +110,108 @@ export interface SubmittedRun {
 }
 
 /**
- * Durably submit a run: atomically create the `working` task row and enqueue its job. When
- * `idempotencyKey` names an already-submitted run, the insert-only task `create` no-ops and
- * the existing run is returned (`deduped`) — no second job is enqueued.
+ * Durably submit a run: create the `working` task and enqueue its job, exactly once per
+ * idempotency key. Two shapes, chosen by which task store is configured:
+ *
+ * - **Postgres (stage 1, transactional).** Both writes happen in one transaction, and the
+ *   insert-only `create` *is* the dedupe — so the idempotency key has to *be* the run id.
+ * - **DynamoDB (stage 2).** The task store is external to the queue, so a dedicated
+ *   `idempotency` table (§16.2) elects the run id first and the task item is created before
+ *   the job is enqueued. A crash between the two leaves a `working` task with no job, which
+ *   expires by TTL; an enqueue *error* is surfaced by failing the task rather than leaving a
+ *   client polling something no worker will ever run.
  */
 export async function submitRun(ctx: ServerContext, input: SubmitRunInput): Promise<SubmittedRun> {
   const db = requireDb(ctx);
-  const runId = input.idempotencyKey ?? randomUUID();
-  const spec: RunSpec = { entryId: input.entryId, params: input.params, env: input.env };
+  const spec: RunSpec = {
+    entryId: input.entryId,
+    params: input.params,
+    env: input.env,
+    trace: ctx.telemetry ? injectTraceContext() : undefined,
+  };
+  const ttlMs = input.ttlMs ?? DEFAULT_TASK_TTL_MS;
+  const provider = ctx.taskStore;
 
-  return db.transaction(async (tx) => {
-    const tasks = new PostgresTaskStore(tx);
-    const created = await tasks.create({
-      runId,
-      state: "working",
-      progressPct: 0,
-      ttlMs: input.ttlMs ?? DEFAULT_TASK_TTL_MS,
+  if (!provider || provider.transactional) {
+    const runId = input.idempotencyKey ?? randomUUID();
+    const submitted = await db.transaction(async (tx) => {
+      const tasks = taskStoreFor(ctx, tx);
+      const created = await tasks.create({ runId, state: "working", progressPct: 0, ttlMs });
+      if (!created) {
+        // Idempotent hit: a task with this runId already exists — return it, enqueue nothing.
+        const existing = await tasks.get(runId);
+        return { runId, state: existing?.state ?? "working", deduped: true };
+      }
+      await enqueue(tx, { runId, spec, priority: input.priority });
+      return { runId, state: created.state, deduped: false };
     });
-    if (!created) {
-      // Idempotent hit: a task with this runId already exists — return it, enqueue nothing.
-      const existing = await tasks.get(runId);
-      return { runId, state: existing?.state ?? "working", deduped: true };
+    // Enqueue first, launch second: the durable job is the safety net for a failed launch.
+    if (input.isolated && !submitted.deduped) await launchIsolatedRun(ctx, submitted.runId);
+    return submitted;
+  }
+
+  const tasks = provider.forDb(db);
+  // Elect the run id. With an idempotency table the id is minted independently of the key;
+  // without one, fall back to the stage-1 convention (key == runId) so dedupe still holds.
+  let runId: string = randomUUID();
+  if (input.idempotencyKey) {
+    if (provider.idempotency) {
+      const claimed = await provider.idempotency.claim(input.idempotencyKey, runId, ttlMs);
+      if (!claimed.claimed) {
+        const existing = await tasks.get(claimed.runId);
+        if (existing) return { runId: claimed.runId, state: existing.state, deduped: true };
+        // Claimed, but no task exists: the earlier submitter died between claiming the key
+        // and creating the task. Trusting the claim here would report `working` for a run
+        // that was never created, never enqueued, and can never fail — while `get_run` on
+        // that same id throws "no run". Adopt the id instead and finish what it started;
+        // idempotency still holds (the key keeps resolving to one run id).
+      }
+      runId = claimed.runId;
+    } else {
+      runId = input.idempotencyKey;
     }
-    await enqueue(tx, { runId, spec, priority: input.priority });
-    return { runId, state: created.state, deduped: false };
-  });
+  }
+
+  const created = await tasks.create({ runId, state: "working", progressPct: 0, ttlMs });
+  if (!created) {
+    const existing = await tasks.get(runId);
+    return { runId, state: existing?.state ?? "working", deduped: true };
+  }
+  try {
+    await enqueue(db, { runId, spec, priority: input.priority });
+  } catch (err) {
+    await tasks.update(runId, { state: "failed", error: "failed to enqueue run" });
+    throw err;
+  }
+  if (input.isolated) await launchIsolatedRun(ctx, runId);
+  return { runId, state: created.state, deduped: false };
+}
+
+/**
+ * Launch a dedicated Fargate worker for an already-enqueued run (§11.3 mode 2). Deliberately
+ * best-effort: the job is durable and the shared pool is the backstop, so a throttled or
+ * capacity-starved `RunTask` degrades to "runs a bit later" rather than failing the
+ * submission the caller has already been told is durable.
+ */
+export async function launchIsolatedRun(ctx: ServerContext, runId: string): Promise<void> {
+  if (!ctx.runTaskLauncher) {
+    ctx.logger?.warn({ runId }, "isolated run requested but no RunTask launcher configured");
+    return;
+  }
+  try {
+    const taskArn = await ctx.runTaskLauncher.launch(runId);
+    ctx.logger?.info({ runId, taskArn }, "launched isolated run task");
+  } catch (err) {
+    ctx.logger?.warn(
+      { runId, err: err instanceof Error ? err.message : String(err) },
+      "isolated run launch failed — falling back to the worker pool",
+    );
+  }
 }
 
 /** Fetch a run's hot task state (status + progress), or null if unknown. */
 export async function getRun(ctx: ServerContext, runId: string): Promise<TaskRecord | null> {
-  return new PostgresTaskStore(requireDb(ctx)).get(runId);
+  return taskStoreFor(ctx, requireDb(ctx)).get(runId);
 }
 
 const TERMINAL: ReadonlySet<TaskState> = new Set(["completed", "failed", "cancelled"]);
@@ -164,7 +255,7 @@ export async function getRunResult(ctx: ServerContext, runId: string): Promise<R
  *  non-terminal run was flagged. */
 export async function cancelRun(ctx: ServerContext, runId: string): Promise<boolean> {
   const db = requireDb(ctx);
-  const tasks = new PostgresTaskStore(db);
+  const tasks = taskStoreFor(ctx, db);
   const task = await tasks.get(runId);
   if (!task || isTerminalState(task.state)) return false;
   const jobFlagged = await requestJobCancel(db, runId);

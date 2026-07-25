@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/aws/test-aws.ts",
+      "default": "./src/aws/test-aws.ts"
     }
   },
   "main": "./src/index.ts",
@@ -16,6 +20,10 @@
   },
   "dependencies": {
     "@atp/schema": "workspace:*",
+    "@aws-sdk/client-dynamodb": "^3.1095.0",
+    "@aws-sdk/client-s3": "^3.1095.0",
+    "@aws-sdk/lib-dynamodb": "^3.1095.0",
+    "@aws-sdk/s3-request-presigner": "^3.1095.0",
     "drizzle-orm": "^0.36.0",
     "pg": "^8.13.0"
   },

@@ -2,6 +2,7 @@ node_modules/
 dist/
 .atp/
 coverage/
+cdk.out/
 *.tsbuildinfo
 .DS_Store
 *.log

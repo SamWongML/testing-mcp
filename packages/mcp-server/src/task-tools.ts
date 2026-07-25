@@ -30,6 +30,12 @@ const envArg = z
   .record(z.string(), z.string())
   .optional()
   .describe("Env overrides merged over the entry's baked-in env, e.g. { baseUrl }.");
+const isolatedArg = z
+  .boolean()
+  .optional()
+  .describe(
+    "Run on a dedicated one-off task instead of the shared worker pool — for very long or heavy runs. Ignored when the deployment has no isolated-run capacity configured.",
+  );
 
 /** `run_suite` — task-augmented (SEP-1686). The `createTask` handler mints a durable task +
  *  job (via the injected task store) that the worker executes; `getTask`/`getTaskResult`
@@ -41,7 +47,7 @@ export function registerRunSuite(server: McpServer, ctx: ServerContext): void {
       title: "Run suite",
       description:
         "Execute a suite asynchronously as a task (SEP-1686): enqueue → worker runs the DAG → poll to a terminal state → fetch the result. Non-Task clients can mirror this via run_selection/get_run/get_run_result/cancel_run.",
-      inputSchema: { id: idArg, params: paramsArg, env: envArg },
+      inputSchema: { id: idArg, params: paramsArg, env: envArg, isolated: isolatedArg },
       execution: { taskSupport: "required" },
     },
     {
@@ -95,9 +101,10 @@ export function registerRunSelection(server: McpServer, ctx: ServerContext): voi
         query: z.string().optional().describe("Case-insensitive substring over id and title."),
         params: paramsArg,
         env: envArg,
+        isolated: isolatedArg,
       },
     },
-    async ({ tags, owner, kind, query, params, env }, extra) => {
+    async ({ tags, owner, kind, query, params, env, isolated }, extra) => {
       guardScope(ctx, extra, SCOPES.RUN);
       const entries = selectEntries(ctx, { tags, owner, kind, query });
       if (entries.length === 0) throw new Error("selection matched no tests or suites");
@@ -106,7 +113,7 @@ export function registerRunSelection(server: McpServer, ctx: ServerContext): voi
       // ordered result mirrors `entries`.
       const runs = await Promise.all(
         entries.map(async (entry) => {
-          const submitted = await submitRun(ctx, { entryId: entry.id, params, env });
+          const submitted = await submitRun(ctx, { entryId: entry.id, params, env, isolated });
           return { entryId: entry.id, runId: submitted.runId, state: submitted.state };
         }),
       );

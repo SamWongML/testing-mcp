@@ -86,10 +86,12 @@ function toRecord(row: Row): TaskRecord {
   };
 }
 
-function resolveExpiry(input: Pick<PutTaskInput, "expiresAt" | "ttlMs">): Date | null {
+/** Absolute expiry from either an explicit date or a relative TTL. Shared with the DynamoDB
+ *  adapter so the two backends can never disagree about what `ttlMs` means. */
+export function resolveExpiry(input: Pick<PutTaskInput, "expiresAt" | "ttlMs">): Date | undefined {
   if (input.expiresAt) return input.expiresAt;
   if (input.ttlMs !== undefined) return new Date(Date.now() + input.ttlMs);
-  return null;
+  return undefined;
 }
 
 /** The column values a task row is written with (shared by `put` and `create`). `updatedAt`
@@ -103,7 +105,7 @@ function rowValues(input: PutTaskInput) {
     resultRef: input.resultRef ?? null,
     error: input.error ?? null,
     cancelRequested: input.cancelRequested ?? false,
-    expiresAt: resolveExpiry(input),
+    expiresAt: resolveExpiry(input) ?? null,
   };
 }
 

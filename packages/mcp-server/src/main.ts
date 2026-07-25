@@ -1,12 +1,20 @@
 import { serve } from "@hono/node-server";
 
 import { loadConfig } from "@atp/schema";
-import { createStore, recordManifest, type StoreClient } from "@atp/store";
+import {
+  createStore,
+  createTaskStoreProvider,
+  recordManifest,
+  resolveDatabaseUrl,
+  type StoreClient,
+  type TaskStoreProvider,
+} from "@atp/store";
 
 import type { ServerContext } from "./context";
 import { buildContext } from "./bootstrap";
 import { createHttpApp } from "./http";
 import { createLogger } from "./logging";
+import { resolveExporters } from "./exporters";
 import { initTelemetry, type Telemetry } from "./telemetry";
 
 /**
@@ -25,16 +33,23 @@ async function main(): Promise<void> {
     base: { service: config.SERVICE_NAME, mode: "server" },
   });
   const telemetry: Telemetry | undefined = config.OTEL_ENABLED
-    ? initTelemetry({ serviceName: config.SERVICE_NAME })
+    ? initTelemetry({ serviceName: config.SERVICE_NAME, ...resolveExporters(config) })
     : undefined;
 
   let ctx: ServerContext = { ...(await buildContext(config)), logger, telemetry };
 
+  // Storage selection is config, not code (P11): the same image runs on the stage-1
+  // Postgres collapse or on DynamoDB + S3 depending only on the environment. Built only
+  // once a db is confirmed — without one the surface is synchronous-only and never touches
+  // task state, so a half-configured TASK_STORE shouldn't fail boot for an unused component.
   let store: StoreClient | undefined;
-  if (config.DATABASE_URL) {
-    store = createStore(config.DATABASE_URL);
+  let taskStore: TaskStoreProvider | undefined;
+  const databaseUrl = resolveDatabaseUrl(config);
+  if (databaseUrl) {
+    store = createStore(databaseUrl);
     await recordManifest(store.db, ctx.manifest);
-    ctx = { ...ctx, db: store.db };
+    taskStore = createTaskStoreProvider(config);
+    ctx = { ...ctx, db: store.db, taskStore };
   }
 
   const server = serve({ fetch: createHttpApp(ctx).fetch, port: config.PORT }, (info) => {
@@ -52,13 +67,18 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     server.close(
       () =>
-        void Promise.allSettled([store?.close(), telemetry?.shutdown()]).finally(() =>
-          process.exit(0),
-        ),
+        // Each step is wrapped in its own thunk: a *synchronous* throw from one (e.g. an SDK
+        // client destroy) would otherwise escape before allSettled ever sees the array.
+        void Promise.allSettled([
+          (async () => store?.close())(),
+          (async () => taskStore?.close())(),
+          (async () => telemetry?.shutdown())(),
+        ]).finally(() => process.exit(0)),
     );
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  // `once`: a second signal while draining would otherwise re-enter shutdown concurrently.
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 }
 
 void main().catch((err: unknown) => {
