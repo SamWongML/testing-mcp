@@ -154,3 +154,45 @@ describe("strictViolations — unwired chain placeholder", () => {
     expect(violations.map((v) => v.rule)).toEqual(["unwired-chain", "non-pinning-assert"]);
   });
 });
+
+describe("strictViolations — robustness on request shapes the schema allows", () => {
+  const pinned: Assertion[] = [{ path: "status", op: "eq", value: 200 }];
+
+  it("flags the placeholder in authRef, which addresses an auth provider by id", () => {
+    const violations = strictViolations(
+      manifestOf([
+        {
+          id: "call",
+          request: { method: "GET", url: "https://api.example/me", authRef: "__TODO_CHAIN__" },
+          assert: pinned,
+        },
+      ]),
+    );
+
+    expect(violations).toEqual([
+      {
+        entryId: "demo.entry",
+        nodeId: "call",
+        rule: "unwired-chain",
+        detail: "unresolved __TODO_CHAIN__ in authRef",
+      },
+    ]);
+  });
+
+  it("survives a body JSON cannot serialize instead of crashing on it", () => {
+    // `request.body` is `z.unknown()`, so an authoring slip can put a function there. It
+    // compiles (JSON.stringify drops function-valued properties when hashing), and the
+    // placeholder scan must not then blow up with a bare TypeError naming no node.
+    expect(() =>
+      strictViolations(
+        manifestOf([
+          {
+            id: "odd-body",
+            request: { method: "POST", url: "https://api.example/x", body: () => ({}) },
+            assert: pinned,
+          },
+        ]),
+      ),
+    ).not.toThrow();
+  });
+});

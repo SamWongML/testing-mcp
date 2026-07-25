@@ -39,18 +39,21 @@ describe("renderAssertions — TS source for pasting into a migrated test", () =
   });
 });
 
-/** A minimal `ExecutionResult` around `steps` — the shape `goldenFromResult` reads. */
+/** A minimal `ExecutionResult` around `steps` — the shape `goldenFromResult` reads. Status and
+ *  metrics are derived from `steps` rather than hardcoded, so the fixture never claims
+ *  something the steps contradict (a later test may read fields this one doesn't). */
 function resultOf(steps: StepResult[]): ExecutionResult {
+  const count = (status: StepResult["status"]) => steps.filter((s) => s.status === status).length;
   return {
     runId: "run-1",
     entryId: "petstore.billing",
-    status: "passed",
+    status: count("passed") === steps.length ? "passed" : "failed",
     steps,
     startedAt: "2026-07-26T00:00:00Z",
     metrics: {
       totalSteps: steps.length,
-      passedSteps: steps.length,
-      failedSteps: 0,
+      passedSteps: count("passed"),
+      failedSteps: count("failed"),
       totalAssertions: 0,
       failedAssertions: 0,
     },

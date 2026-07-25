@@ -72,6 +72,22 @@ doing them out of order.
   assertions describing fixture data while looking like real coverage) and **refuses** to emit for
   a node that did not execute, exiting non-zero and naming it. **Still open:** it prints rather
   than patches — rewriting an authored TS `assert` block is a codemod and belongs in its own change.
+- **`non-pinning-assert` is a scaffolder check, not an assertion-quality linter (from the
+  2026-07-26 review) → if agent-authored tests start gaming it:** `strictViolations` flags only
+  an empty `assert` or *range* ops on `status` — deliberately, so it needs no opt-out (§19). The
+  review confirmed several genuinely unfailable nodes pass it: `status neq 500`, a lone
+  `headers.content-type isString`, `body.<missing> eq undefined` (tautological — an unresolved
+  path is `undefined`), `matches ".*"`, a valueless `jsonpath` on an always-present path, and
+  `contains ""`. Harmless for hand-authored tests; the risk is an agent silencing a violation
+  with one of these instead of understanding the endpoint. Broadening the rule means accepting
+  false positives on legitimate assertions — revisit only with real evidence of the failure mode,
+  and prefer a separate `atp lint`-style check over loosening the strict rule.
+- **`atp import` doesn't scan `authentication.token` for response-ref tags (from the 2026-07-26
+  review) → when a real collection chains its bearer token:** `hasResponseTag` (`import.ts`)
+  checks url/headers/query/body but not `req.authentication?.token`, so an Insomnia bearer token
+  chained from a prior response (a common pattern — login → use the token) is silently scaffolded
+  as a static `{{secrets.*}}` with no `__TODO_CHAIN__` and therefore no `atp validate` signal.
+  Pre-dates the strictness work; the fix is one more field in `hasResponseTag` + a fixture.
 - **Importer: per-request env override + params vs env split (from P9) → if a migration needs it:**
   `atp import` maps every `{{ _.x }}` to `{{env.x}}` against a single collection-level environment and
   ignores Insomnia sub-environments; it never emits a Zod `params` builder (auth tokens are the only

@@ -28,7 +28,8 @@ Usage:
   atp list [--tags a,b] [--owner o] [--kind test|suite]
   atp run <id> [--params '<json>'] [--env name] [--report md|html|junit|json|summary] [--out path]
   atp validate                      compile in-memory; fail on a compile error, an unwired
-                                    __TODO_CHAIN__, or a node nothing can make fail
+                                    __TODO_CHAIN__, or a node asserting nothing (or only a
+                                    range op on status, the atp import placeholder)
   atp import <insomnia.yaml>        scaffold defineTest/defineSuite drafts + MIGRATION.md
   atp golden <id> --base-url <url>  run once against a real SUT; print parity assertions
 `;

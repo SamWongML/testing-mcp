@@ -32,7 +32,10 @@ function isStatusRangeAssert(a: Assertion): boolean {
 
 /** True when the placeholder survives anywhere in `value` (nested objects included). */
 function carriesPlaceholder(value: unknown): boolean {
-  return value !== undefined && JSON.stringify(value).includes(CHAIN_PLACEHOLDER);
+  // `body` is `z.unknown()`, so it can hold something JSON drops entirely (a function, a
+  // symbol) — for which `stringify` returns `undefined` despite its `string` return type.
+  const json = JSON.stringify(value) as string | undefined;
+  return json !== undefined && json.includes(CHAIN_PLACEHOLDER);
 }
 
 /** The request fields still carrying an unresolved chain placeholder, in a stable order. */
@@ -42,6 +45,7 @@ function unwiredFields(request: RequestSpec): string[] {
     headers: request.headers,
     query: request.query,
     body: request.body,
+    authRef: request.authRef,
   };
   return Object.entries(fields)
     .filter(([, value]) => carriesPlaceholder(value))

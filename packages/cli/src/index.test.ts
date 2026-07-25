@@ -18,6 +18,7 @@ async function exists(path: string): Promise<boolean> {
 // `run(argv, root)` is the CLI dispatcher. Pin root to the repo (see commands.test.ts) and
 // silence the console so the exit-code contract can be asserted without noise.
 const repoRoot = resolve(__dirname, "../../..");
+const insomniaFixture = resolve(__dirname, "__fixtures__/petstore.insomnia.yaml");
 
 describe("run (CLI dispatcher exit codes)", () => {
   beforeEach(() => {
@@ -98,7 +99,6 @@ describe("run --report (artifact writing)", () => {
 });
 
 describe("import (Insomnia scaffolder)", () => {
-  const fixture = resolve(__dirname, "__fixtures__/petstore.insomnia.yaml");
   let dir: string;
   beforeEach(async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -111,7 +111,7 @@ describe("import (Insomnia scaffolder)", () => {
   });
 
   it("scaffolds the corpus and a MIGRATION.md under the root → 0", async () => {
-    expect(await run(["import", fixture], dir)).toBe(0);
+    expect(await run(["import", insomniaFixture], dir)).toBe(0);
     expect(await exists(join(dir, "tests/petstore/login.test.ts"))).toBe(true);
     expect(await exists(join(dir, "tests/petstore/billing.suite.ts"))).toBe(true);
     const migration = await readFile(join(dir, "MIGRATION.md"), "utf8");
@@ -142,8 +142,7 @@ describe("import → validate (the §19 strictness gate)", () => {
   });
 
   it("a freshly imported collection fails validate → 1, naming each unfinished node", async () => {
-    const fixture = resolve(__dirname, "__fixtures__/petstore.insomnia.yaml");
-    expect(await run(["import", fixture], dir)).toBe(0);
+    expect(await run(["import", insomniaFixture], dir)).toBe(0);
 
     expect(await run(["validate"], dir)).toBe(1);
     const output = errors.join("\n");

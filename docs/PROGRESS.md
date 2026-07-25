@@ -45,9 +45,9 @@ store + worker, OAuth 2.1 + observability, and P11's AWS deployment layer (CDK s
 **Starting new work?** There is no next phase to read into. Pick up from
 [docs/deferred.md](./deferred.md) — it is the standing backlog of work earlier phases parked,
 now the only queue. Verify the gate first (`pnpm typecheck && pnpm lint && pnpm test &&
-pnpm compile && pnpm synth`); with the services from `docker-compose.dev.yml` up and
-`ATP_TEST_DATABASE_URL` / `ATP_TEST_DYNAMO_ENDPOINT` / `ATP_TEST_S3_ENDPOINT` set, the suite is
-**503 passed | 0 skipped**. Deploying: [docs/deploy.md](./deploy.md).
+pnpm compile && pnpm validate && pnpm synth`); with the services from `docker-compose.dev.yml`
+up and `ATP_TEST_DATABASE_URL` / `ATP_TEST_DYNAMO_ENDPOINT` / `ATP_TEST_S3_ENDPOINT` set, the
+suite is **535 passed | 0 skipped**. Deploying: [docs/deploy.md](./deploy.md).
 
 ---
 

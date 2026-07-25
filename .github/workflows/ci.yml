@@ -65,8 +65,9 @@ jobs:
           ATP_TEST_DYNAMO_ENDPOINT: http://localhost:8000
           ATP_TEST_S3_ENDPOINT: http://localhost:9000
       - run: pnpm compile # builds dist/manifest.json (gitignored); fails on a bad test
-      # Strictness (§19): fails on an unwired __TODO_CHAIN__ or a node nothing can make fail,
-      # so a half-finished Insomnia migration cannot merge as green coverage.
+      # Strictness (§19): fails on an unwired __TODO_CHAIN__ or a node that asserts nothing —
+      # or only `atp import`'s `status lt 500` placeholder, which a 404 satisfies — so a
+      # half-finished Insomnia migration cannot merge as green coverage.
       - run: pnpm validate
       # Synthesize every CDK stack (no deploy, no AWS credentials, no Docker daemon — the
       # image is referenced by URI, not built as an asset). Catches infra breakage on the PR.

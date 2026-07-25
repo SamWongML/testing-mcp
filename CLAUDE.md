@@ -18,7 +18,8 @@ read it whole. There is no "next phase" to read into; new work comes from
 2. Read **only** the `docs/research.md` sections the work touches. `research.md` is ~30k
    tokens; never read it whole. `docs/implementation-plan.md` holds the original per-phase
    scope and exit criteria if you need to know why something is the way it is.
-3. Verify the gate before building on it: `pnpm typecheck && pnpm lint && pnpm test`.
+3. Verify the gate before building on it: `pnpm typecheck && pnpm lint && pnpm test &&
+   pnpm validate`.
 4. Close out by appending one row to `docs/phases/session-log.md`, then commit and push.
 
 Handoff notes for each finished phase live in `docs/phases/P<n>.md` — read one **only** if you
@@ -44,7 +45,7 @@ test run exactly as before (ADR-007 internal-deployment path).
 stays green offline: `ATP_TEST_DATABASE_URL` (Postgres), `ATP_TEST_DYNAMO_ENDPOINT`
 (dynamodb-local), `ATP_TEST_S3_ENDPOINT` (MinIO) — all three in `docker-compose.dev.yml`. Skips
 in a local run are expected, not a regression; with all three services up the suite is
-**503 passed | 0 skipped**.
+**535 passed | 0 skipped**.
 
 **Two-process local dev (async runs).** Async execution needs a durable queue, so bring up
 Postgres and run the server and worker as two processes sharing one `DATABASE_URL`:
@@ -73,7 +74,7 @@ pnpm test:quiet              # vitest run --reporter=dot — the in-loop default
 pnpm test                    # vitest run, full reporter — use when something fails
 pnpm format                  # prettier --write .   (Markdown is intentionally excluded)
 pnpm compile                 # discovery → dist/manifest.json
-pnpm validate                # compile + §19 strictness: no unwired __TODO_CHAIN__, no unfailable node
+pnpm validate                # compile + §19 strictness: no unwired __TODO_CHAIN__, no `status lt 500`-only node
 pnpm atp list|run|validate   # local dev CLI over the tests/ corpus (P4)
 pnpm atp import <file.yaml>  # scaffold defineTest/defineSuite drafts + MIGRATION.md from Insomnia v5 (P9)
 pnpm atp golden <id> --base-url <url>   # run once against a real SUT → paste-ready parity asserts
