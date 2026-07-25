@@ -3,10 +3,11 @@ import { resolve } from "node:path";
 
 import { compile } from "@atp/compile";
 import { type Config, type Manifest, manifestSchema } from "@atp/schema";
-import { LocalArtifactStore } from "@atp/store";
+import { createArtifactStore } from "@atp/store";
 
 import { createAuthenticator } from "./auth";
 import type { AuthContext, ServerContext } from "./context";
+import { createEcsRunTaskLauncher, type RunTaskLauncher } from "./run-task";
 
 /** The `{env}` segment (§16.3) inline runs are stored under — matches the `envName` the
  *  engine stamps onto an MCP-invoked run, so the artifact key layout stays consistent. */
@@ -44,6 +45,38 @@ export function buildAuthContext(config: Config): AuthContext | undefined {
 }
 
 /**
+ * Build the §11.3 mode-2 launcher from config, or `undefined` when the escape hatch is off
+ * (the default). Enabling it without the cluster/task-definition/networking fields is a
+ * configuration error, so it fails fast at boot rather than at the first isolated run.
+ */
+export function buildRunTaskLauncher(config: Config): RunTaskLauncher | undefined {
+  if (!config.RUN_TASK_ENABLED) return undefined;
+  const {
+    RUN_TASK_CLUSTER: cluster,
+    RUN_TASK_DEFINITION: taskDefinition,
+    RUN_TASK_SUBNETS: subnets,
+    RUN_TASK_SECURITY_GROUPS: securityGroups,
+  } = config;
+  if (!cluster || !taskDefinition || !subnets || !securityGroups) {
+    throw new Error(
+      "RUN_TASK_ENABLED requires RUN_TASK_CLUSTER, RUN_TASK_DEFINITION, RUN_TASK_SUBNETS, and RUN_TASK_SECURITY_GROUPS",
+    );
+  }
+  const list = (v: string): string[] =>
+    v
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  return createEcsRunTaskLauncher({
+    cluster,
+    taskDefinition,
+    subnets: list(subnets),
+    securityGroups: list(securityGroups),
+    containerName: config.RUN_TASK_CONTAINER,
+  });
+}
+
+/**
  * Build the stateless {@link ServerContext} from validated config (research §8, ADR-002).
  * Resolves the manifest source, the artifact store, the auth gate, and the roots the tools
  * need — nothing per-request. The db, logger, and telemetry are injected by the entrypoint
@@ -53,12 +86,15 @@ export function buildAuthContext(config: Config): AuthContext | undefined {
 export async function buildContext(config: Config): Promise<ServerContext> {
   const sourceRoot = resolve(config.TESTS_ROOT ?? process.cwd());
   const manifest = await loadManifest(config, sourceRoot);
-  const artifactDir = config.ARTIFACT_DIR ?? resolve(sourceRoot, ".atp/artifacts");
+  // Local filesystem by default; S3 when `ARTIFACT_STORE=s3` (P11, §16.3). Constructing an
+  // S3 client performs no I/O, so this stays offline-safe.
+  const artifacts = createArtifactStore(config, resolve(sourceRoot, ".atp/artifacts"));
   return {
     manifest,
     sourceRoot,
-    artifacts: new LocalArtifactStore(artifactDir),
+    artifacts: artifacts.store,
     artifactEnv: ARTIFACT_ENV,
     authn: buildAuthContext(config),
+    runTaskLauncher: buildRunTaskLauncher(config),
   };
 }

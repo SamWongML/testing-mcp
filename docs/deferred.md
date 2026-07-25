@@ -34,11 +34,11 @@ doing them out of order.
   params into individual nodes (baking `{{params.*}}` at normalize time, since the manifest
   carries no params builder) is still unbuilt; close it when a suite actually needs run-time
   params. `run_test` (single test) params work end-to-end.
-- **`TaskStateStore` grew in P8 → P11 `DynamoTaskStore` must match:** the interface the P11
-  Dynamo adapter implements now also has `create()` (insert-only, `attribute_not_exists(run_id)`
-  in Dynamo terms) and `TaskRecord` carries `createdAt`/`updatedAt`; the `tasks` table gained a
-  `created_at` column. P11's `idempotency` table (§16.2) can replace the stage-1
-  "idempotency-key == runId" dedupe that `submitRun` uses today.
+- **`TaskStateStore` grew in P8 → `DynamoTaskStore` must match — ✅ done (P11, 2026-07-25):**
+  `DynamoTaskStore` implements the full interface incl. `create()` (a conditional
+  `attribute_not_exists` PutItem) and preserves `created_at` across a replacing `put` via
+  `if_not_exists`. The `idempotency` table did replace the stage-1 "key == runId" dedupe on the
+  DynamoDB path: `submitRun` now mints the run id independently of the caller's key.
 - **Two P8 review notes (from P8 re-review) → future session, not defects:** (a) the
   trace-less branch of `SdkTaskStore.getTaskResult` (cancelled/failed task fetched via the raw
   SEP-1686 `tasks/result` call) is only covered indirectly — via `getRunResult`'s direct tests
@@ -47,11 +47,9 @@ doing them out of order.
   non-passed task if a client ever depends on it. (b) `run_selection` fans out submits with
   `Promise.all`; a very large tag match opens more concurrent transactions than the pg pool
   `max` (they queue, not fail) — bound the concurrency if selections ever get large.
-- **Task-row TTL sweep not scheduled (from P8) → P10/P11 operational:** `PostgresTaskStore`
-  sets `expiresAt` and implements `deleteExpired()` (the SEP-1686 "results retained for a
-  server-defined duration" GC), but **nothing calls it yet**, so terminal `tasks` rows accumulate
-  forever. Wire a periodic sweep into the worker loop (or a scheduled job) when adding operational
-  hardening; it's a background-GC concern, not a P8 exit-criteria item.
+- **Task-row TTL sweep not scheduled (from P8) — ✅ done (P11):** `sweepExpiredTasks(ctx)` runs
+  in the worker loop every 5 minutes (`sweepMs`). On DynamoDB the table's native TTL reaps in
+  parallel; both are safe together.
 - **SDK Tasks augmentation scope (from P8) → revisit if a client needs it:** only `run_suite` is
   task-augmented (`registerToolTask`, `taskSupport:'required'`). `run_selection` (batch) and
   `run_test`'s long-running auto-task use the plain durable path (poll via the mirror tools).
@@ -59,11 +57,9 @@ doing them out of order.
   advertised and `SdkTaskStore.listTasks` returns `[]`; implement real listing + the `list`
   capability if an agent needs task enumeration. The SDK API is experimental ("may change
   without notice") — re-verify against the installed source on the next SDK bump.
-- **S3ArtifactStore (from P6) → P11:** the `ArtifactStore` interface + `LocalArtifactStore`
-  landed in P6; the S3 implementation (`@aws-sdk/client-s3` put/get + presigned URLs via
-  `@aws-sdk/s3-request-presigner`) is deferred to P11 (the AWS phase), behind the same
-  interface and alongside the `DynamoTaskStore` — there's no AWS to integration-test against
-  before then, and the SDK deps are heavy. P7 uses `LocalArtifactStore` locally.
+- **S3ArtifactStore (from P6) — ✅ done (P11):** `packages/store/src/aws/s3-artifacts.ts`,
+  selected by `ARTIFACT_STORE=s3`. Integration-tested against MinIO, including a presigned URL
+  fetched over plain HTTP with no credentials.
 - **Catalog snapshot writer (from P6) → P7 — ✅ done (2026-07-24):** `recordManifest(db, manifest)`
   landed in `packages/store/src/manifests.ts` (idempotent; one `manifests` row + one
   `catalog_entries` row per entry), called by `mcp-server` `main.ts` at boot when a db is
@@ -81,25 +77,40 @@ doing them out of order.
   ignores Insomnia sub-environments; it never emits a Zod `params` builder (auth tokens are the only
   `{{secrets.*}}`). Fine for the common case; revisit (sub-env → per-cell env or `params`) if a real
   collection leans on sub-environments or request-scoped variables.
-- **Migrations dir must be copied on `tsc` build (from P6) → P11:** `migrate()` resolves
-  `db/migrations/*.sql` relative to `import.meta.url`, which works under `tsx`/`vitest` (no
-  build). The P11 container build (`tsc` emit to `dist/`) must copy the `migrations` dir into
-  the output, or the migrator won't find the `.sql` files at runtime.
-- **Cross-process trace propagation (from P10) → P11:** P10 emits a `mcp` request span in the
-  server process and a `run <entryId>` span (with nested undici SUT spans) in the *worker*
-  process, but the two are **separate traces** — the enqueue→claim hop doesn't carry a W3C
-  `traceparent`. To correlate agent→server→worker→SUT into one trace, serialize the active span
-  context into `jobs.spec` at `submitRun` and restore it as the run span's parent in
-  `runClaimedJob`. Within-process correlation (run→SUT spans, runId in every log line) already
-  works; this is the last cross-process link.
-- **OTLP exporter wiring (from P10) → P11:** `initTelemetry` defaults to console/in-memory
-  exporters; production needs the OTLP→X-Ray/CloudWatch exporter selection (an `OTEL_EXPORTER`
-  config + `@opentelemetry/exporter-*` deps), configured by the P11 `observability` CDK stack.
-  The `withSpan`/`RunMetrics`/`queue_depth` seams don't change — only the exporter does.
-- **`deleteExpired` TTL sweep still unwired (from P8, reconfirmed P10) → P11:**
-  `PostgresTaskStore.deleteExpired()` exists but nothing calls it, so terminal `tasks` rows
-  accumulate. P10 did not add it (not an exit-criterion item); wire a periodic sweep into the
-  worker loop (alongside the reaper) or a scheduled job when adding P11 operational hardening.
+- **Migrations dir must be copied on `tsc` build (from P6) — ✅ moot (P11):** the container runs
+  the TypeScript sources under `tsx` rather than a `tsc` emit (matching the repo-wide no-build
+  design), so `db/migrations/*.sql` is simply present at runtime. Revisit only if the image ever
+  moves to a real build — see the bundle item below.
+- **Cross-process trace propagation (from P10) — ✅ done (P11):** the W3C `traceparent` is
+  injected into `jobs.spec` (`RunSpec.trace`) at submit and restored as the run span's explicit
+  parent in `runClaimedJob`, so agent→server→worker→SUT is one trace. Regression test asserts
+  both the shared traceId and the parent span id.
+- **OTLP exporter wiring (from P10) — ✅ done (P11):** `resolveExporters(config)` maps
+  `OTEL_EXPORTER=console|otlp` (+ `OTEL_EXPORTER_OTLP_ENDPOINT`) to the span exporter and metric
+  reader `initTelemetry` takes. `otlp` without an endpoint throws at boot.
 - **Denied calls are not audited (from P10) → if security review needs attempt logging:**
   `guardScope` throws *before* `auditRun`, so the audit log records executed runs, not rejected
   attempts. Add a separate authz-failure audit path if failed-attempt visibility is required.
+- **Container runs `tsx`, not a built bundle (from P11) → if start-up cost matters:** the image
+  executes TypeScript through `tsx` because the whole monorepo resolves `@atp/*` to
+  `src/index.ts` via `exports` (ADR-003) — a `tsc` emit would mean rewiring every package's
+  exports, well beyond P11's scope. Costs a few hundred ms of transpile at boot and ships the
+  sources. If cold-start or image size ever matters, do the build properly (per-package
+  `exports` with a `dist` condition, or a single bundler pass) **and** copy
+  `packages/store/src/db/migrations/*.sql` into the output.
+- **`Data` stack provisions DynamoDB tables even in `postgres` mode (from P11) → cosmetic:**
+  the tables are on-demand so an unused pair costs essentially nothing, and always having them
+  is what makes `TASK_STORE` a pure environment flip with no infra change. Gate them on a
+  context flag only if empty-table noise becomes a problem.
+- **`S3ArtifactStore` has no multipart/streaming path (from P11) → if traces get large:**
+  `put` sends the whole body in one `PutObject` and `get` buffers the response. Fine for the
+  trace/report sizes this produces today; a very large suite trace would want multipart upload
+  and a streaming read.
+- **No post-deploy smoke step in the runbook (from P11) → operational polish:**
+  `docs/deploy.md` step 5 asks for a manual `curl /healthz` + one real run. Worth turning into
+  a scripted smoke check (`atp run <id>` against the deployed ALB) wired into the deploy
+  pipeline so a bad rollout is caught without a human.
+- **`run_selection` fan-out is still unbounded (from P8, reconfirmed P11):** noted below in the
+  P8 review items; P11's `isolated` flag makes a large tagged selection able to launch many
+  one-off Fargate tasks at once, so bound the concurrency before using `isolated` with a broad
+  selection.

@@ -8,8 +8,8 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    # Postgres for the @atp/store integration tests. Without ATP_TEST_DATABASE_URL
-    # those suites skip, so the DB is only wired into the test step below.
+    # Backing services for the integration suites. Each suite gates on its own env var and
+    # skips when unset, so the services are only wired into the test step below.
     services:
       postgres:
         image: postgres:16
@@ -24,6 +24,24 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # DynamoDB task store + idempotency table (P11, research §16.2).
+      dynamodb:
+        image: amazon/dynamodb-local:2.5.2
+        ports:
+          - 8000:8000
+      # S3-compatible artifact store (P11, §16.3), incl. presigned-URL fetches.
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: atp
+          MINIO_ROOT_PASSWORD: atpsecret
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -37,4 +55,11 @@ jobs:
       - run: pnpm test
         env:
           ATP_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/atp_test
+          ATP_TEST_DYNAMO_ENDPOINT: http://localhost:8000
+          ATP_TEST_S3_ENDPOINT: http://localhost:9000
       - run: pnpm compile # builds dist/manifest.json (gitignored); fails on a bad test
+      # Synthesize every CDK stack (no deploy, no AWS credentials, no Docker daemon — the
+      # image is referenced by URI, not built as an asset). Catches infra breakage on the PR.
+      - run: pnpm synth
+      # The image is the deployment unit; a broken Dockerfile should fail here, not at deploy.
+      - run: docker build -t atp:ci .

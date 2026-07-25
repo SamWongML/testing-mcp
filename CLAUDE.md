@@ -8,38 +8,43 @@ An LLM-driven API testing platform exposed over MCP. Tests are authored as typed
 `defineTest`/`defineSuite` values, compiled to a normalized JSON manifest, and executed by a pure
 in-house DAG engine. The result is rendered to Markdown / HTML / JUnit / an `llm_summary`.
 
-## Session workflow — read before doing any phase work
+## Session workflow — read before starting work
 
-The platform is built in sequential phases (P0–P11). `docs/PROGRESS.md` is the **index** — it is
-kept under 150 lines, so read it whole. Every session:
+**The phased build (P0–P11) is complete.** `docs/PROGRESS.md` is the index — under 150 lines,
+read it whole. There is no "next phase" to read into; new work comes from
+`docs/deferred.md`, the standing backlog of items earlier phases parked.
 
-1. Open `docs/PROGRESS.md`, find the first phase not marked `✅ done`, and read its checklist and
-   *Entering P<n>, read* pointer. Read `docs/deferred.md` — it carries work earlier phases parked
-   for this one.
-2. Read that phase's section in `docs/implementation-plan.md`, then **only** the `docs/research.md`
-   sections it references. `research.md` is ~30k tokens; never read it whole.
-3. Verify the previous phase's exit-criteria commands still pass before building on it.
-4. Build within the phase's file scope. Work belonging to a later phase → append it to
-   `docs/deferred.md` under that phase; don't do it now.
-5. Close out by following *Archiving a finished phase* in the index, then commit and push.
+1. Open `docs/PROGRESS.md` (status + how to close out a piece of work) and `docs/deferred.md`.
+2. Read **only** the `docs/research.md` sections the work touches. `research.md` is ~30k
+   tokens; never read it whole. `docs/implementation-plan.md` holds the original per-phase
+   scope and exit criteria if you need to know why something is the way it is.
+3. Verify the gate before building on it: `pnpm typecheck && pnpm lint && pnpm test`.
+4. Close out by appending one row to `docs/phases/session-log.md`, then commit and push.
 
-Handoff notes for `✅ done` phases live in `docs/phases/P<n>.md` — read one **only** if the current
-phase revisits that work. **Never let `PROGRESS.md` grow past 150 lines**: it is read in full every
-session and is the largest fixed context cost of a session start.
+Handoff notes for each finished phase live in `docs/phases/P<n>.md` — read one **only** if you
+are revisiting that work; they are not session-start reading. **Never let `PROGRESS.md` grow
+past 150 lines**: it is read in full every session.
 
-**Current state:** P0–P10 done; P11 (CDK infra + DynamoDB adapter) next. `@atp/schema`,
-`@atp/engine`, `@atp/reporting`, `@atp/store`, `@atp/cli`, `@atp/mcp-server`, and `tools/compile`
-are implemented, with a sample corpus in `tests/`. The MCP server has a stateless **sync** surface
+**Current state:** P0–P11 done — the platform is built, tested, and deployable. `@atp/schema`,
+`@atp/engine`, `@atp/reporting`, `@atp/store`, `@atp/cli`, `@atp/mcp-server`, `tools/compile`,
+and the `infra` CDK app are implemented, with a sample corpus in `tests/`. The MCP server has a stateless **sync** surface
 (`pnpm dev:server`) and, when a run database is configured, an **async** surface: `run_suite` (an
 SEP-1686 MCP Task), `run_selection`, and the `get_run`/`get_run_result`/`cancel_run` mirror tools,
 executed by a separate worker (`pnpm dev:worker`). It also exposes the five workflow **prompts**
 (§8.3) and the `atp import` Insomnia scaffolder (see *MCP surface & agent recipes* below). P10
 added an **OAuth 2.1 gate** (jose JWT validation, RFC 9728 metadata, RFC 8707 audience,
 `test:read`/`test:run` scopes, audit log) and **observability** (Pino structured logs + OTel
-traces/metrics incl. `queue_depth`) — **all off by default** via `AUTH_ENABLED`/`OTEL_ENABLED`, so
-dev/test run unauthenticated and quiet unless configured (ADR-007 internal-deployment path).
-DB-backed tests gate on `ATP_TEST_DATABASE_URL` (see `docker-compose.dev.yml`) and skip without
-it — the ~43 skips in a local `pnpm test` are expected, not a regression.
+traces/metrics incl. `queue_depth`). P11 added the **deployment layer**: a CDK app (`infra/`),
+one container image running `MODE=server|worker|migrate`, and DynamoDB/S3 store adapters
+selected by config. **Everything AWS-flavoured is off by default** — `TASK_STORE=postgres`,
+`ARTIFACT_STORE=local`, `AUTH_ENABLED`/`OTEL_ENABLED`/`RUN_TASK_ENABLED` false — so dev and
+test run exactly as before (ADR-007 internal-deployment path).
+
+**Integration tests gate on their backing service and skip when it is absent**, so `pnpm test`
+stays green offline: `ATP_TEST_DATABASE_URL` (Postgres), `ATP_TEST_DYNAMO_ENDPOINT`
+(dynamodb-local), `ATP_TEST_S3_ENDPOINT` (MinIO) — all three in `docker-compose.dev.yml`. Skips
+in a local run are expected, not a regression; with all three services up the suite is
+**503 passed | 0 skipped**.
 
 **Two-process local dev (async runs).** Async execution needs a durable queue, so bring up
 Postgres and run the server and worker as two processes sharing one `DATABASE_URL`:
@@ -52,6 +57,11 @@ pnpm dev:worker   # terminal 2 — claims jobs, runs the engine, drives task sta
 ```
 
 Without `DATABASE_URL` the server is synchronous-only (P7 surface) and `pnpm dev:worker` fails fast.
+`docker compose … up -d` also starts dynamodb-local (`:8000`) and MinIO (`:9000`) for the P11
+adapter suites; dev itself needs only Postgres.
+
+**Deploying.** `docs/deploy.md` is the runbook (bootstrap → image → migrate → deploy → rollback).
+`pnpm synth` runs `cdk synth` for all four stacks and needs no AWS credentials and no Docker.
 
 ## Commands
 
@@ -67,9 +77,13 @@ pnpm atp list|run|validate   # local dev CLI over the tests/ corpus (P4)
 pnpm atp import <file.yaml>  # scaffold defineTest/defineSuite drafts + MIGRATION.md from Insomnia v5 (P9)
 pnpm dev:server              # MCP HTTP surface (needs DATABASE_URL for the async path)
 pnpm dev:worker              # async run worker (requires DATABASE_URL)
+pnpm synth                   # cdk synth for all four stacks (no AWS creds, no Docker) (P11)
+docker build -t atp:dev .    # the deployment image: MODE=server|worker|migrate
 ```
 
-CI (`.github/workflows/ci.yml`) runs — and must stay green on — install → typecheck → lint → test.
+CI (`.github/workflows/ci.yml`) runs — and must stay green on — install → typecheck → lint →
+test (with Postgres, dynamodb-local, and MinIO service containers) → compile → `pnpm synth` →
+`docker build`.
 
 Narrow the test run while iterating: `pnpm exec vitest run <path>` (one file), `pnpm exec vitest run
 -t "<substring>"` (by name), `pnpm --filter @atp/engine test` (one package).
@@ -81,7 +95,7 @@ normalizer → normalized JSON **manifest** (fully serializable) → the **engin
 `ExecutionResult` → renderers. The manifest — not the source files — is what the server loads at
 runtime (ADR-003).
 
-**Monorepo layout.** pnpm workspaces over `packages/*` and `tools/*`. Internal `@atp/*` packages
+**Monorepo layout.** pnpm workspaces over `packages/*`, `tools/*`, and `infra`. Internal `@atp/*` packages
 resolve to their `src/index.ts` via the `exports` field, so cross-package imports need no build step
 in dev/test. To add a cross-package dependency, add `"@atp/x": "workspace:*"` to that package's
 `dependencies` and run `pnpm install`. Dependency direction: `schema` ← `engine` ← everything else;
@@ -131,6 +145,9 @@ These hold across all phases (ADR references point into `docs/research.md`):
 - **Additive MCP tool surface** — never rename or remove a tool or field; add optional fields.
 - **Stateless request path** — no cross-request memory in the MCP service (ADR-002).
 - **Every run records `manifestHash` + `gitSha`.**
+- **Storage backing is config, never code** (P11, §18) — `TASK_STORE`/`ARTIFACT_STORE` select the
+  adapter; everything above `@atp/store` goes through the `TaskStateStore`/`ArtifactStore` seams
+  (in `mcp-server`, via `taskStoreFor(ctx, db)`).
 
 ## Conventions
 
