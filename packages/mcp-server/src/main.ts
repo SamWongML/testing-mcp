@@ -6,6 +6,8 @@ import { createStore, recordManifest, type StoreClient } from "@atp/store";
 import type { ServerContext } from "./context";
 import { buildContext } from "./bootstrap";
 import { createHttpApp } from "./http";
+import { createLogger } from "./logging";
+import { initTelemetry, type Telemetry } from "./telemetry";
 
 /**
  * The `MODE=server` dev entrypoint (`pnpm dev:server`). Validates config (fail fast),
@@ -18,7 +20,15 @@ import { createHttpApp } from "./http";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
-  let ctx: ServerContext = await buildContext(config);
+  const logger = createLogger({
+    level: config.LOG_LEVEL,
+    base: { service: config.SERVICE_NAME, mode: "server" },
+  });
+  const telemetry: Telemetry | undefined = config.OTEL_ENABLED
+    ? initTelemetry({ serviceName: config.SERVICE_NAME })
+    : undefined;
+
+  let ctx: ServerContext = { ...(await buildContext(config)), logger, telemetry };
 
   let store: StoreClient | undefined;
   if (config.DATABASE_URL) {
@@ -28,13 +38,24 @@ async function main(): Promise<void> {
   }
 
   const server = serve({ fetch: createHttpApp(ctx).fetch, port: config.PORT }, (info) => {
-    console.log(
-      `atp mcp server on http://127.0.0.1:${info.port} — ${ctx.manifest.entries.length} tests, db ${store ? "on" : "off"}`,
+    logger.info(
+      {
+        port: info.port,
+        tests: ctx.manifest.entries.length,
+        db: Boolean(store),
+        auth: Boolean(ctx.authn),
+      },
+      "atp mcp server started",
     );
   });
 
   const shutdown = (): void => {
-    server.close(() => void store?.close().finally(() => process.exit(0)));
+    server.close(
+      () =>
+        void Promise.allSettled([store?.close(), telemetry?.shutdown()]).finally(() =>
+          process.exit(0),
+        ),
+    );
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

@@ -23,6 +23,23 @@ export const configSchema = z.object({
   /** Root the corpus is compiled from and `ManifestEntry.sourcePath` resolves against, so
    *  `run_test` can import the authored definition (P7). Defaults to the process cwd. */
   TESTS_ROOT: z.string().optional(),
+  /** OAuth 2.1 gate on the MCP surface (P10, ADR-007). Off by default so local dev and the
+   *  test suite run unauthenticated; production sets `AUTH_ENABLED=true` and the JWKS/issuer/
+   *  resource fields below. When on, every tool handler enforces `test:read`/`test:run`. */
+  AUTH_ENABLED: z.stringbool().default(false),
+  /** The authorization server's issuer URL — advertised in the RFC 9728 metadata and the
+   *  required `iss` claim of every access token. */
+  AUTH_ISSUER: z.string().optional(),
+  /** JWKS endpoint used to validate access-token signatures (`jose` remote key set). */
+  AUTH_JWKS_URI: z.string().optional(),
+  /** This server's RFC 8707 resource identifier — the required token `aud` and the
+   *  `resource` of the RFC 9728 protected-resource metadata document. */
+  AUTH_RESOURCE: z.string().optional(),
+  /** OpenTelemetry tracing + metrics (P10, §15). Off by default; when on, the server/worker
+   *  install a tracer + meter (console exporter locally, OTLP in prod). */
+  OTEL_ENABLED: z.stringbool().default(false),
+  /** Service name stamped on spans/metrics (OTel `service.name`). */
+  SERVICE_NAME: z.string().default("atp"),
 });
 export type Config = z.infer<typeof configSchema>;
 

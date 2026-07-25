@@ -5,8 +5,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
+import { SCOPES } from "./auth";
 import type { ServerContext } from "./context";
 import { executeEntry } from "./execute";
+import { auditRun, guardScope } from "./guard";
 import { loadTrace, persistRun } from "./run-store";
 import { submitRun } from "./tasks";
 
@@ -90,7 +92,8 @@ export function registerListTests(server: McpServer, ctx: ServerContext): void {
           .describe("Case-insensitive substring match over id and title."),
       },
     },
-    ({ tags, owner, kind, query }) => {
+    ({ tags, owner, kind, query }, extra) => {
+      guardScope(ctx, extra, SCOPES.READ);
       const entries = selectEntries(ctx, { tags, owner, kind, query }).map(catalogView);
       return jsonResult({ entries });
     },
@@ -108,7 +111,10 @@ export function registerDescribeTest(server: McpServer, ctx: ServerContext): voi
         "Return the full manifest entry for a test or suite by id: its executable node graph, params JSON Schema, env, matrix, and authored source path.",
       inputSchema: { id: z.string().describe('The test or suite id, e.g. "identity.login".') },
     },
-    ({ id }) => jsonResult({ entry: findEntry(ctx, id) }),
+    ({ id }, extra) => {
+      guardScope(ctx, extra, SCOPES.READ);
+      return jsonResult({ entry: findEntry(ctx, id) });
+    },
   );
 }
 
@@ -152,11 +158,13 @@ export function registerRunTest(server: McpServer, ctx: ServerContext): void {
           .describe("Env overrides merged over the test's baked-in env, e.g. { baseUrl }."),
       },
     },
-    async ({ id, params, env }) => {
+    async ({ id, params, env }, extra) => {
+      guardScope(ctx, extra, SCOPES.RUN);
       const entry = findEntry(ctx, id);
       if (entry.kind !== "test") {
         throw new Error(`"${id}" is a suite; use run_suite (suite execution is asynchronous).`);
       }
+      await auditRun(ctx, extra, { action: "run_test", entryId: id, params });
       if (entry.isLongRunning) {
         // Auto-task: a long-running test is enqueued for the worker rather than blocking the
         // request. Requires a configured run database (the async path is durable).
@@ -195,7 +203,8 @@ export function registerGetReport(server: McpServer, ctx: ServerContext): void {
           .describe("Report format; defaults to markdown."),
       },
     },
-    async ({ runId, format }) => {
+    async ({ runId, format }, extra) => {
+      guardScope(ctx, extra, SCOPES.READ);
       const fmt: ReportFormat = format ?? "md";
       const trace = await loadTrace(ctx, runId);
       return textResult(renderReport(trace, fmt), { runId, format: fmt });
@@ -238,7 +247,8 @@ export function registerListRuns(server: McpServer, ctx: ServerContext): void {
         limit: z.number().int().positive().max(1000).optional().describe("Max rows (default 100)."),
       },
     },
-    async ({ entryId, status, since, limit }) => {
+    async ({ entryId, status, since, limit }, extra) => {
+      guardScope(ctx, extra, SCOPES.READ);
       if (!ctx.db) return jsonResult({ runs: [] });
       const rows = await listRuns(ctx.db, {
         entryId,

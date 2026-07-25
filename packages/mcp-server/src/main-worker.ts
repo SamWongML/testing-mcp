@@ -2,6 +2,8 @@ import { loadConfig } from "@atp/schema";
 import { createStore, recordManifest, type StoreClient } from "@atp/store";
 
 import { buildContext } from "./bootstrap";
+import { createLogger } from "./logging";
+import { initTelemetry, type Telemetry } from "./telemetry";
 import { startWorker } from "./worker";
 
 /**
@@ -17,17 +19,29 @@ async function main(): Promise<void> {
     throw new Error("the worker requires DATABASE_URL (async runs need a durable queue)");
   }
 
-  const ctx = await buildContext(config);
-  const store: StoreClient = createStore(config.DATABASE_URL);
-  await recordManifest(store.db, ctx.manifest);
+  const logger = createLogger({
+    level: config.LOG_LEVEL,
+    base: { service: config.SERVICE_NAME, mode: "worker" },
+  });
+  const telemetry: Telemetry | undefined = config.OTEL_ENABLED
+    ? initTelemetry({ serviceName: config.SERVICE_NAME })
+    : undefined;
 
-  const worker = startWorker({ ...ctx, db: store.db });
-  console.log(
-    `atp worker ${worker.workerId} started — ${ctx.manifest.entries.length} entries in catalog`,
+  const base = await buildContext(config);
+  const store: StoreClient = createStore(config.DATABASE_URL);
+  await recordManifest(store.db, base.manifest);
+
+  const worker = startWorker({ ...base, db: store.db, logger, telemetry });
+  logger.info(
+    { workerId: worker.workerId, entries: base.manifest.entries.length },
+    "atp worker started",
   );
 
   const shutdown = (): void => {
-    void worker.stop().then(() => store.close().finally(() => process.exit(0)));
+    void worker
+      .stop()
+      .then(() => Promise.allSettled([store.close(), telemetry?.shutdown()]))
+      .finally(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

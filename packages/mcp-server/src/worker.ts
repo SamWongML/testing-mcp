@@ -2,6 +2,7 @@ import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 
 import type { ManifestEntry } from "@atp/schema";
+import type { ExecutionResult } from "@atp/schema";
 import {
   claim,
   heartbeat,
@@ -9,6 +10,7 @@ import {
   type Job,
   markDone,
   PostgresTaskStore,
+  queueDepth,
   reapExpired,
   type Db,
   type TaskState,
@@ -18,6 +20,7 @@ import type { ServerContext } from "./context";
 import { executeEntry } from "./execute";
 import { parseSpec, requireDb as ensureDb, resultStateFor } from "./tasks";
 import { persistRun } from "./run-store";
+import { withSpan } from "./telemetry";
 
 /**
  * The async worker (research §11.2/§11.3, ADR-004). It claims queued jobs with
@@ -66,11 +69,14 @@ export async function runClaimedJob(
   const tasks = new PostgresTaskStore(db);
   const runId = job.runId ?? job.id;
   const heartbeatMs = opts.heartbeatMs ?? DEFAULTS.heartbeatMs;
+  // Correlation ids thread through every line this run emits (§15).
+  const log = ctx.logger?.child({ runId, taskId: runId });
 
   // Cancel-while-queued: a job flagged before it was claimed never runs.
   if (job.cancelRequested) {
     await tasks.update(runId, { state: "cancelled" });
     await markDone(db, job.id, workerId, "done");
+    log?.info("run cancelled while queued");
     return { runId, state: "cancelled" };
   }
 
@@ -84,6 +90,7 @@ export async function runClaimedJob(
   if (!entry) {
     return finalizeError(ctx, job, workerId, runId, `unknown entry "${spec.entryId}"`);
   }
+  log?.info({ entryId: entry.id, kind: entry.kind }, "claimed run");
 
   const controller = new AbortController();
   // Serialize progress writes and keep the terminal write strictly after the last one, so a
@@ -102,14 +109,17 @@ export async function runClaimedJob(
     })();
   }, heartbeatMs);
 
-  try {
-    const result = await executeEntry(ctx, entry, {
+  // Wrap execution in a run span (when telemetry is on) so the engine's undici SUT calls nest
+  // under it — the MCP-call → run → SUT-call trace (§15).
+  const execute = (): Promise<ExecutionResult> =>
+    executeEntry(ctx, entry, {
       params: spec.params,
       env: spec.env,
       runId,
       signal: controller.signal,
       onProgress: (u) => {
         const pct = u.total > 0 ? Math.round((u.completed / u.total) * 100) : 0;
+        log?.debug({ nodeId: u.nodeId, completed: u.completed, total: u.total }, "node settled");
         // Advisory: a transient progress-write failure must not fail an otherwise-good run,
         // so swallow per-tick errors (the terminal write is the authoritative state).
         progressChain = progressChain.then(() =>
@@ -117,6 +127,13 @@ export async function runClaimedJob(
         );
       },
     });
+
+  try {
+    const result = ctx.telemetry
+      ? await withSpan(ctx.telemetry.tracer, `run ${entry.id}`, execute, {
+          attributes: { "atp.run_id": runId, "atp.entry_id": entry.id },
+        })
+      : await execute();
     clearInterval(beat);
     await progressChain;
 
@@ -128,11 +145,14 @@ export async function runClaimedJob(
       resultRef: traceUri,
       error: result.error,
     });
+    recordRunMetrics(ctx, entry.id, result, state);
+    log?.info({ state, durationMs: result.durationMs }, "run terminal");
     // A cancelled/completed job is terminal (never requeue); only a failed run is 'failed'.
     await markDone(db, job.id, workerId, state === "failed" ? "failed" : "done");
     return { runId, state };
   } catch (err) {
     clearInterval(beat);
+    log?.error({ err: errorMessage(err) }, "run threw");
     return finalizeError(ctx, job, workerId, runId, errorMessage(err));
   }
 }
@@ -145,6 +165,21 @@ export interface TaskStateResult {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Publish the per-run metrics (§15): the terminal-count/duration + one assertion-failure tick
+ *  per failed assertion, tagged by test for the `assertion_failures_total{test}` breakdown. */
+function recordRunMetrics(
+  ctx: ServerContext,
+  entryId: string,
+  result: ExecutionResult,
+  state: TaskState,
+): void {
+  const metrics = ctx.telemetry?.metrics;
+  if (!metrics) return;
+  metrics.recordRun(state, result.durationMs ?? 0);
+  const failed = result.steps.reduce((n, s) => n + s.assertions.filter((a) => !a.ok).length, 0);
+  if (failed > 0) metrics.recordAssertionFailure(entryId, failed);
 }
 
 /** Terminal-fail a job that could not be executed (bad spec, unknown entry, unexpected throw). */
@@ -161,13 +196,16 @@ async function finalizeError(
   return { runId, state: "failed" };
 }
 
-/** Claim one ready job and run it; returns false when the queue was empty. */
+/** Claim one ready job and run it; returns false when the queue was empty. Samples `queue_depth`
+ *  before claiming so the autoscaling metric reflects the backlog each poll (§15). */
 export async function claimAndRun(
   ctx: ServerContext,
   workerId: string,
   opts: WorkerOptions = {},
 ): Promise<boolean> {
-  const job = await claim(requireDb(ctx), workerId);
+  const db = requireDb(ctx);
+  if (ctx.telemetry) ctx.telemetry.metrics.setQueueDepth(await queueDepth(db));
+  const job = await claim(db, workerId);
   if (!job) return false;
   await runClaimedJob(ctx, job, workerId, opts);
   return true;

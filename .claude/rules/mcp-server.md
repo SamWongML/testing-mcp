@@ -16,13 +16,42 @@ paths:
 - **Additive tool surface.** Never rename or remove a tool or a field; add optional fields.
   Existing clients must keep working across phases.
 
+## Authorization has two layers — know which one covers your code
+
+`guardScope` in a handler covers **only** requests the SDK routes through one of our callbacks:
+`tools/call` and `resources/read`. It does **not** and **cannot** cover the SEP-1686 `tasks/*`
+family (`tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel`): the SDK's `Protocol`
+registers its own generic handlers for those as soon as a `taskStore` is configured, dispatching
+straight into `SdkTaskStore` without a callback, and `TaskStore` is never given the caller's
+`AuthInfo`. Those methods are gated **by method name in `http.ts`** (`TASK_METHOD_SCOPES` +
+`requiredScopesFor` → 403 `insufficient_scope`).
+
+**So:** adding a tool ⇒ add `guardScope` in its handler. Adding or enabling any *protocol-level*
+method the SDK handles for us ⇒ add it to `TASK_METHOD_SCOPES`, because no handler guard will run.
+P10 shipped this bypass initially (any zero-scope token could cancel any run); `auth-http.test.ts`
+holds the regression tests.
+
 ## Layout
 
 - `context.ts` — `ServerContext`, the composition root (manifest, sourceRoot, artifacts,
-  artifactEnv, optional `db`, optional `auth`). Injected, never per-request.
+  artifactEnv, optional `db`, engine `auth` providers, and P10's optional `authn`/`logger`/
+  `telemetry`). Injected, never per-request.
 - `server.ts` — `buildMcpServer(ctx)`: pure/stateless registration of tools + resources;
   enables the async task surface + `SdkTaskStore` + Tasks capability when `ctx.db` is present.
-- `tools.ts`, `resources.ts` — the sync surface itself.
+- `tools.ts`, `resources.ts` — the sync surface itself. Every handler takes `extra` and calls
+  `guardScope(ctx, extra, SCOPES.READ|RUN)`; the four run tools also `auditRun(...)`.
+- `auth.ts` — the pure OAuth core (P10, ADR-007): `parseBearerToken`, `SCOPES`, `assertScope`/
+  `ScopeError`, RFC 9728 `protectedResourceMetadata` + `wwwAuthenticate`, `createAuthenticator`
+  (jose JWT verify: signature/issuer/RFC 8707 audience/expiry → SDK `AuthInfo`). Side-effect free.
+- `guard.ts` — handler-side `guardScope` / `auditRun` / `principalOf`; both the scope check and
+  the audit write **no-op** off the auth/db path, so handlers run unchanged in dev/test.
+  `redactAuditParams` masks secret-shaped **keys** before an audit row is written (the engine's
+  `redact()` is value-based and cannot cover an arbitrary caller-supplied params bag).
+- `logging.ts` — `createLogger` (Pino JSON + `REDACT_PATHS` secret scrub; `child({runId,…})`).
+- `telemetry.ts` — `initTelemetry` (OTel providers + undici auto-instrumentation for SUT spans),
+  `withSpan` (active-span wrapper), `RunMetrics` (`runs_total`/`queue_depth`/…). Exporters
+  injectable (console default, in-memory in tests). **The engine stays pure** — SUT spans come
+  from undici's diagnostics_channel, never an engine OTel import.
 - `execute.ts` — `executeEntry`: the shared test/suite executor (signal + `onProgress` +
   `runId`) used by both the inline `run_test` and the worker.
 - `tasks.ts` — async lifecycle glue over the P6 queue + `PostgresTaskStore`: `submitRun`

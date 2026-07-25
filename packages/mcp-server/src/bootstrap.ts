@@ -5,7 +5,8 @@ import { compile } from "@atp/compile";
 import { type Config, type Manifest, manifestSchema } from "@atp/schema";
 import { LocalArtifactStore } from "@atp/store";
 
-import type { ServerContext } from "./context";
+import { createAuthenticator } from "./auth";
+import type { AuthContext, ServerContext } from "./context";
 
 /** The `{env}` segment (§16.3) inline runs are stored under — matches the `envName` the
  *  engine stamps onto an MCP-invoked run, so the artifact key layout stays consistent. */
@@ -26,10 +27,28 @@ async function loadManifest(config: Config, sourceRoot: string): Promise<Manifes
 }
 
 /**
+ * Build the OAuth {@link AuthContext} from config (P10, ADR-007), or `undefined` when
+ * `AUTH_ENABLED` is off (the dev/test default). Enabling auth requires the issuer, this
+ * server's resource identifier, and a JWKS endpoint — a missing one fails fast at boot. The
+ * remote key set is lazy (no I/O until the first token verify), so this stays offline-safe.
+ */
+export function buildAuthContext(config: Config): AuthContext | undefined {
+  if (!config.AUTH_ENABLED) return undefined;
+  const { AUTH_ISSUER: issuer, AUTH_RESOURCE: resource, AUTH_JWKS_URI: jwksUri } = config;
+  if (!issuer || !resource || !jwksUri) {
+    throw new Error(
+      "AUTH_ENABLED requires AUTH_ISSUER, AUTH_RESOURCE, and AUTH_JWKS_URI to be set",
+    );
+  }
+  return { issuer, resource, authenticator: createAuthenticator({ issuer, resource, jwksUri }) };
+}
+
+/**
  * Build the stateless {@link ServerContext} from validated config (research §8, ADR-002).
- * Resolves the manifest source, the artifact store, and the roots the tools need — nothing
- * per-request. The db is injected by the entrypoint (the established seam: tests build a
- * context with a throwaway db), so this stays offline and free of connection lifecycle.
+ * Resolves the manifest source, the artifact store, the auth gate, and the roots the tools
+ * need — nothing per-request. The db, logger, and telemetry are injected by the entrypoint
+ * (the established seam: tests build a context with a throwaway db + in-memory exporters), so
+ * this stays offline and free of connection/provider lifecycle.
  */
 export async function buildContext(config: Config): Promise<ServerContext> {
   const sourceRoot = resolve(config.TESTS_ROOT ?? process.cwd());
@@ -40,5 +59,6 @@ export async function buildContext(config: Config): Promise<ServerContext> {
     sourceRoot,
     artifacts: new LocalArtifactStore(artifactDir),
     artifactEnv: ARTIFACT_ENV,
+    authn: buildAuthContext(config),
   };
 }

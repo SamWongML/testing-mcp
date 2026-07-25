@@ -28,31 +28,12 @@
 | P7 | MCP server — sync surface | ✅ | 2026-07-24 | ✅ | [phases/P7.md](./phases/P7.md) |
 | P8 | Worker + MCP Tasks — async lifecycle | ✅ | 2026-07-24 | ✅ | [phases/P8.md](./phases/P8.md) |
 | P9 | Prompts + Insomnia migration | ✅ | 2026-07-24 | ✅ | [phases/P9.md](./phases/P9.md) |
-| P10 | AuthN/Z + observability | ⬜ | — | — | ← **current** |
-| P11 | CDK infra + DynamoDB adapter | ⬜ | — | — | |
+| P10 | AuthN/Z + observability | ✅ | 2026-07-25 | ✅ | [phases/P10.md](./phases/P10.md) |
+| P11 | CDK infra + DynamoDB adapter | ⬜ | — | — | ← **current** |
 
 ---
 
 ## Current phase
-
-### P10 — Auth + observability
-- [ ] OAuth 2.1 (`jose`, RFC 9728/8707), `test:read`/`test:run` scopes, dev-off flag
-- [ ] Audit log on run-invoking calls
-- [ ] Pino everywhere with runId/taskId/traceId/nodeId + log redaction
-- [ ] OTel tracing (MCP call → run → SUT call spans)
-- [ ] Metrics incl. `queue_depth` for autoscaling
-- [ ] Tests: scope rejection, audit rows, correlation ids
-
-**Handoff notes:** _none yet_
-
-**Entering P10, read:** plan §P10 · research §15 (all), ADR-007, §2.4 (auth capabilities), §8.1 ·
-[docs/deferred.md](./deferred.md) · [phases/P9.md](./phases/P9.md) for the finished agent-facing
-surface (tools/prompts/resources) auth now gates, and [phases/P8.md](./phases/P8.md) for the async
-lifecycle whose run-invoking calls need audit rows + correlation ids.
-
----
-
-## Upcoming phases
 
 ### P11 — Infra + DynamoDB
 - [ ] Dockerfile (MODE=server|worker, tini, graceful shutdown)
@@ -60,6 +41,15 @@ lifecycle whose run-invoking calls need audit rows + correlation ids.
 - [ ] `DynamoTaskStore` + idempotency adapter + config-based store selection
 - [ ] (Optional) `RunTask` escape hatch for very long runs
 - [ ] `cdk synth` in CI; `docs/deploy.md` runbook
+
+**Handoff notes:** _none yet_
+
+**Entering P11, read:** plan §P11 · research §17 (all), §16.2, §18, §11.3, ADR-004/005/008 ·
+[docs/deferred.md](./deferred.md) (S3ArtifactStore, `DynamoTaskStore` interface match, migrations-
+dir copy on `tsc` build, `deleteExpired` TTL sweep, plus the P10 items: OTLP exporter wiring +
+cross-process trace propagation) · [phases/P10.md](./phases/P10.md) for the `queue_depth`
+autoscaling signal the `ecs` stack scales on, and [phases/P6.md](./phases/P6.md) for the
+`TaskStateStore`/`ArtifactStore` seams the Dynamo/S3 adapters implement.
 
 ---
 

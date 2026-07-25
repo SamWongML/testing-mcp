@@ -7,6 +7,7 @@ import {
   heartbeat,
   isCancelRequested,
   markDone,
+  queueDepth,
   reapExpired,
   requestCancel,
 } from "./queue";
@@ -127,6 +128,23 @@ describe.skipIf(!pgAvailable)("queue", () => {
       )
       .then((r) => r.rows);
     expect(row).toMatchObject({ status: "running", worker_id: "worker-b" });
+  });
+
+  it("queueDepth counts ready queued jobs — the worker-autoscaling signal", async () => {
+    expect(await queueDepth(tdb.db)).toBe(0);
+
+    await enqueue(tdb.db, { runId: "q1" });
+    await enqueue(tdb.db, { runId: "q2" });
+    await enqueue(tdb.db, { runId: "q3" });
+    expect(await queueDepth(tdb.db)).toBe(3);
+
+    // A claimed job is `running`, not queued → depth drops.
+    await claim(tdb.db, "worker-a");
+    expect(await queueDepth(tdb.db)).toBe(2);
+
+    // A future-scheduled job is queued but not yet ready → excluded from the depth.
+    await enqueue(tdb.db, { runId: "later", runAfter: new Date(Date.now() + 60_000) });
+    expect(await queueDepth(tdb.db)).toBe(2);
   });
 
   it("cancel flag is set per run and observable by the worker", async () => {

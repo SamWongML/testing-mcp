@@ -3,7 +3,9 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import type { Variables } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 
+import { SCOPES } from "./auth";
 import type { ServerContext } from "./context";
+import { guardScope } from "./guard";
 import { loadTrace } from "./run-store";
 import { findEntry } from "./tools";
 
@@ -36,7 +38,10 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "Every test and suite in the loaded manifest.",
       mimeType: "application/json",
     },
-    (uri) => jsonContents(uri, { entries: ctx.manifest.entries }),
+    (uri, extra) => {
+      guardScope(ctx, extra, SCOPES.READ);
+      return jsonContents(uri, { entries: ctx.manifest.entries });
+    },
   );
 
   server.registerResource(
@@ -47,7 +52,8 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "The full manifest entry for a single test or suite id.",
       mimeType: "application/json",
     },
-    (uri, variables) => {
+    (uri, variables, extra) => {
+      guardScope(ctx, extra, SCOPES.READ);
       const entry = findEntry(ctx, scalar(variables.id));
       return jsonContents(uri, { entry });
     },
@@ -61,7 +67,8 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "The rendered markdown report for a completed run.",
       mimeType: "text/markdown",
     },
-    async (uri, variables) => {
+    async (uri, variables, extra) => {
+      guardScope(ctx, extra, SCOPES.READ);
       const trace = await loadTrace(ctx, scalar(variables.runId));
       return textContents(uri, renderReport(trace, "md"), "text/markdown");
     },
@@ -75,7 +82,8 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "The canonical ExecutionResult trace everything else renders from.",
       mimeType: "application/json",
     },
-    async (uri, variables) => {
+    async (uri, variables, extra) => {
+      guardScope(ctx, extra, SCOPES.READ);
       const trace = await loadTrace(ctx, scalar(variables.runId));
       return jsonContents(uri, trace);
     },

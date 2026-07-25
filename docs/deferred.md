@@ -85,3 +85,21 @@ doing them out of order.
   `db/migrations/*.sql` relative to `import.meta.url`, which works under `tsx`/`vitest` (no
   build). The P11 container build (`tsc` emit to `dist/`) must copy the `migrations` dir into
   the output, or the migrator won't find the `.sql` files at runtime.
+- **Cross-process trace propagation (from P10) → P11:** P10 emits a `mcp` request span in the
+  server process and a `run <entryId>` span (with nested undici SUT spans) in the *worker*
+  process, but the two are **separate traces** — the enqueue→claim hop doesn't carry a W3C
+  `traceparent`. To correlate agent→server→worker→SUT into one trace, serialize the active span
+  context into `jobs.spec` at `submitRun` and restore it as the run span's parent in
+  `runClaimedJob`. Within-process correlation (run→SUT spans, runId in every log line) already
+  works; this is the last cross-process link.
+- **OTLP exporter wiring (from P10) → P11:** `initTelemetry` defaults to console/in-memory
+  exporters; production needs the OTLP→X-Ray/CloudWatch exporter selection (an `OTEL_EXPORTER`
+  config + `@opentelemetry/exporter-*` deps), configured by the P11 `observability` CDK stack.
+  The `withSpan`/`RunMetrics`/`queue_depth` seams don't change — only the exporter does.
+- **`deleteExpired` TTL sweep still unwired (from P8, reconfirmed P10) → P11:**
+  `PostgresTaskStore.deleteExpired()` exists but nothing calls it, so terminal `tasks` rows
+  accumulate. P10 did not add it (not an exit-criterion item); wire a periodic sweep into the
+  worker loop (alongside the reaper) or a scheduled job when adding P11 operational hardening.
+- **Denied calls are not audited (from P10) → if security review needs attempt logging:**
+  `guardScope` throws *before* `auditRun`, so the audit log records executed runs, not rejected
+  attempts. Add a separate authz-failure audit path if failed-attempt visibility is required.
