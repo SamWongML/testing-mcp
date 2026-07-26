@@ -42,9 +42,5 @@ request/response.
 
 ## Conventions
 
-TypeScript strict + ESM. The base tsconfig sets `verbatimModuleSyntax`, `isolatedModules`, and
-`noUncheckedIndexedAccess` — use `import type` for type-only imports and treat indexed access
-as possibly-`undefined`.
-
 Unit tests sit beside their source as `packages/engine/src/**/*.test.ts` — that is what
 `vitest.config.ts` matches.

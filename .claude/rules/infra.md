@@ -63,8 +63,4 @@ load-bearing — without it the signal stops at the shell.
 Migrations run as a **one-off `MODE=migrate` task before** a rollout, never at service boot
 (concurrent DDL across a rolling deploy's tasks wedges the deploy).
 
-## Conventions
-
-TypeScript strict + ESM, same as the rest of the repo (`verbatimModuleSyntax`,
-`isolatedModules`, `noUncheckedIndexedAccess`). `cdk.out/` is generated — gitignored and
-eslint-ignored.
+`cdk.out/` is generated — gitignored and eslint-ignored.

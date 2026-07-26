@@ -46,42 +46,19 @@ method the SDK handles for us ⇒ add it to `TASK_METHOD_SCOPES`, because no han
 This bypass shipped once (any zero-scope token could cancel any run); `auth-http.test.ts` holds the
 regression tests.
 
-## Layout
+## Files whose design is not obvious from reading them
 
-- `context.ts` — `ServerContext`, the composition root (manifest, sourceRoot, artifacts,
-  artifactEnv, optional `db`, engine `auth` providers, and the optional `authn`/`logger`/
-  `telemetry`). Injected, never per-request.
-- `server.ts` — `buildMcpServer(ctx)`: pure/stateless registration of tools + resources;
-  enables the async task surface + `SdkTaskStore` + Tasks capability when `ctx.db` is present.
-- `tools.ts`, `resources.ts` — the sync surface itself. Every handler takes `extra` and calls
-  `guardScope(ctx, extra, SCOPES.READ|RUN)`; the four run tools also `auditRun(...)`.
-- `auth.ts` — the pure OAuth core: `parseBearerToken`, `SCOPES`, `assertScope`/
-  `ScopeError`, RFC 9728 `protectedResourceMetadata` + `wwwAuthenticate`, `createAuthenticator`
-  (jose JWT verify: signature/issuer/RFC 8707 audience/expiry → SDK `AuthInfo`). Side-effect free.
-- `guard.ts` — handler-side `guardScope` / `auditRun` / `principalOf`; both the scope check and
-  the audit write **no-op** off the auth/db path, so handlers run unchanged in dev/test.
-  `redactAuditParams` masks secret-shaped **keys** before an audit row is written (the engine's
-  `redact()` is value-based and cannot cover an arbitrary caller-supplied params bag).
-- `logging.ts` — `createLogger` (Pino JSON + `REDACT_PATHS` secret scrub; `child({runId,…})`).
-- `telemetry.ts` — `initTelemetry` (OTel providers + undici auto-instrumentation for SUT spans),
-  `withSpan` (active-span wrapper), `RunMetrics` (`runs_total`/`queue_depth`/…). Exporters
-  injectable (console default, in-memory in tests). **The engine stays pure** — SUT spans come
-  from undici's diagnostics_channel, never an engine OTel import.
-- `execute.ts` — `executeEntry`: the shared test/suite executor (signal + `onProgress` +
-  `runId`) used by both the inline `run_test` and the worker.
-- `tasks.ts` — async lifecycle glue over the queue + `PostgresTaskStore`: `submitRun`
-  (atomic create-task + enqueue, idempotent), `getRun`/`getRunResult`/`cancelRun`.
-- `worker.ts` — the `MODE=worker` claim→execute→reap loop (`pnpm dev:worker`).
-- `sdk-tasks.ts` — `SdkTaskStore`: bridges the experimental MCP Tasks protocol onto the same
-  durable rows (keyed `runId == taskId`).
-- `task-tools.ts` — `run_suite` (task-augmented) + `run_selection` + the
-  `get_run`/`get_run_result`/`cancel_run` mirror tools.
-- `bootstrap.ts` — `buildContext(config)`: manifest from `MANIFEST_PATH` (schema-validated)
-  else `compile({ root: TESTS_ROOT })`. **Does not create the db** — `main.ts`/`main-worker.ts`
+- `context.ts` — `ServerContext`, the composition root. Injected at boot, never per-request.
+- `guard.ts` — both the scope check and the audit write **no-op** off the auth/db path, so
+  handlers run unchanged in dev/test. `redactAuditParams` masks secret-shaped **keys** because
+  the engine's `redact()` is value-based and cannot cover a caller-supplied params bag.
+- `telemetry.ts` — SUT spans come from undici's diagnostics_channel, never an engine OTel
+  import; that is what keeps the engine pure. Exporters are injectable (in-memory in tests).
+- `bootstrap.ts` — `buildContext(config)` **does not create the db**; `main.ts`/`main-worker.ts`
   inject it, so `buildContext` stays offline and free of pool lifecycle (mirrors the test seam).
-- `main.ts` / `main-worker.ts` — `MODE=server` / `MODE=worker` entrypoints
-  (`pnpm dev:server` / `pnpm dev:worker`, `tsx watch`).
-- `testkit.ts` — shared test seam: `makeTestContext`, `connectClient` (in-memory transport
+- `sdk-tasks.ts` — bridges the experimental MCP Tasks protocol onto the same durable rows,
+  keyed `runId == taskId`.
+- `testkit.ts` — the shared test seam: `makeTestContext`, `connectClient` (in-memory transport
   pair), `startHttpServer`, `startTestSut`, `makeTestDb`/`pgAvailable` (skips offline).
 
 ## Working here
@@ -92,6 +69,3 @@ regression tests.
   `node_modules/@modelcontextprotocol/` or Context7, not memory.**
 - Tests here use the in-memory client from `testkit.ts`; db-backed paths skip without
   `ATP_TEST_DATABASE_URL`.
-
-TypeScript strict + ESM (`verbatimModuleSyntax`, `isolatedModules`,
-`noUncheckedIndexedAccess`).

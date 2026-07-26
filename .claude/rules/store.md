@@ -59,9 +59,3 @@ database, so concurrency tests use a real pool. CI sets `ATP_TEST_DATABASE_URL` 
 - **Every run records `manifestHash` + `gitSha`.** `git_sha` is denormalized onto `runs` so a
   run row is self-describing without the `manifests` table.
 - Queue claims use `FOR UPDATE SKIP LOCKED`; the reaper requeues expired leases.
-
-## Code conventions
-
-TypeScript strict + ESM. The base tsconfig sets `verbatimModuleSyntax`, `isolatedModules`, and
-`noUncheckedIndexedAccess` — use `import type` for type-only imports and treat indexed access
-as possibly-`undefined`.
