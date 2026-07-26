@@ -23,11 +23,11 @@ function textOf(result: unknown): string {
   return content.map((b) => b.text ?? "").join("");
 }
 
-/** Run `identity.login` against `baseUrl` and return its runId. */
-async function runLogin(conn: ConnectedClient, baseUrl: string): Promise<string> {
+/** Run `alpha.create-widget` against `baseUrl` and return its runId. */
+async function runCreateWidget(conn: ConnectedClient, baseUrl: string): Promise<string> {
   const res = await conn.client.callTool({
     name: "run_test",
-    arguments: { id: "identity.login", env: { baseUrl } },
+    arguments: { id: "alpha.create-widget", env: { baseUrl } },
   });
   return payload<{ run: { runId: string } }>(res).run.runId;
 }
@@ -47,33 +47,36 @@ describe("list_tests", () => {
       entries: { id: string; kind: string; isLongRunning: boolean }[];
     }>(res);
     expect(entries.map((e) => e.id)).toEqual([
-      "billing.e2e-refund",
-      "billing.get-invoice",
-      "identity.login",
+      "alpha.create-widget",
+      "alpha.widget-lifecycle",
+      "beta.read-widget",
     ]);
     // Catalog view carries the fields agents filter/route on.
-    const login = entries.find((e) => e.id === "identity.login");
-    expect(login).toMatchObject({ kind: "test", isLongRunning: false });
+    const widget = entries.find((e) => e.id === "alpha.create-widget");
+    expect(widget).toMatchObject({ kind: "test", isLongRunning: false });
   });
 
   it("filters by tag", async () => {
     const res = await conn.client.callTool({
       name: "list_tests",
-      arguments: { tags: ["billing"] },
+      arguments: { tags: ["alpha"] },
     });
     const { entries } = payload<{ entries: { id: string }[] }>(res);
-    expect(entries.map((e) => e.id).sort()).toEqual(["billing.e2e-refund", "billing.get-invoice"]);
+    expect(entries.map((e) => e.id).sort()).toEqual([
+      "alpha.create-widget",
+      "alpha.widget-lifecycle",
+    ]);
   });
 
   it("filters by kind and owner", async () => {
     const suites = payload<{ entries: { id: string }[] }>(
       await conn.client.callTool({ name: "list_tests", arguments: { kind: "suite" } }),
     );
-    expect(suites.entries.map((e) => e.id)).toEqual(["billing.e2e-refund"]);
+    expect(suites.entries.map((e) => e.id)).toEqual(["alpha.widget-lifecycle"]);
     const owned = payload<{ entries: { id: string }[] }>(
-      await conn.client.callTool({ name: "list_tests", arguments: { owner: "team-identity" } }),
+      await conn.client.callTool({ name: "list_tests", arguments: { owner: "team-beta" } }),
     );
-    expect(owned.entries.map((e) => e.id)).toEqual(["identity.login"]);
+    expect(owned.entries.map((e) => e.id)).toEqual(["beta.read-widget"]);
   });
 });
 
@@ -89,7 +92,7 @@ describe("describe_test", () => {
   it("returns the full manifest entry for an id", async () => {
     const res = await conn.client.callTool({
       name: "describe_test",
-      arguments: { id: "identity.login" },
+      arguments: { id: "alpha.create-widget" },
     });
     const { entry } = payload<{
       entry: {
@@ -101,14 +104,14 @@ describe("describe_test", () => {
         env?: Record<string, string>;
       };
     }>(res);
-    expect(entry.id).toBe("identity.login");
+    expect(entry.id).toBe("alpha.create-widget");
     expect(entry.kind).toBe("test");
     // The detail view carries what the catalog omits: the executable node graph, the
     // params JSON Schema, the resolved env, and the authored source path.
-    expect(entry.nodes.map((n) => n.id)).toEqual(["post-login"]);
+    expect(entry.nodes.map((n) => n.id)).toEqual(["create"]);
     expect(entry.paramsSchema?.type).toBe("object");
     expect(entry.env).toMatchObject({ baseUrl: expect.any(String) });
-    expect(entry.sourcePath).toBe("tests/identity/login.test.ts");
+    expect(entry.sourcePath).toBe("tests/alpha/create-widget.test.ts");
   });
 
   it("errors on an unknown id", async () => {
@@ -136,7 +139,7 @@ describe("run_test", () => {
   it("runs a test inline against the caller's env and reports a passing run", async () => {
     const res = await conn.client.callTool({
       name: "run_test",
-      arguments: { id: "identity.login", env: { baseUrl: sut.url } },
+      arguments: { id: "alpha.create-widget", env: { baseUrl: sut.url } },
     });
     const { run } = payload<{
       run: {
@@ -147,7 +150,7 @@ describe("run_test", () => {
         metrics: { totalSteps: number; passedSteps: number };
       };
     }>(res);
-    expect(run.entryId).toBe("identity.login");
+    expect(run.entryId).toBe("alpha.create-widget");
     expect(run.status).toBe("passed");
     expect(run.runId).toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/); // a uuid
     expect(run.metrics).toMatchObject({ totalSteps: 1, passedSteps: 1 });
@@ -158,7 +161,7 @@ describe("run_test", () => {
   it("rejects suites — inline run_test is for a single test (async suites go through run_suite)", async () => {
     const res = await conn.client.callTool({
       name: "run_test",
-      arguments: { id: "billing.e2e-refund", env: { baseUrl: sut.url } },
+      arguments: { id: "alpha.widget-lifecycle", env: { baseUrl: sut.url } },
     });
     expect(res.isError).toBe(true);
     expect(JSON.stringify(res.content).toLowerCase()).toContain("suite");
@@ -172,13 +175,13 @@ describe("run_test", () => {
     const manifest = {
       ...base.manifest,
       entries: base.manifest.entries.map((e) =>
-        e.id === "identity.login" ? { ...e, isLongRunning: true } : e,
+        e.id === "alpha.create-widget" ? { ...e, isLongRunning: true } : e,
       ),
     };
     const c = await connectClient({ ...base, manifest });
     const res = await c.client.callTool({
       name: "run_test",
-      arguments: { id: "identity.login", env: { baseUrl: sut.url } },
+      arguments: { id: "alpha.create-widget", env: { baseUrl: sut.url } },
     });
     expect(res.isError).toBe(true);
     const msg = JSON.stringify(res.content).toLowerCase();
@@ -201,21 +204,21 @@ describe("get_report", () => {
   });
 
   it("renders a stored run's markdown report on demand", async () => {
-    const runId = await runLogin(conn, sut.url);
+    const runId = await runCreateWidget(conn, sut.url);
     const md = textOf(
       await conn.client.callTool({ name: "get_report", arguments: { runId, format: "md" } }),
     );
-    expect(md).toContain(`# Report — identity.login`);
+    expect(md).toContain(`# Report — alpha.create-widget`);
     expect(md).toContain("**Status:** passed");
     expect(md).toContain(runId);
   });
 
   it("defaults to markdown and honours other formats", async () => {
-    const runId = await runLogin(conn, sut.url);
+    const runId = await runCreateWidget(conn, sut.url);
     // No format → markdown.
     expect(
       textOf(await conn.client.callTool({ name: "get_report", arguments: { runId } })),
-    ).toContain("# Report — identity.login");
+    ).toContain("# Report — alpha.create-widget");
     // JUnit is the same run through a different renderer.
     const junit = textOf(
       await conn.client.callTool({ name: "get_report", arguments: { runId, format: "junit" } }),
@@ -261,15 +264,20 @@ describe.skipIf(!pgAvailable)("list_runs (db-backed)", () => {
   });
 
   it("records inline runs and lists them, filterable by entry", async () => {
-    const r1 = await runLogin(conn, sut.url);
-    const r2 = await runLogin(conn, sut.url);
+    const r1 = await runCreateWidget(conn, sut.url);
+    const r2 = await runCreateWidget(conn, sut.url);
     const { runs } = payload<{
       runs: { runId: string; entryId: string; status: string; startedAt: string }[];
-    }>(await conn.client.callTool({ name: "list_runs", arguments: { entryId: "identity.login" } }));
+    }>(
+      await conn.client.callTool({
+        name: "list_runs",
+        arguments: { entryId: "alpha.create-widget" },
+      }),
+    );
     const ids = runs.map((r) => r.runId);
     expect(ids).toContain(r1);
     expect(ids).toContain(r2);
-    expect(runs.every((r) => r.entryId === "identity.login")).toBe(true);
+    expect(runs.every((r) => r.entryId === "alpha.create-widget")).toBe(true);
     expect(runs.every((r) => r.status === "passed")).toBe(true);
     // The row's Date columns are serialized to ISO strings for JSON transport.
     const first = runs.find((r) => r.runId === r1);
@@ -277,7 +285,7 @@ describe.skipIf(!pgAvailable)("list_runs (db-backed)", () => {
   });
 
   it("filters out non-matching entries", async () => {
-    await runLogin(conn, sut.url);
+    await runCreateWidget(conn, sut.url);
     const { runs } = payload<{ runs: unknown[] }>(
       await conn.client.callTool({ name: "list_runs", arguments: { entryId: "nope.absent" } }),
     );

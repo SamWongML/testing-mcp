@@ -32,19 +32,19 @@ describe("catalog + test resources", () => {
     expect(mimeType).toBe("application/json");
     const parsed = JSON.parse(text) as { entries: { id: string }[] };
     expect(parsed.entries.map((e) => e.id).sort()).toEqual([
-      "billing.e2e-refund",
-      "billing.get-invoice",
-      "identity.login",
+      "alpha.create-widget",
+      "alpha.widget-lifecycle",
+      "beta.read-widget",
     ]);
   });
 
   it("serves one entry's detail at test://{id}", async () => {
-    const res = await conn.client.readResource({ uri: "test://identity.login" });
+    const res = await conn.client.readResource({ uri: "test://alpha.create-widget" });
     const parsed = JSON.parse(first(res).text) as {
       entry: { id: string; nodes: { id: string }[] };
     };
-    expect(parsed.entry.id).toBe("identity.login");
-    expect(parsed.entry.nodes.map((n) => n.id)).toEqual(["post-login"]);
+    expect(parsed.entry.id).toBe("alpha.create-widget");
+    expect(parsed.entry.nodes.map((n) => n.id)).toEqual(["create"]);
   });
 
   it("errors on an unknown test id", async () => {
@@ -69,7 +69,7 @@ describe("run resources", () => {
   async function run(): Promise<string> {
     const res = await conn.client.callTool({
       name: "run_test",
-      arguments: { id: "identity.login", env: { baseUrl: sut.url } },
+      arguments: { id: "alpha.create-widget", env: { baseUrl: sut.url } },
     });
     return (res as unknown as { structuredContent: { run: { runId: string } } }).structuredContent
       .run.runId;
@@ -80,13 +80,13 @@ describe("run resources", () => {
 
     const md = first(await conn.client.readResource({ uri: `run://${runId}/report.md` }));
     expect(md.mimeType).toBe("text/markdown");
-    expect(md.text).toContain("# Report — identity.login");
+    expect(md.text).toContain("# Report — alpha.create-widget");
 
     const trace = first(await conn.client.readResource({ uri: `run://${runId}/trace.json` }));
     expect(trace.mimeType).toBe("application/json");
     const parsed = JSON.parse(trace.text) as { runId: string; entryId: string };
     expect(parsed.runId).toBe(runId);
-    expect(parsed.entryId).toBe("identity.login");
+    expect(parsed.entryId).toBe("alpha.create-widget");
   });
 
   it("errors on an unknown run", async () => {

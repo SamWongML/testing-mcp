@@ -27,7 +27,7 @@ describe("HTTP surface", () => {
   it("reports readiness with the loaded test count at /readyz", async () => {
     const res = await fetch(`${http.url}/readyz`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ready", tests: 3 });
+    expect(await res.json()).toEqual({ status: "ready", tests: 3 }); // the fixture corpus
   });
 
   it("serves MCP over Streamable-HTTP in stateless mode", async () => {
@@ -38,7 +38,7 @@ describe("HTTP surface", () => {
       const res = (await client.callTool({ name: "list_tests", arguments: {} })) as unknown as {
         structuredContent: { entries: { id: string }[] };
       };
-      expect(res.structuredContent.entries.map((e) => e.id)).toContain("identity.login");
+      expect(res.structuredContent.entries.map((e) => e.id)).toContain("alpha.create-widget");
     } finally {
       await client.close();
     }
