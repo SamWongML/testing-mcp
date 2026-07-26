@@ -50,6 +50,7 @@ function resultOf(steps: StepResult[]): ExecutionResult {
     status: count("passed") === steps.length ? "passed" : "failed",
     steps,
     startedAt: "2026-07-26T00:00:00Z",
+    runAttempt: 1,
     metrics: {
       totalSteps: steps.length,
       passedSteps: count("passed"),

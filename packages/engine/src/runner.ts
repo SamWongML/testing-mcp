@@ -49,6 +49,26 @@ export interface ProgressUpdate {
   nodeId: string;
 }
 
+/**
+ * Seed state for a resumed attempt: nodes/steps a prior attempt of this **same `runId`**
+ * already executed and durably recorded. A seeded node is not re-sent and not re-asserted;
+ * its `extracted` bag is rehydrated so downstream templates resolve exactly as if this
+ * attempt had run it.
+ *
+ * The safety property is the caller's to uphold: never seed a node you cannot prove already
+ * executed. The engine enforces the other half — {@link RunOptionsBase.onNodeSettled} is
+ * awaited before any dependent starts, so "recorded" always implies "definitely ran".
+ */
+export interface ResumeState {
+  /** Terminal results by node/step id — `passed`, `failed`, or `errored`. Never `skipped`
+   * or `cancelled`: those are recomputed from their dependencies on every attempt. */
+  completed: Record<string, StepResult>;
+  /** 1-based count of attempts for this run so far, including this one. */
+  runAttempt?: number;
+  /** ISO timestamp of the first attempt's start, for end-to-end elapsed time. */
+  firstStartedAt?: string;
+}
+
 /** Options common to both drivers (single test and suite). */
 export interface RunOptionsBase {
   env?: Record<string, unknown>;
@@ -66,6 +86,19 @@ export interface RunOptionsBase {
    * `completed` counts settled nodes, `total` the plan size. Best-effort and unawaited —
    * a driver that needs a *durable* per-node hook wants `onNodeSettled` instead. */
   onProgress?: (update: ProgressUpdate) => void;
+  /** Seed from a prior attempt of this run — see {@link ResumeState}. Absent ⇒ a normal
+   * first attempt, which is every caller that doesn't opt in. */
+  resumeFrom?: ResumeState;
+  /**
+   * Fired once a node/step **this attempt actually executed** reaches a terminal,
+   * non-cancelled status, and **awaited before any dependent is started**. That ordering is
+   * the whole durability boundary: a caller wiring this to a checkpoint write may then trust
+   * "recorded ⇒ definitely ran" on a later attempt. Anything looser re-opens the race.
+   *
+   * Unlike `onProgress`, a rejection is not swallowed — it aborts the run (remaining nodes
+   * cancel) and reports `errored`, rather than silently continuing without the safety net.
+   */
+  onNodeSettled?: (result: StepResult) => Promise<void> | void;
   runId?: string;
   /** The executable-unit id recorded as the result's `entryId` (defaults to the
    * test/suite id). For a matrix cell, pass the cell-addressed id, e.g.
@@ -234,6 +267,8 @@ export async function runTest(
     env: opts.envName,
     manifestHash: opts.manifestHash,
     gitSha: opts.gitSha,
+    runAttempt: opts.resumeFrom?.runAttempt,
+    firstStartedAt: opts.resumeFrom?.firstStartedAt,
   };
 
   let params: Record<string, unknown>;
@@ -271,14 +306,44 @@ export async function runTest(
     steps.push(result);
     opts.onProgress?.({ completed: steps.length, total, nodeId: result.id });
   };
+  let checkpointError: Error | undefined;
   for (let i = 0; i < test.steps.length; i++) {
     const step = test.steps[i] as AuthoredStep;
+    // A step a prior attempt already executed is seeded, not re-sent: rehydrate what it
+    // published so later steps' `{{nodes.X.var}}`/`{{vars.*}}` resolve, then settle it.
+    const seed = opts.resumeFrom?.completed[step.id];
+    if (seed) {
+      ctx.nodes[step.id] = { ...(ctx.nodes[step.id] ?? {}), ...seed.extracted };
+      Object.assign(ctx.vars, seed.extracted);
+      settle({ ...seed, resumed: true });
+      if (seed.status === "failed" || seed.status === "errored") {
+        for (let j = i + 1; j < test.steps.length; j++)
+          settle(notRunStep((test.steps[j] as AuthoredStep).id, "skipped"));
+        break;
+      }
+      continue;
+    }
     if (ctx.signal?.aborted) {
       settle(notRunStep(step.id, "cancelled"));
       continue;
     }
     const result = await runStep(step, ctx, secretValues, test.timeoutMs);
+    // Durability boundary: record this step before the next one can act on what it
+    // published (see `onNodeSettled`). A rejection ends the run rather than continuing
+    // unrecorded, which would let a later attempt re-send a step that already ran.
+    if (result.status !== "cancelled") {
+      try {
+        await opts.onNodeSettled?.(result);
+      } catch (err) {
+        checkpointError = err instanceof Error ? err : new Error(String(err));
+      }
+    }
     settle(result);
+    if (checkpointError) {
+      for (let j = i + 1; j < test.steps.length; j++)
+        settle(notRunStep((test.steps[j] as AuthoredStep).id, "cancelled"));
+      break;
+    }
     if (result.status === "cancelled") {
       for (let j = i + 1; j < test.steps.length; j++)
         settle(notRunStep((test.steps[j] as AuthoredStep).id, "cancelled"));
@@ -292,7 +357,14 @@ export async function runTest(
     }
   }
 
-  return finalize({ ...base, status: computeStatus(steps), steps, params, startedAt });
+  return finalize({
+    ...base,
+    status: checkpointError ? "errored" : computeStatus(steps),
+    steps,
+    params,
+    error: checkpointError ? `checkpoint write failed: ${checkpointError.message}` : undefined,
+    startedAt,
+  });
 }
 
 function finalize(input: {
@@ -307,6 +379,8 @@ function finalize(input: {
   manifestHash?: string;
   gitSha?: string;
   startedAt: Date;
+  runAttempt?: number;
+  firstStartedAt?: string;
 }): ExecutionResult {
   const finishedAt = new Date();
   return executionResultSchema.parse({
@@ -324,6 +398,9 @@ function finalize(input: {
     manifestHash: input.manifestHash,
     gitSha: input.gitSha,
     error: input.error,
+    runAttempt: input.runAttempt,
+    // Attempt 1 is its own first attempt; only a resumed run carries a distinct value.
+    firstStartedAt: input.firstStartedAt ?? input.startedAt.toISOString(),
   });
 }
 
@@ -349,24 +426,48 @@ const DEFAULT_CONCURRENCY = 8;
  * branches, so it is only reliable within a single dependency chain.) Returns results
  * keyed by node id.
  */
+interface ScheduleOutcome {
+  results: Map<string, StepResult>;
+  /** Set when `onNodeSettled` rejected: the DAG walk lost its durability guarantee partway
+   * through, so the caller reports the run as errored rather than trusting the result. */
+  checkpointError?: Error;
+}
+
 function scheduleNodes(
   plan: PlanNode[],
   baseCtx: RunContext,
   secretValues: string[],
   concurrency: number,
   onProgress?: (update: ProgressUpdate) => void,
-): Promise<Map<string, StepResult>> {
+  resumeFrom?: ResumeState,
+  onNodeSettled?: (result: StepResult) => Promise<void> | void,
+  abortForCheckpointFailure?: () => void,
+): Promise<ScheduleOutcome> {
   const results = new Map<string, StepResult>();
   // Started but maybe not settled — a node in flight must not look "settled" to its
   // dependents, so readiness keys off `results` while `started` guards against relaunch.
   const started = new Set<string>();
+  let checkpointError: Error | undefined;
 
   // Record a node's terminal result and emit a k/n progress tick — every settle
-  // site (ran, skipped, cancelled) goes through here so `completed` reaches `total`.
+  // site (ran, seeded, skipped, cancelled) goes through here so `completed` reaches `total`.
   const settle = (nodeId: string, result: StepResult): void => {
     results.set(nodeId, result);
     onProgress?.({ completed: results.size, total: plan.length, nodeId });
   };
+
+  // Seed the frontier before scheduling anything. In *plan* order, not the seed map's key
+  // order: `vars` is last-writer-wins, so replaying execution order is what makes a resumed
+  // run's flat bag agree with what a from-scratch run would have produced.
+  for (const node of plan) {
+    const seed = resumeFrom?.completed[node.id];
+    if (!seed) continue;
+    baseCtx.nodes[node.id] = { ...(baseCtx.nodes[node.id] ?? {}), ...seed.extracted };
+    Object.assign(baseCtx.vars, seed.extracted);
+    started.add(node.id);
+    // Already durably recorded by the attempt that ran it — no `onNodeSettled` here.
+    settle(node.id, { ...seed, resumed: true });
+  }
 
   const depsSettled = (node: PlanNode): boolean => node.needs.every((d) => results.has(d));
   const depsPassed = (node: PlanNode): boolean =>
@@ -378,7 +479,8 @@ function scheduleNodes(
     const pump = (): void => {
       for (const node of plan) {
         if (started.has(node.id) || !depsSettled(node)) continue;
-        // Aborting (caller cancel or run-timeout) short-circuits every remaining node.
+        // Aborting (caller cancel, run-timeout, or a failed checkpoint) short-circuits
+        // every remaining node.
         if (baseCtx.signal?.aborted) {
           started.add(node.id);
           settle(node.id, notRunStep(node.id, "cancelled"));
@@ -393,7 +495,20 @@ function scheduleNodes(
         started.add(node.id);
         active++;
         const nodeCtx: RunContext = { ...baseCtx, params: node.params };
-        const finish = (result: StepResult): void => {
+        const finish = async (result: StepResult): Promise<void> => {
+          // The durability boundary. `settle` is what makes this node visible to its
+          // dependents (and `results.set` is synchronous), so the checkpoint write must be
+          // awaited *first* — otherwise a sibling's pump could dispatch this node's
+          // dependent while this node is still unrecorded, which is exactly the race a
+          // later attempt would resolve by re-sending a request that already went out.
+          if (result.status !== "cancelled" && !checkpointError) {
+            try {
+              await onNodeSettled?.(result);
+            } catch (err) {
+              checkpointError = err instanceof Error ? err : new Error(String(err));
+              abortForCheckpointFailure?.();
+            }
+          }
           settle(node.id, result);
           active--;
           pump();
@@ -404,7 +519,7 @@ function scheduleNodes(
           finish(erroredStep(node.id, errorMessage(err))),
         );
       }
-      if (active === 0 && results.size === plan.length) resolve(results);
+      if (active === 0 && results.size === plan.length) resolve({ results, checkpointError });
     };
 
     pump();
@@ -425,6 +540,8 @@ export async function runSuite(
     env: opts.envName,
     manifestHash: opts.manifestHash,
     gitSha: opts.gitSha,
+    runAttempt: opts.resumeFrom?.runAttempt,
+    firstStartedAt: opts.resumeFrom?.firstStartedAt,
   };
 
   let plan: PlanNode[];
@@ -446,7 +563,12 @@ export async function runSuite(
     timeoutSignal = AbortSignal.timeout(suite.timeoutMs);
     signals.push(timeoutSignal);
   }
-  const signal = signals.length > 0 ? AbortSignal.any(signals) : undefined;
+  // A failed checkpoint write is fatal for the run: this controller lets the scheduler
+  // short-circuit every not-yet-started node through the same abort cascade a timeout or a
+  // caller cancel already uses.
+  const checkpointAbort = new AbortController();
+  signals.push(checkpointAbort.signal);
+  const signal = AbortSignal.any(signals);
 
   const matrix = opts.matrix ?? {};
   const baseCtx = createRunContext({
@@ -461,15 +583,28 @@ export async function runSuite(
   // `?? DEFAULT` doesn't guard 0 (a valid number): a 0 limit launches nothing and hangs.
   const concurrency =
     opts.concurrency && opts.concurrency > 0 ? Math.floor(opts.concurrency) : DEFAULT_CONCURRENCY;
-  const resultMap = await scheduleNodes(plan, baseCtx, secretValues, concurrency, opts.onProgress);
+  const { results: resultMap, checkpointError } = await scheduleNodes(
+    plan,
+    baseCtx,
+    secretValues,
+    concurrency,
+    opts.onProgress,
+    opts.resumeFrom,
+    opts.onNodeSettled,
+    () => checkpointAbort.abort(),
+  );
   const steps = plan.map((n) => resultMap.get(n.id) as StepResult);
 
   const timedOut = timeoutSignal?.aborted === true && opts.signal?.aborted !== true;
   return finalize({
     ...base,
-    status: timedOut ? "errored" : computeStatus(steps),
+    status: checkpointError ? "errored" : timedOut ? "errored" : computeStatus(steps),
     steps,
-    error: timedOut ? `suite "${suite.id}" exceeded timeoutMs (${suite.timeoutMs}ms)` : undefined,
+    error: checkpointError
+      ? `checkpoint write failed: ${checkpointError.message}`
+      : timedOut
+        ? `suite "${suite.id}" exceeded timeoutMs (${suite.timeoutMs}ms)`
+        : undefined,
     startedAt,
   });
 }

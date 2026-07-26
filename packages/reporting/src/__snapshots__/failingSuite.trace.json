@@ -107,6 +107,7 @@
   "startedAt": "2026-07-23T10:00:00.000Z",
   "finishedAt": "2026-07-23T10:00:00.210Z",
   "durationMs": 210,
+  "runAttempt": 1,
   "metrics": {
     "totalSteps": 4,
     "passedSteps": 2,

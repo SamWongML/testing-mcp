@@ -240,6 +240,196 @@ describe("runSuite — DAG scheduling", () => {
   });
 });
 
+describe("runSuite — resume from the DAG frontier", () => {
+  /** The chain every resume test walks: `order` (side-effecting) → `capture` → `verify`. */
+  function chain() {
+    return defineSuite({
+      id: "billing.chain",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      nodes: {
+        order: {
+          request: { method: "POST", url: "{{env.baseUrl}}/orders" },
+          extract: [{ as: "paymentId", from: "body.paymentId" }],
+          assert: [{ path: "status", op: "eq", value: 201 }],
+        },
+        capture: {
+          needs: ["order"],
+          request: {
+            method: "POST",
+            url: "{{env.baseUrl}}/payments/{{nodes.order.paymentId}}/capture",
+          },
+          assert: [{ path: "status", op: "eq", value: 200 }],
+        },
+        verify: {
+          needs: ["capture"],
+          request: { method: "GET", url: "{{env.baseUrl}}/ledger/{{nodes.order.paymentId}}" },
+          assert: [{ path: "status", op: "eq", value: 200 }],
+        },
+      },
+    });
+  }
+
+  it("seeds completed nodes, rehydrates their extracts, and never re-sends them", async () => {
+    const pool = agent.get("https://api.example.com");
+    // Registered ONCE each, with no `.persist()`: a second call to either has no interceptor
+    // and (net-connect disabled) fails. That is the duplicate-side-effect detector.
+    pool
+      .intercept({ path: "/orders", method: "POST" })
+      .reply(201, { paymentId: "pay-1" }, JSON_HEADERS);
+    pool
+      .intercept({ path: "/payments/pay-1/capture", method: "POST" })
+      .reply(200, { ok: true }, JSON_HEADERS);
+
+    // Attempt 1: run until `capture` settles, then abort — standing in for the worker dying
+    // with two nodes durably recorded and `verify` never started.
+    const controller = new AbortController();
+    const checkpoints: Record<string, (typeof first.steps)[number]> = {};
+    const first = await runSuite(chain(), {
+      signal: controller.signal,
+      onNodeSettled: (result) => {
+        checkpoints[result.id] = result;
+        if (result.id === "capture") controller.abort();
+      },
+    });
+    expect(Object.keys(checkpoints).sort()).toEqual(["capture", "order"]);
+    expect(first.steps.find((s) => s.id === "verify")?.status).toBe("cancelled");
+
+    // Attempt 2: only `verify` has an interceptor. If resume re-sent `order` or `capture`
+    // the run would error on a missing interceptor instead of passing.
+    pool
+      .intercept({ path: "/ledger/pay-1", method: "GET" })
+      .reply(200, { status: "settled" }, JSON_HEADERS);
+
+    const second = await runSuite(chain(), {
+      resumeFrom: { completed: checkpoints, runAttempt: 2 },
+    });
+
+    expect(second.status).toBe("passed");
+    expect(second.runAttempt).toBe(2);
+    expect(second.steps.find((s) => s.id === "order")?.resumed).toBe(true);
+    expect(second.steps.find((s) => s.id === "capture")?.resumed).toBe(true);
+    expect(second.steps.find((s) => s.id === "verify")?.resumed).toBeUndefined();
+    // `verify`'s url only resolves if the seeded node's `extracted` bag was rehydrated.
+    expect(second.steps.find((s) => s.id === "verify")?.request?.url).toContain("/ledger/pay-1");
+    agent.assertNoPendingInterceptors();
+  });
+
+  it("merges a seeded branch with a freshly-run one in a diamond", async () => {
+    const pool = agent.get("https://api.example.com");
+    pool.intercept({ path: "/right", method: "GET" }).reply(200, { r: "R" }, JSON_HEADERS);
+    pool.intercept({ path: "/merge", method: "POST" }).reply(200, { ok: true }, JSON_HEADERS);
+
+    const suite = defineSuite({
+      id: "diamond.resume",
+      version: 1,
+      env: { baseUrl: "https://api.example.com" },
+      nodes: {
+        left: {
+          request: { method: "GET", url: "{{env.baseUrl}}/left" },
+          extract: [{ as: "l", from: "body.l" }],
+        },
+        right: {
+          request: { method: "GET", url: "{{env.baseUrl}}/right" },
+          extract: [{ as: "r", from: "body.r" }],
+        },
+        merge: {
+          needs: ["left", "right"],
+          request: {
+            method: "POST",
+            url: "{{env.baseUrl}}/merge",
+            body: { l: "{{nodes.left.l}}", r: "{{nodes.right.r}}" },
+          },
+          assert: [{ path: "status", op: "eq", value: 200 }],
+        },
+      },
+    });
+
+    // `left` is seeded (no interceptor registered for /left at all); `right` runs for real.
+    const result = await runSuite(suite, {
+      resumeFrom: {
+        completed: {
+          left: {
+            id: "left",
+            status: "passed",
+            assertions: [],
+            extracted: { l: "L" },
+            attempts: 1,
+          },
+        },
+        runAttempt: 2,
+      },
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.steps.find((s) => s.id === "merge")?.request?.body).toEqual({ l: "L", r: "R" });
+    agent.assertNoPendingInterceptors();
+  });
+
+  it("does not start a dependent until its parent's checkpoint write resolves", async () => {
+    const pool = agent.get("https://api.example.com");
+    const events: string[] = [];
+    pool
+      .intercept({ path: "/orders", method: "POST" })
+      .reply(201, { paymentId: "pay-1" }, JSON_HEADERS);
+    pool.intercept({ path: "/payments/pay-1/capture", method: "POST" }).reply(() => {
+      events.push("capture-sent");
+      return { statusCode: 200, data: JSON.stringify({ ok: true }), responseOptions: JSON_HEADERS };
+    });
+    pool
+      .intercept({ path: "/ledger/pay-1", method: "GET" })
+      .reply(200, { status: "settled" }, JSON_HEADERS);
+
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const run = runSuite(chain(), {
+      onNodeSettled: async (result) => {
+        if (result.id !== "order") return;
+        events.push("order-checkpoint-start");
+        await gate;
+        events.push("order-checkpoint-done");
+      },
+    });
+
+    // Give the scheduler every chance to (wrongly) dispatch `capture` while the checkpoint
+    // is still in flight, then release.
+    await new Promise((r) => setTimeout(r, 30));
+    expect(events).toEqual(["order-checkpoint-start"]);
+    release();
+
+    const result = await run;
+    expect(result.status).toBe("passed");
+    expect(events).toEqual([
+      "order-checkpoint-start",
+      "order-checkpoint-done",
+      "capture-sent",
+    ]);
+  });
+
+  it("errors the run when a checkpoint write fails, instead of continuing unrecorded", async () => {
+    const pool = agent.get("https://api.example.com");
+    // Only `order` gets an interceptor: nothing downstream may be sent once the safety net
+    // is gone, so a dispatched `capture` would fail the test.
+    pool
+      .intercept({ path: "/orders", method: "POST" })
+      .reply(201, { paymentId: "pay-1" }, JSON_HEADERS);
+
+    const result = await runSuite(chain(), {
+      onNodeSettled: () => Promise.reject(new Error("db unreachable")),
+    });
+
+    expect(result.status).toBe("errored");
+    expect(result.error).toContain("checkpoint write failed");
+    expect(result.error).toContain("db unreachable");
+    expect(result.steps.find((s) => s.id === "capture")?.status).toBe("cancelled");
+    expect(result.steps.find((s) => s.id === "verify")?.status).toBe("cancelled");
+    agent.assertNoPendingInterceptors();
+  });
+});
+
 describe("runSuite — cancellation & timeout", () => {
   it("cancels every node when the signal is already aborted", async () => {
     const controller = new AbortController();

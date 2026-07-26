@@ -358,6 +358,109 @@ describe("runTest — chaining via extract + {{nodes.X.var}}", () => {
   });
 });
 
+describe("runTest — resume", () => {
+  /** Two sequential steps where the second addresses what the first published. */
+  const twoStep = defineTest({
+    id: "billing.two-step",
+    version: 1,
+    env: { baseUrl: "https://api.example.com" },
+    steps: [
+      {
+        id: "create",
+        request: { method: "POST", url: "{{env.baseUrl}}/orders" },
+        extract: [{ as: "orderId", from: "body.orderId" }],
+        assert: [{ path: "status", op: "eq", value: 201 }],
+      },
+      {
+        id: "confirm",
+        request: { method: "POST", url: "{{env.baseUrl}}/orders/{{nodes.create.orderId}}/confirm" },
+        assert: [{ path: "status", op: "eq", value: 200 }],
+      },
+    ],
+  });
+
+  it("runs only the remainder when the first step is seeded", async () => {
+    // No interceptor for POST /orders: re-sending the seeded step would fail the run.
+    agent
+      .get("https://api.example.com")
+      .intercept({ path: "/orders/ord-1/confirm", method: "POST" })
+      .reply(200, { ok: true }, JSON_HEADERS);
+
+    const result = await runTest(twoStep, {
+      resumeFrom: {
+        completed: {
+          create: {
+            id: "create",
+            status: "passed",
+            assertions: [],
+            extracted: { orderId: "ord-1" },
+            attempts: 1,
+          },
+        },
+        runAttempt: 2,
+      },
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.runAttempt).toBe(2);
+    expect(result.steps[0]?.resumed).toBe(true);
+    expect(result.steps[1]?.resumed).toBeUndefined();
+    agent.assertNoPendingInterceptors();
+  });
+
+  it("skip-cascades the remainder when the seeded step is a recorded failure", async () => {
+    // A checkpointed failure is a fact about a request that already went out — re-running it
+    // would re-send it, so the run inherits the failure and skips the rest.
+    const result = await runTest(twoStep, {
+      resumeFrom: {
+        completed: {
+          create: {
+            id: "create",
+            status: "failed",
+            assertions: [{ ok: false, op: "eq", path: "status", expected: 201, actual: 500 }],
+            extracted: {},
+            attempts: 1,
+          },
+        },
+        runAttempt: 2,
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.steps[0]?.resumed).toBe(true);
+    expect(result.steps[1]?.status).toBe("skipped");
+  });
+
+  it("records each executed step before the next one runs", async () => {
+    const pool = agent.get("https://api.example.com");
+    const events: string[] = [];
+    pool
+      .intercept({ path: "/orders", method: "POST" })
+      .reply(201, { orderId: "ord-1" }, JSON_HEADERS);
+    pool.intercept({ path: "/orders/ord-1/confirm", method: "POST" }).reply(() => {
+      events.push("confirm-sent");
+      return { statusCode: 200, data: JSON.stringify({ ok: true }), responseOptions: JSON_HEADERS };
+    });
+
+    const result = await runTest(twoStep, {
+      onNodeSettled: async (step) => {
+        events.push(`checkpoint:${step.id}`);
+        await new Promise((r) => setTimeout(r, 10));
+        events.push(`checkpoint-done:${step.id}`);
+      },
+    });
+
+    expect(result.status).toBe("passed");
+    expect(events).toEqual([
+      "checkpoint:create",
+      "checkpoint-done:create",
+      "confirm-sent",
+      "checkpoint:confirm",
+      "checkpoint-done:confirm",
+    ]);
+  });
+});
+
 describe("runTest — redaction", () => {
   it("masks secret values in persisted request snapshots", async () => {
     agent
