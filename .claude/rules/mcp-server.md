@@ -31,6 +31,15 @@ Tests are *data*, so authoring a new test never needs a new tool. The surface is
 - **Resources** (`resources.ts`). `test://catalog` (the manifest) · `test://{id}` (one normalized
   entry) · `run://{runId}/report.md` · `run://{runId}/trace.json`.
 
+**Known gaps in that surface — don't mistake them for finished work.** `SdkTaskStore.listTasks`
+returns `{ tasks: [] }` unconditionally, so `tasks/list` answers 200-with-nothing while `tasks/get`
+returns real tasks — the spec requires anything gettable to also be listable. `list_tests` and
+`test://catalog` take no `limit`/`cursor` and return the whole corpus. And **server→client
+notifications are architecturally foreclosed**, not merely unimplemented: `http.ts` builds a fresh
+server + transport per request and discards both, so nothing (progress, `resources/subscribe`,
+`notifications/message`) can be pushed outside the response to the request that triggered it.
+Adopting any of them means adopting sessions + an `EventStore`, which is a separate decision.
+
 ## Authorization has two layers — know which one covers your code
 
 `guardScope` in a handler covers **only** requests the SDK routes through one of our callbacks:

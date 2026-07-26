@@ -42,6 +42,13 @@ Narrow the loop: `pnpm exec vitest run <path>` · `-t "<substring>"` · `pnpm --
   plus `pnpm install`. Dependency direction: `schema` ← `engine` ← everything else.
 - **Async runs need two processes** sharing one `DATABASE_URL`: `pnpm dev:server` and
   `pnpm dev:worker`. Without `DATABASE_URL` the server is sync-only and the worker fails fast.
+- **`atp run` without `--base-url` silently retargets the run.** It starts the built-in mock SUT
+  (`packages/cli/src/mock-sut.ts`), which only serves the `identity`/`billing` sample routes. The
+  `mockmart` namespace has its own richer fixture service — start it with
+  `pnpm exec tsx fixtures/sut/mockmart-sut.ts --port 8899` and always pass
+  `--base-url http://127.0.0.1:8899`, or every request 404s against the wrong mock. It needs the
+  `ATP_SECRET_*` block in `tests/mockmart/MIGRATION.md` (the same bag configures the service and
+  the run).
 - **AWS is off by default** — `TASK_STORE=postgres`, `ARTIFACT_STORE=local`, and
   `AUTH_ENABLED`/`OTEL_ENABLED`/`RUN_TASK_ENABLED` false — so dev and test need no cloud.
 

@@ -62,8 +62,9 @@ export interface RunOptionsBase {
   matrix?: Record<string, unknown>;
   signal?: AbortSignal;
   /** Fired as each node/step settles (passed, failed, skipped, or cancelled) so a driver
-   * can surface k/n progress — the worker maps this onto task progress + MCP progress
-   * notifications. `completed` counts settled nodes, `total` the plan size. */
+   * can surface k/n progress; the worker persists it as the run's progress percentage.
+   * `completed` counts settled nodes, `total` the plan size. Best-effort and unawaited —
+   * a driver that needs a *durable* per-node hook wants `onNodeSettled` instead. */
   onProgress?: (update: ProgressUpdate) => void;
   runId?: string;
   /** The executable-unit id recorded as the result's `entryId` (defaults to the

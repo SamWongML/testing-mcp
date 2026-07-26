@@ -976,7 +976,7 @@ flowchart TB
 
 - **Stateless MCP service** behind ALB → target‑tracking autoscaling on request count/CPU; rolling deploys with connection draining are safe (no session pinning).
 - **Separate worker service** so long runs never block the request path; scales independently on **queue depth**.
-- **Health checks:** ALB → `/healthz` (liveness) and `/readyz` (reports stateless mode + dependency reachability). `tini`/proper signal handling in the container for graceful shutdown (finish/park in‑flight work, release job leases).
+- **Health checks:** ALB → `/healthz` (liveness) and `/readyz` (readiness). `tini`/proper signal handling in the container for graceful shutdown (finish/park in‑flight work, release job leases). **As shipped, `/readyz` reports only that the manifest loaded — it does not check dependency reachability, so a task with an unreachable database still reports ready. The ALB is wired to `/healthz`.**
 - **Least‑privilege IAM task roles:** MCP role (read/write DynamoDB, read Postgres, presign S3, `ecs:RunTask` optional); worker role (claim/write Postgres, write DynamoDB/S3). Secrets via Secrets Manager injected at task start.
 - **Networking:** tasks in private subnets; egress to the systems‑under‑test via NAT/VPC endpoints; DynamoDB/S3 via **Gateway VPC Endpoints** (no NAT cost, private).
 - **IaC:** AWS **CDK** stacks — `network`, `data` (RDS/DynamoDB/S3), `ecs` (services + autoscaling), `observability` (dashboards/alarms).
