@@ -26,7 +26,10 @@ const USAGE = `atp — API testing platform CLI
 Usage:
   atp compile                       build dist/manifest.json from tests/
   atp list [--tags a,b] [--owner o] [--kind test|suite]
-  atp run <id> [--params '<json>'] [--env name] [--report md|html|junit|json|summary] [--out path]
+  atp run <id> [--params '<json>'] [--env name] [--base-url <url>]
+                [--report md|html|junit|json|summary] [--out path]
+                                    without --base-url (or ATP_BASE_URL) the run goes to a
+                                    local mock SUT, which tests the corpus, not your service
   atp validate                      compile in-memory; fail on a compile error, an unwired
                                     __TODO_CHAIN__, or a node asserting nothing (or only a
                                     range op on status, the atp import placeholder)
@@ -54,11 +57,43 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { positional, flags };
 }
 
+/**
+ * The flags each command accepts. A flag outside its command's set is an error, not a
+ * silently-ignored argument: `atp run --base-url` was accepted and dropped for exactly as
+ * long as this check was missing, sending runs to the built-in mock while reading as though
+ * they had hit the named SUT.
+ */
+const COMMAND_FLAGS: Record<string, readonly string[]> = {
+  compile: [],
+  list: ["tags", "owner", "kind"],
+  validate: [],
+  import: [],
+  run: ["params", "env", "base-url", "report", "out"],
+  golden: ["base-url", "params", "env"],
+};
+
+/** The unrecognized flags in `flags` for `command`, in the order given. */
+function unknownFlags(command: string, flags: Record<string, string>): string[] {
+  const allowed = COMMAND_FLAGS[command];
+  if (!allowed) return [];
+  return Object.keys(flags).filter((f) => !allowed.includes(f));
+}
+
 /** Dispatch a parsed command line against the corpus at `root`. Returns the exit code.
  *  `root` is injectable for tests; the real CLI passes `process.cwd()` (see below). */
 export async function run(argv: string[], root: string = process.cwd()): Promise<number> {
   const [command, ...rest] = argv;
   const { positional, flags } = parseArgs(rest);
+
+  const unknown = unknownFlags(command ?? "", flags);
+  if (unknown.length > 0) {
+    console.error(
+      `atp ${command}: unknown flag${unknown.length > 1 ? "s" : ""} ` +
+        `${unknown.map((f) => `--${f}`).join(", ")}\n`,
+    );
+    console.error(USAGE);
+    return 1;
+  }
 
   try {
     switch (command) {
@@ -157,6 +192,7 @@ export async function run(argv: string[], root: string = process.cwd()): Promise
           root,
           params: flags.params ? (JSON.parse(flags.params) as Record<string, unknown>) : undefined,
           envName: flags.env || undefined,
+          baseUrl: flags["base-url"] || undefined,
         });
         console.log(formatResult(result));
         if (flags.report && isReportFormat(flags.report)) {

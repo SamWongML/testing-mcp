@@ -18,6 +18,9 @@ async function exists(path: string): Promise<boolean> {
 // `run(argv, root)` is the CLI dispatcher. Pin root to the repo (see commands.test.ts) and
 // silence the console so the exit-code contract can be asserted without noise.
 const repoRoot = resolve(__dirname, "../../..");
+// Corpus-dependent dispatch tests run against the fixture corpus (see commands.test.ts) so
+// authoring a product test is never a breaking change to the CLI suite.
+const fixtureRoot = resolve(repoRoot, "fixtures/corpus");
 const insomniaFixture = resolve(__dirname, "__fixtures__/petstore.insomnia.yaml");
 
 describe("run (CLI dispatcher exit codes)", () => {
@@ -28,48 +31,100 @@ describe("run (CLI dispatcher exit codes)", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("list → 0", async () => {
-    expect(await run(["list"], repoRoot)).toBe(0);
+    expect(await run(["list"], fixtureRoot)).toBe(0);
   });
 
   it("validate → 0", async () => {
-    expect(await run(["validate"], repoRoot)).toBe(0);
+    expect(await run(["validate"], fixtureRoot)).toBe(0);
   });
 
   it("run <passing id> → 0", async () => {
-    expect(await run(["run", "identity.login"], repoRoot)).toBe(0);
+    expect(await run(["run", "alpha.create-widget"], fixtureRoot)).toBe(0);
   });
 
   it("run with no <id> → 1", async () => {
-    expect(await run(["run"], repoRoot)).toBe(1);
+    expect(await run(["run"], fixtureRoot)).toBe(1);
   });
 
   it("run with malformed --params JSON → 1", async () => {
-    expect(await run(["run", "identity.login", "--params", "{not json"], repoRoot)).toBe(1);
+    expect(await run(["run", "alpha.create-widget", "--params", "{not json"], fixtureRoot)).toBe(1);
   });
 
   it("unknown id → 1 (surfaces the command-layer error)", async () => {
-    expect(await run(["run", "does.not.exist"], repoRoot)).toBe(1);
+    expect(await run(["run", "does.not.exist"], fixtureRoot)).toBe(1);
   });
 
   it("unknown command → 1", async () => {
-    expect(await run(["bogus"], repoRoot)).toBe(1);
+    expect(await run(["bogus"], fixtureRoot)).toBe(1);
   });
 
   it("no command → 0 (prints usage)", async () => {
-    expect(await run([], repoRoot)).toBe(0);
+    expect(await run([], fixtureRoot)).toBe(0);
   });
 
   it("honors --flag=value form (list --kind=suite)", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    expect(await run(["list", "--kind=suite"], repoRoot)).toBe(0);
+    expect(await run(["list", "--kind=suite"], fixtureRoot)).toBe(0);
     // The suite is listed; the two tests are filtered out.
     const output = log.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(output).toContain("billing.e2e-refund");
-    expect(output).not.toContain("identity.login");
+    expect(output).toContain("alpha.widget-lifecycle");
+    expect(output).not.toContain("alpha.create-widget");
   });
 
   it("rejects an unknown --report format → 1", async () => {
-    expect(await run(["run", "identity.login", "--report", "pdf"], repoRoot)).toBe(1);
+    expect(await run(["run", "alpha.create-widget", "--report", "pdf"], fixtureRoot)).toBe(1);
+  });
+
+  it("rejects an unknown flag → 1, naming it rather than silently ignoring it", async () => {
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => {
+      errors.push(a.map(String).join(" "));
+    });
+    // A swallowed flag is how `--base-url` looked like it worked on `run` while the request
+    // went somewhere else entirely.
+    expect(await run(["run", "alpha.create-widget", "--baseurl", "http://x"], fixtureRoot)).toBe(1);
+    expect(errors.join("\n")).toContain("--baseurl");
+  });
+
+  it("rejects a flag that is valid for a different command → 1", async () => {
+    // `--base-url` belongs to `run` and `golden`, not `list`.
+    expect(await run(["list", "--base-url", "http://x"], fixtureRoot)).toBe(1);
+  });
+});
+
+describe("run --base-url (choosing the SUT)", () => {
+  const preset = process.env.ATP_BASE_URL;
+  beforeEach(() => {
+    delete process.env.ATP_BASE_URL;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (preset === undefined) delete process.env.ATP_BASE_URL;
+    else process.env.ATP_BASE_URL = preset;
+  });
+
+  it("sends the run at --base-url instead of the built-in mock → 1 when that SUT 404s", async () => {
+    const sut = await startMockSut();
+    try {
+      // A path prefix the mock has no route for. The built-in mock would answer this test
+      // happily, so a passing run here would mean the flag had been ignored.
+      const args = ["run", "alpha.create-widget", "--base-url", `${sut.url}/nope`];
+      expect(await run(args, fixtureRoot)).toBe(1);
+    } finally {
+      await sut.close();
+    }
+  });
+
+  it("passes against a --base-url that does serve the routes → 0", async () => {
+    const sut = await startMockSut();
+    try {
+      const args = ["run", "alpha.create-widget", "--base-url", sut.url];
+      expect(await run(args, fixtureRoot)).toBe(0);
+    } finally {
+      await sut.close();
+    }
   });
 });
 
@@ -87,13 +142,17 @@ describe("run --report (artifact writing)", () => {
 
   it("writes a markdown artifact to --out", async () => {
     const out = join(dir, "report.md");
-    expect(await run(["run", "identity.login", "--report", "md", "--out", out], repoRoot)).toBe(0);
-    expect(await readFile(out, "utf8")).toContain("# Report — identity.login");
+    expect(
+      await run(["run", "alpha.create-widget", "--report", "md", "--out", out], fixtureRoot),
+    ).toBe(0);
+    expect(await readFile(out, "utf8")).toContain("# Report — alpha.create-widget");
   });
 
   it("writes a self-contained html artifact to --out", async () => {
     const out = join(dir, "report.html");
-    expect(await run(["run", "identity.login", "--report=html", `--out=${out}`], repoRoot)).toBe(0);
+    expect(
+      await run(["run", "alpha.create-widget", "--report=html", `--out=${out}`], fixtureRoot),
+    ).toBe(0);
     expect(await readFile(out, "utf8")).toContain("<!DOCTYPE html>");
   });
 });
@@ -158,6 +217,9 @@ describe("golden (live parity capture)", () => {
   let errors: string[];
   beforeEach(() => {
     delete process.env.ATP_BASE_URL;
+    // `beta.read-widget` authenticates, so its credential has to reach the run the way a real
+    // one does — injected as ATP_SECRET_<KEY> and collected into the `{{secrets.*}}` bag.
+    process.env.ATP_SECRET_FIXTURE_TOKEN = "fixture-tok";
     logs = [];
     errors = [];
     vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => {
@@ -169,16 +231,17 @@ describe("golden (live parity capture)", () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    delete process.env.ATP_SECRET_FIXTURE_TOKEN;
     if (preset === undefined) delete process.env.ATP_BASE_URL;
     else process.env.ATP_BASE_URL = preset;
   });
 
   it("missing <id> → 1", async () => {
-    expect(await run(["golden"], repoRoot)).toBe(1);
+    expect(await run(["golden"], fixtureRoot)).toBe(1);
   });
 
   it("no base URL → 1, naming the flag instead of silently using the mock SUT", async () => {
-    expect(await run(["golden", "billing.get-invoice"], repoRoot)).toBe(1);
+    expect(await run(["golden", "beta.read-widget"], fixtureRoot)).toBe(1);
     expect(errors.join("\n")).toContain("--base-url");
   });
 
@@ -188,12 +251,11 @@ describe("golden (live parity capture)", () => {
       // Point the suite at a path prefix the mock has no route for: its first node gets a 404
       // (a real baseline), fails `status eq 200`, and every downstream node is skipped — so
       // there is nothing to derive their parity assertions from.
-      const args = ["golden", "billing.e2e-refund", "--base-url", `${sut.url}/nope`];
-      expect(await run(args, repoRoot)).toBe(1);
+      const args = ["golden", "alpha.widget-lifecycle", "--base-url", `${sut.url}/nope`];
+      expect(await run(args, fixtureRoot)).toBe(1);
 
       const warning = errors.join("\n");
-      expect(warning).toContain("order");
-      expect(warning).toContain("verify");
+      expect(warning).toContain("capture");
       // The one node that did execute is still emitted, so the capture is not wasted.
       expect(logs.join("\n")).toContain('{ path: "status", op: "eq", value: 404 }');
     } finally {
@@ -204,9 +266,9 @@ describe("golden (live parity capture)", () => {
   it("prints a paste-ready assert block per node against the given SUT → 0", async () => {
     const sut = await startMockSut();
     try {
-      expect(await run(["golden", "billing.get-invoice", "--base-url", sut.url], repoRoot)).toBe(0);
+      expect(await run(["golden", "beta.read-widget", "--base-url", sut.url], fixtureRoot)).toBe(0);
       const output = logs.join("\n");
-      expect(output).toContain("get-invoice");
+      expect(output).toContain("read");
       expect(output).toContain('{ path: "status", op: "eq", value: 200 }');
       expect(output).toContain('{ path: "body.amount", op: "isNumber" }');
     } finally {
