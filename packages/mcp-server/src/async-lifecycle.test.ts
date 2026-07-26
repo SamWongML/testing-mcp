@@ -49,7 +49,7 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
 
   it("submit → worker → completed, with a fetchable report", async () => {
     const { runId, state } = await submitRun(ctx, {
-      entryId: "billing.e2e-refund",
+      entryId: "alpha.widget-lifecycle",
       env: { baseUrl: sut.url },
     });
     expect(state).toBe("working");
@@ -70,12 +70,12 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
   it("dedupes a resubmission by idempotency key — one run, one job", async () => {
     const key = "idem-key-1";
     const first = await submitRun(ctx, {
-      entryId: "identity.login",
+      entryId: "alpha.create-widget",
       env: { baseUrl: sut.url },
       idempotencyKey: key,
     });
     const second = await submitRun(ctx, {
-      entryId: "identity.login",
+      entryId: "alpha.create-widget",
       env: { baseUrl: sut.url },
       idempotencyKey: key,
     });
@@ -89,7 +89,7 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
 
   it("cancel before the worker claims → finalized cancelled, and get_run_result is clean (no trace)", async () => {
     const { runId } = await submitRun(ctx, {
-      entryId: "billing.e2e-refund",
+      entryId: "alpha.widget-lifecycle",
       env: { baseUrl: sut.url },
     });
     expect(await cancelRun(ctx, runId)).toBe(true);
@@ -125,13 +125,13 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
     const slowSut = await startTestSut({ ledgerSettles: false });
     try {
       const { runId } = await submitRun(ctx, {
-        entryId: "billing.e2e-refund",
+        entryId: "alpha.widget-lifecycle",
         env: { baseUrl: slowSut.url },
       });
       // Run the job concurrently with a fast cancel-poll cadence.
       const running = claimAndRun(ctx, "worker-1", { heartbeatMs: 50 });
-      // Wait until the chain has reached the polling `verify` node (4/5 settled).
-      await waitFor(async () => ((await getRun(ctx, runId))?.progressPct ?? 0) >= 80);
+      // Wait until the chain has reached the polling `verify` node (2/3 settled).
+      await waitFor(async () => ((await getRun(ctx, runId))?.progressPct ?? 0) >= 60);
       expect(await cancelRun(ctx, runId)).toBe(true);
       await running;
       expect((await getRun(ctx, runId))?.state).toBe("cancelled");
@@ -142,7 +142,7 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
 
   it("crash mid-run → the reaper requeues the lease and a second worker completes it", async () => {
     const { runId } = await submitRun(ctx, {
-      entryId: "billing.e2e-refund",
+      entryId: "alpha.widget-lifecycle",
       env: { baseUrl: sut.url },
     });
 
@@ -165,7 +165,7 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
       conn = await connectClient(ctx);
       const sel = (await conn.client.callTool({
         name: "run_selection",
-        arguments: { query: "identity.login", env: { baseUrl: sut.url } },
+        arguments: { query: "alpha.create-widget", env: { baseUrl: sut.url } },
       })) as unknown as { structuredContent: { runs: { runId: string }[] } };
       const runId = sel.structuredContent.runs[0]!.runId;
 
@@ -183,7 +183,7 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
         arguments: { runId, format: "md" },
       })) as unknown as { content: { text?: string }[]; structuredContent: { ready: boolean } };
       expect(report.structuredContent.ready).toBe(true);
-      expect(report.content.map((c) => c.text ?? "").join("")).toContain("identity.login");
+      expect(report.content.map((c) => c.text ?? "").join("")).toContain("alpha.create-widget");
     } finally {
       await worker.stop();
       await conn?.close();
@@ -196,7 +196,10 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
     try {
       conn = await connectClient(ctx);
       const stream = conn.client.experimental.tasks.callToolStream(
-        { name: "run_suite", arguments: { id: "billing.e2e-refund", env: { baseUrl: sut.url } } },
+        {
+          name: "run_suite",
+          arguments: { id: "alpha.widget-lifecycle", env: { baseUrl: sut.url } },
+        },
         undefined,
         { task: { ttl: 60_000 } },
       );
@@ -225,11 +228,14 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
     // SEP-1686 retains a result "for a server-defined duration"; without a sweep the rows
     // accumulate forever. Live and un-expired tasks must survive it.
     const expired = await submitRun(ctx, {
-      entryId: "identity.login",
+      entryId: "alpha.create-widget",
       env: { baseUrl: sut.url },
       ttlMs: -1000,
     });
-    const live = await submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } });
+    const live = await submitRun(ctx, {
+      entryId: "alpha.create-widget",
+      env: { baseUrl: sut.url },
+    });
 
     expect(await sweepExpiredTasks(ctx)).toBe(1);
     expect(await getRun(ctx, expired.runId)).toBeNull();
@@ -237,8 +243,14 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
   });
 
   it("a one-shot worker drains exactly one job and exits (the RunTask escape hatch)", async () => {
-    const first = await submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } });
-    const second = await submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } });
+    const first = await submitRun(ctx, {
+      entryId: "alpha.create-widget",
+      env: { baseUrl: sut.url },
+    });
+    const second = await submitRun(ctx, {
+      entryId: "alpha.create-widget",
+      env: { baseUrl: sut.url },
+    });
 
     // This is the mode an `ecs:RunTask`-launched task runs in: claim one job, finish it, exit.
     // Without the self-stop it would be a second, unmanaged worker pool that never scales in.

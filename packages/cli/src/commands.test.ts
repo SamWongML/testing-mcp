@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -12,46 +14,65 @@ import {
 } from "./commands";
 import { startMockSut } from "./mock-sut";
 
-// The CLI commands operate on the real sample corpus. Pin the root to the repo (relative
-// to this file) rather than `process.cwd()`, so the suite passes under both the root
-// `pnpm test` and the per-package `pnpm --filter @atp/cli test` (which runs from the
-// package dir, where the default cwd would scan a nonexistent `packages/cli/tests`).
+// Pin the root to the repo (relative to this file) rather than `process.cwd()`, so the suite
+// passes under both the root `pnpm test` and the per-package `pnpm --filter @atp/cli test`
+// (which runs from the package dir, where the default cwd would scan a nonexistent
+// `packages/cli/tests`).
 const repoRoot = resolve(__dirname, "../../..");
+
+// Catalog *behavior* — filtering, sorting, projection — is tested against a fixture corpus
+// with known contents, not the product corpus. `tests/` is a product artifact that grows as
+// the platform is used; pinning its exact ids here would make every authored test a breaking
+// change. Corpus *health* is asserted separately, on properties rather than contents.
+const fixtureRoot = resolve(repoRoot, "fixtures/corpus");
 
 describe("listEntries", () => {
   it("lists the whole corpus, id-sorted", async () => {
-    const entries = await listEntries({ root: repoRoot });
+    const entries = await listEntries({ root: fixtureRoot });
     expect(entries.map((e) => e.id)).toEqual([
-      "billing.e2e-refund",
-      "billing.get-invoice",
-      "identity.login",
+      "alpha.create-widget",
+      "alpha.widget-lifecycle",
+      "beta.read-widget",
     ]);
   });
 
   it("filters by tag", async () => {
-    const entries = await listEntries({ root: repoRoot, tags: ["billing"] });
-    expect(entries.map((e) => e.id).sort()).toEqual(["billing.e2e-refund", "billing.get-invoice"]);
+    const entries = await listEntries({ root: fixtureRoot, tags: ["alpha"] });
+    expect(entries.map((e) => e.id).sort()).toEqual([
+      "alpha.create-widget",
+      "alpha.widget-lifecycle",
+    ]);
   });
 
   it("filters by kind and owner", async () => {
-    expect((await listEntries({ root: repoRoot, kind: "suite" })).map((e) => e.id)).toEqual([
-      "billing.e2e-refund",
+    expect((await listEntries({ root: fixtureRoot, kind: "suite" })).map((e) => e.id)).toEqual([
+      "alpha.widget-lifecycle",
     ]);
-    expect(
-      (await listEntries({ root: repoRoot, owner: "team-identity" })).map((e) => e.id),
-    ).toEqual(["identity.login"]);
+    expect((await listEntries({ root: fixtureRoot, owner: "team-beta" })).map((e) => e.id)).toEqual(
+      ["beta.read-widget"],
+    );
   });
 });
 
 describe("validate", () => {
-  it("reports the corpus compiles", async () => {
-    expect((await validate(repoRoot)).entries).toBe(3);
-  });
-
   it("finds no strictness violations in the sample corpus", async () => {
     // Every corpus node pins an exact status or a body field, so the strictness rules are green on
     // `main` — the check imposes no migration burden on the existing tests.
     expect((await validate(repoRoot)).violations).toEqual([]);
+  });
+
+  it("reports the whole corpus was checked", async () => {
+    // A *property*, not a count: the product corpus grows as the platform is used, and pinning
+    // its size here would make every authored test a breaking change.
+    expect((await validate(repoRoot)).entries).toBeGreaterThan(0);
+  });
+
+  it("refuses an empty corpus rather than passing vacuously", async () => {
+    // Discovery finding nothing yields zero entries and therefore zero violations — a green
+    // `atp validate` that checked nothing at all. That is the same trap the strictness rules
+    // exist to close, one level up, so it is an error rather than an "ok".
+    const emptyRoot = await mkdtemp(join(tmpdir(), "atp-empty-corpus-"));
+    await expect(validate(emptyRoot)).rejects.toThrow(/empty/i);
   });
 });
 

@@ -33,6 +33,41 @@ export const requestSchema = z.object({
 });
 export type RequestSpec = z.infer<typeof requestSchema>;
 
+/**
+ * An authentication provider, as **data**. A step's `request.authRef` names one by `id`;
+ * the engine builds the credential-injecting behaviour from the declaration at run time.
+ *
+ * Declarative on purpose: a provider that carried a function could not live in the manifest,
+ * and the server would have to import authored source to recover it. Credentials are written
+ * as `{{secrets.*}}` templates and resolved per run, so nothing sensitive is ever normalized
+ * into the manifest.
+ */
+export const authProviderSchema = z.discriminatedUnion("type", [
+  z.object({ id: z.string(), type: z.literal("bearer"), token: z.string() }),
+  z.object({
+    id: z.string(),
+    type: z.literal("basic"),
+    username: z.string(),
+    password: z.string(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("apiKey"),
+    name: z.string(),
+    value: z.string(),
+    in: z.enum(["header", "query"]).default("header"),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("oauth2ClientCredentials"),
+    tokenUrl: z.string(),
+    clientId: z.string(),
+    clientSecret: z.string(),
+    scope: z.string().optional(),
+  }),
+]);
+export type AuthProviderSpec = z.infer<typeof authProviderSchema>;
+
 export const assertionOpSchema = z.enum([
   "eq",
   "neq",
@@ -119,6 +154,10 @@ export const testCaseSchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
   env: z.record(z.string(), z.unknown()).optional(),
   matrix: matrixSchema.optional(),
+  auth: z
+    .array(authProviderSchema)
+    .default([])
+    .refine(uniqueById, "auth provider ids must be unique"),
   steps: z.array(stepSchema).min(1).refine(uniqueById, "step ids must be unique"),
 });
 export type TestCase = z.infer<typeof testCaseSchema>;
@@ -171,5 +210,7 @@ export interface AuthoredTestCase {
   matrix?: Record<string, unknown[]>;
   /** Force Task augmentation. If omitted, the normalizer infers from timeoutMs. */
   isLongRunning?: boolean;
+  /** Auth providers this test's steps may select by `request.authRef`. */
+  auth?: AuthProviderSpec[];
   steps: AuthoredStep[];
 }

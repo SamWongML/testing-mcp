@@ -9,13 +9,16 @@ import { CHAIN_PLACEHOLDER } from "./import";
  * `atp import` scaffolds every request with a deliberately weak `status lt 500` assertion and
  * an `__TODO_CHAIN__` placeholder wherever it could not resolve an Insomnia response-ref. Left
  * unfinished, those compose: the request hits a bogus URL, gets a 404, and `status < 500`
- * passes. These two rules turn that silent trap into a build error.
+ * passes. These rules turn that silent trap into a build error.
+ *
+ * The third rule covers the credential half of the same problem: a node may name an `authRef`
+ * that no provider on its entry declares, which validates clean and then errors at first run.
  *
  * Pure and offline: they operate on the compiled manifest, so the check is independent of how
  * an entry was authored.
  */
 
-export type StrictRule = "unwired-chain" | "non-pinning-assert";
+export type StrictRule = "unwired-chain" | "non-pinning-assert" | "unknown-auth-ref";
 
 /** One rule violation, addressed by the entry + node it was found on. */
 export interface Violation {
@@ -56,8 +59,21 @@ function unwiredFields(request: RequestSpec): string[] {
 export function strictViolations(manifest: Manifest): Violation[] {
   const violations: Violation[] = [];
   for (const entry of manifest.entries) {
+    const declared = new Set(entry.auth.map((p) => p.id));
     for (const node of entry.nodes) {
       const at = { entryId: entry.id, nodeId: node.id };
+
+      const ref = node.request.authRef;
+      if (ref && !declared.has(ref)) {
+        violations.push({
+          ...at,
+          rule: "unknown-auth-ref",
+          detail:
+            `authRef "${ref}" matches no provider declared on this entry ` +
+            `(declared: ${declared.size ? [...declared].join(", ") : "none"}) — the run would ` +
+            `error before sending`,
+        });
+      }
 
       for (const field of unwiredFields(node.request)) {
         violations.push({

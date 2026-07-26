@@ -58,7 +58,7 @@ function redactValue(value: unknown): unknown {
  * Mask secret-shaped params before they are persisted to `audit_log` ("redact before
  * persist"). This is **key**-based on purpose: the engine's `redact()` masks known secret
  * *values* inside request/response snapshots, but a tool-call `params` bag is arbitrary caller
- * input whose secrets are only identifiable by name — the corpus's own `identity.login` takes a
+ * input whose secrets are only identifiable by name — the fixture corpus's `alpha.create-widget` takes a
  * `password` param, which would otherwise land in Postgres in plaintext.
  */
 export function redactAuditParams(

@@ -38,7 +38,8 @@ export async function executeEntry(
   const common = {
     env: { ...(unit?.env ?? {}), ...(opts.env ?? {}) },
     matrix: unit?.matrix ?? {},
-    auth: ctx.auth,
+    auth: entry.auth,
+    secrets: ctx.secrets,
     entryId: entry.id,
     envName: ctx.artifactEnv,
     manifestHash: ctx.manifest.manifestHash,

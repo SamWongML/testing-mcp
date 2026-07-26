@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { jsonSchemaSchema } from "./params";
 import { suiteNodeSchema } from "./suite";
-import { matrixSchema } from "./test";
+import { authProviderSchema, matrixSchema } from "./test";
 import { uniqueById } from "./util";
 
 /**
@@ -35,6 +35,13 @@ export const manifestEntrySchema = z.object({
    * per unit; a plain entry carries its static env). Templates like `{{secrets.*}}`
    * stay literal here — they resolve in the engine at run time, so no secret leaks. */
   env: z.record(z.string(), z.unknown()).optional(),
+  /** Auth providers this entry's nodes may select by `request.authRef`. Declarative data,
+   * so the engine builds them from the manifest alone; credential values stay `{{secrets.*}}`
+   * templates and resolve per run. */
+  auth: z
+    .array(authProviderSchema)
+    .default([])
+    .refine(uniqueById, "auth provider ids must be unique"),
   /** Normalized DAG: ids, needs, request templates, assertions (incl. fnHash), extracts. */
   nodes: z.array(suiteNodeSchema).min(1).refine(uniqueById, "node ids must be unique"),
   sourcePath: z.string(),

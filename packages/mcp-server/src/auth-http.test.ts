@@ -111,7 +111,7 @@ describe("auth-enabled HTTP surface", () => {
       const res = (await client.callTool({ name: "list_tests", arguments: {} })) as unknown as {
         structuredContent: { entries: { id: string }[] };
       };
-      expect(res.structuredContent.entries.map((e) => e.id)).toContain("identity.login");
+      expect(res.structuredContent.entries.map((e) => e.id)).toContain("alpha.create-widget");
     } finally {
       await client.close();
     }
@@ -152,7 +152,7 @@ describe("auth-enabled HTTP surface", () => {
     try {
       const res = (await client.callTool({
         name: "run_test",
-        arguments: { id: "identity.login", env: { baseUrl: sut.url } },
+        arguments: { id: "alpha.create-widget", env: { baseUrl: sut.url } },
       })) as unknown as { isError?: boolean; content: { type: string; text: string }[] };
       expect(res.isError).toBe(true);
       expect(res.content[0]!.text).toContain(SCOPES.RUN);
@@ -166,7 +166,7 @@ describe("auth-enabled HTTP surface", () => {
     try {
       const res = (await client.callTool({
         name: "run_test",
-        arguments: { id: "identity.login", env: { baseUrl: sut.url } },
+        arguments: { id: "alpha.create-widget", env: { baseUrl: sut.url } },
       })) as unknown as { isError?: boolean; structuredContent: { run: { status: string } } };
       expect(res.isError).toBeFalsy();
       expect(res.structuredContent.run.status).toBe("passed");
@@ -203,7 +203,7 @@ describe.skipIf(!pgAvailable)("tasks/* authorization is enforced durably", () =>
   });
 
   it("a read-only token cannot cancel a run via raw tasks/cancel", async () => {
-    const { runId } = await submitRun(ctx, { entryId: "identity.login" });
+    const { runId } = await submitRun(ctx, { entryId: "alpha.create-widget" });
     expect((await getRun(ctx, runId))?.cancelRequested).toBe(false);
 
     const res = await fetch(`${http.url}/mcp`, {
@@ -227,7 +227,7 @@ describe.skipIf(!pgAvailable)("tasks/* authorization is enforced durably", () =>
   });
 
   it("a run-scoped token still can cancel via raw tasks/cancel (the gate isn't over-broad)", async () => {
-    const { runId } = await submitRun(ctx, { entryId: "identity.login" });
+    const { runId } = await submitRun(ctx, { entryId: "alpha.create-widget" });
 
     const res = await fetch(`${http.url}/mcp`, {
       method: "POST",

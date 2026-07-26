@@ -98,3 +98,26 @@ export type Config = z.infer<typeof configSchema>;
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   return configSchema.parse(env);
 }
+
+/** The prefix marking an environment variable as a SUT credential. */
+export const SECRET_ENV_PREFIX = "ATP_SECRET_";
+
+/**
+ * Collect the `{{secrets.*}}` bag from the process environment: `ATP_SECRET_API_TOKEN`
+ * becomes `API_TOKEN`. This is how a credential reaches a run — infra injects it from
+ * Secrets Manager at task start, and nothing sensitive is ever normalized into the manifest.
+ *
+ * Prefixed rather than "the whole environment" on purpose: the engine redacts by masking
+ * every known secret *value* wherever it appears in a persisted trace, so admitting
+ * unrelated variables would blank arbitrary substrings out of reports. Empty values are
+ * dropped for the same reason — an empty mask would match everywhere.
+ */
+export function secretsFromEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const secrets: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.startsWith(SECRET_ENV_PREFIX) || !value) continue;
+    const name = key.slice(SECRET_ENV_PREFIX.length);
+    if (name) secrets[name] = value;
+  }
+  return secrets;
+}

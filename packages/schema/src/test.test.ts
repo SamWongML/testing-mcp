@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertionSchema,
+  authProviderSchema,
   matrixSchema,
   requestSchema,
   retryPolicySchema,
@@ -147,6 +148,42 @@ describe("testCaseSchema", () => {
         version: 0,
         steps: [{ id: "s", request: { method: "GET", url: "/" } }],
       }),
+    ).toThrow();
+  });
+});
+
+describe("authProviderSchema", () => {
+  it("parses each provider kind as serializable data", () => {
+    // Providers are manifest data, not functions: the engine builds the credential-injecting
+    // behaviour from these declarations at run time, so the manifest stays the source of truth.
+    expect(
+      authProviderSchema.parse({ id: "api", type: "bearer", token: "{{secrets.API_TOKEN}}" }),
+    ).toEqual({ id: "api", type: "bearer", token: "{{secrets.API_TOKEN}}" });
+    expect(
+      authProviderSchema.parse({ id: "b", type: "basic", username: "u", password: "p" }),
+    ).toMatchObject({ type: "basic" });
+    // `in` defaults to a header, matching the engine's apiKey provider.
+    expect(
+      authProviderSchema.parse({ id: "k", type: "apiKey", name: "x-api-key", value: "v" }),
+    ).toMatchObject({ in: "header" });
+    expect(
+      authProviderSchema.parse({
+        id: "o",
+        type: "oauth2ClientCredentials",
+        tokenUrl: "https://idp/token",
+        clientId: "c",
+        clientSecret: "s",
+      }),
+    ).toMatchObject({ type: "oauth2ClientCredentials" });
+  });
+
+  it("rejects an unknown provider type", () => {
+    expect(() => authProviderSchema.parse({ id: "x", type: "magic" })).toThrow();
+  });
+
+  it("rejects a provider carrying a function — that is what makes it unserializable", () => {
+    expect(() =>
+      authProviderSchema.parse({ id: "x", type: "bearer", token: () => "tok" }),
     ).toThrow();
   });
 });

@@ -45,7 +45,7 @@ describe.skipIf(!pgAvailable || !dynamoAvailable)("async lifecycle on DynamoDB t
 
   it("submit → worker → completed, with task state served from DynamoDB", async () => {
     const { runId, state } = await submitRun(ctx, {
-      entryId: "billing.e2e-refund",
+      entryId: "alpha.widget-lifecycle",
       env: { baseUrl: sut.url },
     });
     expect(state).toBe("working");
@@ -71,12 +71,12 @@ describe.skipIf(!pgAvailable || !dynamoAvailable)("async lifecycle on DynamoDB t
   it("dedupes a resubmitted idempotency key via the idempotency table", async () => {
     const key = "nightly-smoke";
     const first = await submitRun(ctx, {
-      entryId: "identity.login",
+      entryId: "alpha.create-widget",
       env: { baseUrl: sut.url },
       idempotencyKey: key,
     });
     const second = await submitRun(ctx, {
-      entryId: "identity.login",
+      entryId: "alpha.create-widget",
       env: { baseUrl: sut.url },
       idempotencyKey: key,
     });
@@ -103,7 +103,7 @@ describe.skipIf(!pgAvailable || !dynamoAvailable)("async lifecycle on DynamoDB t
     expect(await tables.taskItem(orphanRunId)).toBeNull();
 
     const submitted = await submitRun(ctx, {
-      entryId: "identity.login",
+      entryId: "alpha.create-widget",
       env: { baseUrl: sut.url },
       idempotencyKey: "stranded",
     });
@@ -123,7 +123,7 @@ describe.skipIf(!pgAvailable || !dynamoAvailable)("async lifecycle on DynamoDB t
     await store.close();
 
     await expect(
-      submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } }),
+      submitRun(ctx, { entryId: "alpha.create-widget", env: { baseUrl: sut.url } }),
     ).rejects.toThrow();
 
     const items = await tables.scanTasks();

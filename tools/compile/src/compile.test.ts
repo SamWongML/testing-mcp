@@ -17,6 +17,7 @@ function entry(overrides: Partial<ManifestEntry> = {}): ManifestEntry {
     version: 1,
     tags: [],
     isLongRunning: false,
+    auth: [],
     nodes: [{ id: "s", request: { method: "GET", url: "u" }, assert: [], extract: [], needs: [] }],
     sourcePath: "tests/x.test.ts",
     ...overrides,

@@ -7,14 +7,14 @@ import { loadConfig } from "@atp/schema";
 import { describe, expect, it } from "vitest";
 
 import { buildAuthContext, buildContext } from "./bootstrap";
-import { repoRoot } from "./testkit";
+import { fixtureRoot, repoRoot } from "./testkit";
 
 describe("buildContext", () => {
   it("compiles the corpus from TESTS_ROOT when no manifest path is set", async () => {
-    const ctx = await buildContext(loadConfig({ TESTS_ROOT: repoRoot }));
+    const ctx = await buildContext(loadConfig({ TESTS_ROOT: fixtureRoot }));
 
-    expect(ctx.manifest.entries.map((e) => e.id)).toContain("identity.login");
-    expect(ctx.sourceRoot).toBe(repoRoot);
+    expect(ctx.manifest.entries.map((e) => e.id)).toContain("alpha.create-widget");
+    expect(ctx.sourceRoot).toBe(fixtureRoot);
     expect(ctx.artifactEnv).toBe("mcp");
     expect(ctx.db).toBeUndefined(); // offline: no db wired, so list_runs reports empty history
   });

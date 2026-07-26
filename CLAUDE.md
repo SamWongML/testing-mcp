@@ -53,6 +53,8 @@ These hold from anywhere, including the packages with no rule file of their own 
 - **Schema is the source of truth** — representation changes land in `@atp/schema` first.
 - **The engine stays pure** — never import MCP or AWS code into `@atp/engine`.
 - **Redact before persist** — every request/response snapshot passes `redact()` first.
+- **Credentials are data + env** — providers are declarative `AuthProviderSpec`s carried by the
+  manifest entry; their values are `{{secrets.*}}` templates filled from `ATP_SECRET_<KEY>`.
 - **The MCP tool surface is additive** — never rename or remove a tool or field; add optional ones.
 
 ## Working here

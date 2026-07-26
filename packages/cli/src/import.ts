@@ -34,6 +34,10 @@ export interface MappingEntry {
 export interface ImportResult {
   files: GeneratedFile[];
   mapping: MappingEntry[];
+  /** The corpus namespace these drafts land in, slugged from the collection name. Also the
+   * directory the migration ledger belongs in — one per namespace, since parity is reached
+   * (and the Insomnia source retired) a namespace at a time. */
+  domain: string;
 }
 
 /** Lowercase kebab slug for names → file/id segments ("Get Invoice" → "get-invoice"). */
@@ -222,7 +226,9 @@ function requestExtras(
   if (auth?.type === "bearer") authRef = providerFor.get(auth.token ?? "");
   else if (auth?.type) {
     todos.push(
-      `auth type "${auth.type}" isn't auto-mapped — add a provider in tests/_shared/auth (see @atp/engine basicAuth / oauth2ClientCredentials) and set \`authRef\`.`,
+      `auth type "${auth.type}" isn't auto-mapped — declare a provider in tests/_shared/auth ` +
+        `({ id, type: "basic" | "apiKey" | "oauth2ClientCredentials", … }), add it to the ` +
+        `entry's \`auth\` array, and set \`authRef\`.`,
     );
   }
   if (hasResponseTag(req)) {
@@ -285,10 +291,11 @@ function emitTest(
   const { authRef, todos } = requestExtras(req, providerFor);
   // 6-space base indent: the `request:` key sits 6 columns in (steps[0] → request).
   const request = renderLiteral(mapRequest(req, authRef), "      ");
+  const auth = authWiring(domain, authRef ? [authRef] : []);
 
   const content = `import { defineTest } from "@atp/engine";
 
-import { ${domain} } from "../_shared/env/${domain}";
+${auth.imports}import { ${domain} } from "../_shared/env/${domain}";
 
 export default defineTest({
   id: "${id}",
@@ -296,7 +303,7 @@ export default defineTest({
   title: ${JSON.stringify(req.name ?? name)},
   tags: [${JSON.stringify(domain)}],
   env: ${domain},
-  steps: [
+${auth.field}  steps: [
 ${todoLines(todos, "    ")}    {
       id: "${name}",
       request: ${request},
@@ -338,9 +345,11 @@ function emitSuite(
     },
   ];
   const nodeSrc: string[] = [];
+  const nodeAuthRefs: string[] = [];
   for (const child of collectRequests(folder.children ?? [])) {
     const key = uniqNode(slug(child.name ?? "request"));
     const { authRef, todos } = requestExtras(child, providerFor);
+    if (authRef) nodeAuthRefs.push(authRef);
     const request = renderLiteral(mapRequest(child, authRef), "      ");
     nodeSrc.push(
       `${todoLines(todos, "    ")}    ${JSON.stringify(key)}: {\n` +
@@ -357,9 +366,10 @@ function emitSuite(
     });
   }
 
+  const auth = authWiring(domain, nodeAuthRefs);
   const content = `import { defineSuite } from "@atp/engine";
 
-import { ${domain} } from "../_shared/env/${domain}";
+${auth.imports}import { ${domain} } from "../_shared/env/${domain}";
 
 export default defineSuite({
   id: "${id}",
@@ -367,7 +377,7 @@ export default defineSuite({
   title: ${JSON.stringify(folder.name ?? suiteName)},
   tags: [${JSON.stringify(domain)}],
   env: ${domain},
-  nodes: {
+${auth.field}  nodes: {
 ${nodeSrc.join("\n")}
   },
 });
@@ -375,16 +385,37 @@ ${nodeSrc.join("\n")}
   return { file: { path, content }, mapping };
 }
 
-/** Emit `tests/_shared/auth/<providerId>.ts` — a reusable bearer provider. */
+/** Emit `tests/_shared/auth/<providerId>.ts` — a reusable bearer provider *declaration*.
+ * Plain data, so it needs no engine import and travels in the manifest; the credential stays
+ * a `{{secrets.*}}` template resolved per run from `ATP_SECRET_<KEY>`. */
 function emitAuth(providerId: string, secretKey: string): GeneratedFile {
-  const content = `import { bearerAuth } from "@atp/engine";
+  const content = `import type { AuthProviderSpec } from "@atp/schema";
 
-export const ${identifier(providerId)} = bearerAuth({
+export const ${authIdentifier(providerId)}: AuthProviderSpec = {
   id: "${providerId}",
+  type: "bearer",
   token: "{{secrets.${secretKey}}}",
-});
+};
 `;
   return { path: `tests/_shared/auth/${providerId}.ts`, content };
+}
+
+/** The exported binding for a provider module. Suffixed because a single-token collection
+ * names its provider after the domain, which is also the env module's export — importing both
+ * unsuffixed into one file would be a duplicate identifier. */
+function authIdentifier(providerId: string): string {
+  return `${identifier(providerId)}Auth`;
+}
+
+/** The `import` line + `auth:` field an entry needs for the providers its requests select. */
+function authWiring(domain: string, providerIds: string[]): { imports: string; field: string } {
+  const unique = [...new Set(providerIds)].sort();
+  if (unique.length === 0) return { imports: "", field: "" };
+  const imports = unique
+    .map((id) => `import { ${authIdentifier(id)} } from "../_shared/auth/${id}";\n`)
+    .join("");
+  const field = `  auth: [${unique.map(authIdentifier).join(", ")}],\n`;
+  return { imports, field };
 }
 
 /** Emit `tests/_shared/env/<domain>.ts` from the collection's environment data. */
@@ -437,7 +468,7 @@ export function importInsomnia(yamlText: string): ImportResult {
   }
 
   files.push(...authFiles);
-  return { files, mapping };
+  return { files, mapping, domain };
 }
 
 /** Escape a value for a Markdown table cell so a literal `|` can't break the column layout. */
@@ -474,12 +505,15 @@ export interface WriteImportResult {
  * `root`. The `atp import` CLI command layer; the pure transform is {@link importInsomnia}. */
 export async function writeImport(yamlPath: string, root: string): Promise<WriteImportResult> {
   const yamlText = await readFile(resolve(yamlPath), "utf8");
-  const { files, mapping } = importInsomnia(yamlText);
+  const { files, mapping, domain } = importInsomnia(yamlText);
 
   const written: string[] = [];
+  // The ledger goes beside the corpus it describes. A single root-level MIGRATION.md is
+  // rewritten wholesale on every import, so a second collection silently destroys the first
+  // namespace's cutover record — and the mapping is per-namespace anyway.
   for (const file of [
     ...files,
-    { path: "MIGRATION.md", content: renderMigration(mapping, yamlPath) },
+    { path: `tests/${domain}/MIGRATION.md`, content: renderMigration(mapping, yamlPath) },
   ]) {
     const target = resolve(root, file.path);
     await mkdir(dirname(target), { recursive: true });

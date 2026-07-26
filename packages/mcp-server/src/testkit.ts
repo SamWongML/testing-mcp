@@ -21,18 +21,27 @@ import { buildMcpServer } from "./server";
  *  (mirrors the CLI tests — passes under both root `pnpm test` and per-package runs). */
 export const repoRoot = resolve(__dirname, "../../..");
 
-/** Build a `ServerContext` over the real sample corpus with a throwaway local artifact
+/**
+ * The fixture corpus root — a corpus with *known, fixed* contents that the surface tests
+ * assert against. `tests/` is a product artifact that grows as the platform is used; pinning
+ * its ids here would make authoring a test a breaking change to the platform's own suite.
+ * Its entries hit the same routes as {@link startTestSut}, so they are executable too.
+ */
+export const fixtureRoot = resolve(repoRoot, "fixtures/corpus");
+
+/** Build a `ServerContext` over the fixture corpus with a throwaway local artifact
  *  store and no db (offline). Overrides let a test inject a db or swap the manifest. */
 export async function makeTestContext(
   overrides: Partial<ServerContext> = {},
 ): Promise<ServerContext> {
-  const manifest = await compile({ root: repoRoot });
+  const manifest = await compile({ root: fixtureRoot });
   const dir = await mkdtemp(join(tmpdir(), "atp-mcp-"));
   return {
     manifest,
-    sourceRoot: repoRoot,
+    sourceRoot: fixtureRoot,
     artifacts: new LocalArtifactStore(dir),
     artifactEnv: "test",
+    secrets: {},
     ...overrides,
   };
 }
@@ -166,14 +175,14 @@ export interface TestSut {
 }
 
 export interface TestSutOptions {
-  /** When false, the ledger route never returns `settled`, so `billing.e2e-refund`'s
+  /** When false, the ledger route never returns `settled`, so `alpha.widget-lifecycle`'s
    *  polling `verify` node stays in flight — the deterministic window a cancel test needs. */
   ledgerSettles?: boolean;
 }
 
-/** A tiny mock SUT covering the routes the corpus tests + the `billing.e2e-refund` suite
- *  hit, so an inline `run_test` or a worker-run suite executes offline. Ephemeral loopback
- *  port; inject its URL as `{{env.baseUrl}}`. */
+/** A tiny mock SUT covering the routes the fixture corpus hits, so an inline `run_test` or a
+ *  worker-run suite executes offline. Ephemeral loopback port; inject its URL as
+ *  `{{env.baseUrl}}`. */
 export function startTestSut(opts: TestSutOptions = {}): Promise<TestSut> {
   const ledgerSettles = opts.ledgerSettles ?? true;
   const server: Server = createServer((req, res) => {
