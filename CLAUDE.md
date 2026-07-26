@@ -27,12 +27,10 @@ Narrow the loop: `pnpm exec vitest run <path>` · `-t "<substring>"` · `pnpm --
 
 ## Gotchas
 
-- **A test that cannot fail is a build error.** `pnpm validate` compiles the corpus and then
-  applies two strictness rules (`packages/cli/src/strict.ts`): no `__TODO_CHAIN__` placeholder may
-  survive into a request, and no node may assert only a *range* on `status`. Together those are
-  what let a half-finished Insomnia migration pass while testing nothing. Strict by default — there
-  is no opt-out flag, so fix the node rather than reaching for one. An exact `status eq 204` with no
-  body assert is deliberately legal.
+- **A test that cannot fail is a build error.** `packages/cli/src/strict.ts` rejects a surviving
+  `__TODO_CHAIN__` placeholder and a node asserting only a *range* on `status` — together, what
+  let a half-finished Insomnia migration pass while testing nothing. An exact `status eq 204` with
+  no body assert is deliberately legal.
 - **Test-file location matters.** Platform unit tests sit beside their source under
   `packages/**/src/**/*.test.ts`. The `tests/` corpus is *also* `*.test.ts` but is deliberately not
   matched by `vitest.config.ts` — it is the product corpus, not unit tests.
@@ -49,14 +47,13 @@ Narrow the loop: `pnpm exec vitest run <path>` · `-t "<substring>"` · `pnpm --
 
 ## Invariants
 
+These hold from anywhere, including the packages with no rule file of their own (`reporting`,
+`cli`, `tools/`):
+
 - **Schema is the source of truth** — representation changes land in `@atp/schema` first.
 - **The engine stays pure** — never import MCP or AWS code into `@atp/engine`.
 - **Redact before persist** — every request/response snapshot passes `redact()` first.
 - **The MCP tool surface is additive** — never rename or remove a tool or field; add optional ones.
-- **Stateless request path** — no cross-request memory in the MCP service.
-- **Every run records `manifestHash` + `gitSha`.**
-- **Storage backing is config, never code** — `TASK_STORE`/`ARTIFACT_STORE` select the adapter, and
-  everything above `@atp/store` goes through the `TaskStateStore`/`ArtifactStore` seams.
 
 ## Working here
 
@@ -68,11 +65,12 @@ template rather than reconstructing the workflow.
 Delegate to a subagent only for large, genuinely independent tracks of work, such as a wide
 multi-file investigation. Don't delegate what you can finish in a handful of tool calls, and don't
 use subagents to verify your own work. Match written documents to what the task needs — cover the
-substance without padding.
+substance without padding. Keep conversational replies brief and lead with the outcome; put the
+supporting detail after it.
 
 ## Key docs
 
-- `.claude/rules/*.md` — per-package detail; each loads automatically when you open a file it covers.
+- `.claude/rules/*.md` — per-package detail.
 - `docs/research.md` — architecture rationale and the ADRs. Large; it opens with a topic index.
 - `docs/deploy.md` — the deployment runbook.
 - `README.md` — the package-responsibility map.

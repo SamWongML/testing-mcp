@@ -34,9 +34,3 @@ the `params` builder with a JSON Schema. Normalized assertion is
   `timestamptz`) parse as well as `Z`.
 - **Config changes are additive** — `configSchema` is consumed by the CLI and the MCP server;
   add optional fields, don't repurpose existing ones.
-
-## Conventions
-
-TypeScript strict + ESM. The base tsconfig sets `verbatimModuleSyntax`, `isolatedModules`, and
-`noUncheckedIndexedAccess` — use `import type` for type-only imports and treat indexed access
-as possibly-`undefined`.

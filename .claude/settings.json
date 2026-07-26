@@ -7,9 +7,10 @@
       "Bash(pnpm lint:*)",
       "Bash(pnpm test:*)",
       "Bash(pnpm compile:*)",
+      "Bash(pnpm validate:*)",
       "Bash(pnpm atp:*)",
       "Bash(pnpm synth:*)",
-      "Bash(pnpm format:check:*)",
+      "Bash(pnpm format:*)",
       "Bash(pnpm dev:*)",
       "Bash(pnpm exec vitest:*)",
       "Bash(pnpm exec tsc:*)",
@@ -26,9 +27,16 @@
       "Bash(git push:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
       "Bash(docker compose -f docker-compose.dev.yml:*)"
     ],
-    "deny": ["Read(./pnpm-lock.yaml)", "Read(./**/coverage/**)", "Read(./**/*.tsbuildinfo)"]
+    "deny": [
+      "Read(./pnpm-lock.yaml)",
+      "Read(./**/coverage/**)",
+      "Read(./**/*.tsbuildinfo)",
+      "Read(./**/cdk.out/**)"
+    ]
   },
   "hooks": {
     "Stop": [
