@@ -10,12 +10,12 @@ paths:
 Four stacks in `infra/src/`, composed by `infra/bin/app.ts`: `network` (VPC, NAT, gateway
 endpoints, the shared security groups) → `data` (RDS Multi-AZ, DynamoDB `tasks`+`idempotency`,
 S3 artifacts) → `ecs` (ALB'd server + worker services, autoscaling, IAM) and `observability`
-(dashboard + alarms). Runbook: [docs/deploy.md](../../docs/deploy.md). Research §17, ADR-008.
+(dashboard + alarms). Runbook: [docs/deploy.md](../../docs/deploy.md).
 
 ## Testing — the seam is the synthesized template
 
 Tests assert against `Template.fromStack(...)` — the CloudFormation that actually deploys —
-not against construct objects. They encode the §17.2 deployment *properties* (Multi-AZ,
+not against construct objects. They encode the deployment *properties* (Multi-AZ,
 gateway endpoints, health-check path, least-privilege roles, TTL attributes), never CDK's own
 behaviour. They run in the normal `pnpm test` (no AWS, no credentials, no Docker).
 
@@ -42,7 +42,7 @@ still used, it just no longer creates the security group that caused the cycle. 
   attribute key `RUN_STATE_ATTRIBUTE` (`telemetry.ts`) and queried with `RUN_STATE_DIMENSION`
   (`metrics.ts`). CloudWatch matches dimensions as an **exact set**: a mismatch does not error,
   it returns no datapoints, so the alarm sits in `INSUFFICIENT_DATA` forever and reads as
-  healthy. P11 shipped `status` vs `state` and disabled two alarms. Tests on both sides pin the
+  healthy. A past change shipped `status` vs `state` and silently disabled two alarms. Tests on both sides pin the
   literal — keep them.
 - **Metrics only reach CloudWatch through a collector you must run yourself.** The app exports
   OTLP; nothing in `infra/` provisions an ADOT collector. Until one translates OTLP →

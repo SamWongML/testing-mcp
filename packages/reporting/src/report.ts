@@ -7,7 +7,7 @@ import { renderSummary } from "./summary";
 import { renderTrace } from "./trace";
 
 /**
- * Format dispatch over the canonical renderers (research §14, ADR-006). A new output
+ * Format dispatch over the canonical renderers. A new output
  * format is an additive entry here — no caller changes. The CLI's `--report` flag and
  * the future `get_report` MCP tool both route through this one map.
  */

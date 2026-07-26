@@ -20,7 +20,7 @@ describe("ObservabilityStack", () => {
     const alarms = Object.values(template.findResources("AWS::CloudWatch::Alarm"));
     const metrics = alarms.map((a) => a.Properties?.MetricName ?? "composite");
 
-    // Plan §P11: "alarms: queue depth, pass rate, p95 duration, worker errors".
+    //: "alarms: queue depth, pass rate, p95 duration, worker errors".
     expect(metrics).toContain("queue_depth");
     expect(metrics).toContain("run_duration_ms");
     expect(metrics).toContain("runs_total");

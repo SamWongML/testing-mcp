@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { workerOptionsFromConfig } from "./worker";
 
 /**
- * The env → `WorkerOptions` mapping. This seam exists because the §11.3 mode-2 escape hatch
+ * The env → `WorkerOptions` mapping. This seam exists because the mode-2 escape hatch
  * is only real if the environment the `ecs:RunTask` launcher sets is actually *read*: the
  * launcher writes `WORKER_ONCE`/`ATP_RUN_ID` onto the one-off task, and nothing else connects
  * them to the worker loop's `maxRuns`/`runId`. Testing `startWorker({ maxRuns: 1 })` directly

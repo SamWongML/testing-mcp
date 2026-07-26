@@ -5,11 +5,11 @@ import { createOrder } from "../_shared/steps/create-order";
 import login from "../identity/login.test";
 
 /**
- * A suite that composes existing tests/steps with no duplication (research §7.2). `login`
+ * A suite that composes existing tests/steps with no duplication. `login`
  * is reused by reference; `createOrder` is a shared step bound with the extracted token.
  * `needs` makes the DAG explicit; `extract` publishes values later nodes address via
  * `{{nodes.X.var}}`; `verify` polls until the ledger settles. `timeoutMs` > 30s marks it
- * long-running (an MCP Task by default in P8).
+ * long-running (an MCP Task by default ).
  */
 export default defineSuite({
   id: "billing.e2e-refund",

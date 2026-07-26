@@ -38,7 +38,7 @@ async function main(): Promise<void> {
 
   let ctx: ServerContext = { ...(await buildContext(config)), logger, telemetry };
 
-  // Storage selection is config, not code (P11): the same image runs on the stage-1
+  // Storage selection is config, not code: the same image runs on the stage-1
   // Postgres collapse or on DynamoDB + S3 depending only on the environment. Built only
   // once a db is confirmed — without one the surface is synchronous-only and never touches
   // task state, so a half-configured TASK_STORE shouldn't fail boot for an unused component.

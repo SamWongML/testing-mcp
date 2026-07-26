@@ -20,7 +20,7 @@ function recordingLauncher(fail = false): RunTaskLauncher & { launched: string[]
 }
 
 /**
- * The §11.3 mode-2 wiring: an isolated submission still goes through the durable queue and
+ * The mode-2 wiring: an isolated submission still goes through the durable queue and
  * *additionally* launches a dedicated Fargate task. The queue-first ordering is the whole
  * safety property — it is what makes the escape hatch an optimisation rather than a second,
  * fragile execution path.

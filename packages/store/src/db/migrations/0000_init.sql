@@ -1,4 +1,4 @@
--- P6 store — system of record + durable queue + stage-1 task state (research §16.1, §18).
+-- store — system of record + durable queue + stage-1 task state.
 -- Ids are `text` (not `uuid`): the IR types every id as a string; the store honors that.
 
 CREATE TABLE manifests (
@@ -77,7 +77,7 @@ CREATE TABLE audit_log (
   scopes    text[]
 );
 
--- Stage-1 hot task state collapsed into Postgres (§16.2 fields, §18 "dozens").
+-- Stage-1 hot task state collapsed into Postgres (fields, "dozens").
 CREATE TABLE tasks (
   run_id           text PRIMARY KEY,
   state            text NOT NULL,

@@ -91,7 +91,7 @@ describe("matrixSchema", () => {
 });
 
 describe("testCaseSchema", () => {
-  it("parses the §7.1 login test (normalized)", () => {
+  it("parses the login test (normalized)", () => {
     const parsed = testCaseSchema.parse({
       id: "identity.login",
       version: 1,

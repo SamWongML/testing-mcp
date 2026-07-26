@@ -3,7 +3,7 @@ import type { PollPolicy } from "@atp/schema";
 import { sleep } from "./util";
 
 /**
- * Eventual-consistency polling (research §10.2–10.3). When a step declares
+ * Eventual-consistency polling (–10.3). When a step declares
  * `poll.untilAssertPasses`, the runner re-sends the request and re-evaluates that
  * step's assertions on an `intervalMs` cadence until they pass or the `maxMs` budget
  * elapses — abortable via `signal`, exactly like the retry backoff.

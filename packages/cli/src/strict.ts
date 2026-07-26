@@ -4,7 +4,7 @@ import { CHAIN_PLACEHOLDER } from "./import";
 
 /**
  * Strictness rules for `atp validate` — the guard that stops a half-finished migration from
- * shipping a corpus that *cannot fail* (research §19).
+ * shipping a corpus that *cannot fail*.
  *
  * `atp import` scaffolds every request with a deliberately weak `status lt 500` assertion and
  * an `__TODO_CHAIN__` placeholder wherever it could not resolve an Insomnia response-ref. Left

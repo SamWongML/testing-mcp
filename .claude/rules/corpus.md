@@ -24,7 +24,7 @@ pnpm atp run <id>            # execute one entry against the local mock SUT
 pnpm atp golden <id> --base-url <url>   # real SUT → paste-ready parity assertions
 ```
 
-**Strictness (`atp validate`, §19).** It fails on a node that no response could make fail —
+**Strictness (`atp validate`).** It fails on a node that no response could make fail —
 an `assert` that is empty, or whose only entries are *range* ops on `status` (`lt`/`gt`) — and
 on any surviving `__TODO_CHAIN__` from `atp import`. Pin an exact status (`op: "eq"`) plus at
 least one body assertion. A status-only `{ path: "status", op: "eq", value: 204 }` is fine (a

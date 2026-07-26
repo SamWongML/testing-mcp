@@ -4,10 +4,10 @@ import { diagnose } from "./diagnose";
 import { fmtValue, ms } from "./util";
 
 /**
- * Markdown report (research §14) — the agent-friendly format returned inline by
+ * Markdown report — the agent-friendly format returned inline by
  * `get_report`: a status header, a per-step table, the heuristic likely cause, and a
  * failures section with request/response and assertion detail. Derived from the same
- * `ExecutionResult` as every other renderer (ADR-006).
+ * `ExecutionResult` as every other renderer.
  */
 
 const GLYPH: Record<StepStatus, string> = {

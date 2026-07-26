@@ -4,7 +4,7 @@ import type { EngineResponse } from "./context";
 import { getByPath } from "./util";
 
 /**
- * Extraction (research §10.3): each `{ as, from }` reads a dot-path from the
+ * Extraction: each `{ as, from }` reads a dot-path from the
  * response (`body.token`, `body.user.id`, `status`, `headers.x`) and publishes it
  * to the run's var bag, where later nodes reference it via `{{nodes.X.as}}`.
  */

@@ -1,6 +1,6 @@
 import type { AssertionResult } from "@atp/schema";
 
-/** Small shared helpers for the renderers (research §14). Kept internal to the package. */
+/** Small shared helpers for the renderers. Kept internal to the package. */
 
 /**
  * Escape a string for use in XML/HTML text or attribute context. The set covers both

@@ -9,8 +9,8 @@ import { createAuthenticator } from "./auth";
 import type { AuthContext, ServerContext } from "./context";
 import { createEcsRunTaskLauncher, type RunTaskLauncher } from "./run-task";
 
-/** The `{env}` segment (§16.3) inline runs are stored under — matches the `envName` the
- *  engine stamps onto an MCP-invoked run, so the artifact key layout stays consistent. */
+/** The `{env}` segment inline runs are stored under — matches the `envName` the
+ * engine stamps onto an MCP-invoked run, so the artifact key layout stays consistent. */
 const ARTIFACT_ENV = "mcp";
 
 /**
@@ -28,7 +28,7 @@ async function loadManifest(config: Config, sourceRoot: string): Promise<Manifes
 }
 
 /**
- * Build the OAuth {@link AuthContext} from config (P10, ADR-007), or `undefined` when
+ * Build the OAuth {@link AuthContext} from config, or `undefined` when
  * `AUTH_ENABLED` is off (the dev/test default). Enabling auth requires the issuer, this
  * server's resource identifier, and a JWKS endpoint — a missing one fails fast at boot. The
  * remote key set is lazy (no I/O until the first token verify), so this stays offline-safe.
@@ -45,7 +45,7 @@ export function buildAuthContext(config: Config): AuthContext | undefined {
 }
 
 /**
- * Build the §11.3 mode-2 launcher from config, or `undefined` when the escape hatch is off
+ * Build the mode-2 launcher from config, or `undefined` when the escape hatch is off
  * (the default). Enabling it without the cluster/task-definition/networking fields is a
  * configuration error, so it fails fast at boot rather than at the first isolated run.
  */
@@ -77,7 +77,7 @@ export function buildRunTaskLauncher(config: Config): RunTaskLauncher | undefine
 }
 
 /**
- * Build the stateless {@link ServerContext} from validated config (research §8, ADR-002).
+ * Build the stateless {@link ServerContext} from validated config.
  * Resolves the manifest source, the artifact store, the auth gate, and the roots the tools
  * need — nothing per-request. The db, logger, and telemetry are injected by the entrypoint
  * (the established seam: tests build a context with a throwaway db + in-memory exporters), so
@@ -86,7 +86,7 @@ export function buildRunTaskLauncher(config: Config): RunTaskLauncher | undefine
 export async function buildContext(config: Config): Promise<ServerContext> {
   const sourceRoot = resolve(config.TESTS_ROOT ?? process.cwd());
   const manifest = await loadManifest(config, sourceRoot);
-  // Local filesystem by default; S3 when `ARTIFACT_STORE=s3` (P11, §16.3). Constructing an
+  // Local filesystem by default; S3 when `ARTIFACT_STORE=s3`. Constructing an
   // S3 client performs no I/O, so this stays offline-safe.
   const artifacts = createArtifactStore(config, resolve(sourceRoot, ".atp/artifacts"));
   return {

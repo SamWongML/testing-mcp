@@ -1,7 +1,7 @@
 import type { DeclarativeAssertion, ExecutionResult } from "@atp/schema";
 
 /**
- * Golden-master parity helper (research §19 step 4). Migration is only trustworthy once a
+ * Golden-master parity helper (step 4). Migration is only trustworthy once a
  * converted test is shown to reproduce the original request's behavior. Given a captured
  * baseline response, {@link goldenAssertions} derives a conservative set of parity assertions
  * — the exact status, plus a per-field *shape* check for each scalar key — and

@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 /**
- * `atp import` — the deterministic Insomnia-v5-YAML scaffolder (research §13.1, §19).
+ * `atp import` — the deterministic Insomnia-v5-YAML scaffolder.
  *
  * Insomnia YAML is a *source*, never wired into MCP directly: this transform maps the clean,
  * mechanical parts (request → step, folder → suite, environment → `_shared/env`, auth →
@@ -49,17 +49,17 @@ function slug(name: string): string {
 
 /** An Insomnia variable tag: `{{ _.foo }}` → the `foo` capture. */
 const INSOMNIA_VAR_TAG = /\{\{\s*_\.([a-zA-Z0-9_]+)\s*\}\}/;
-/** An Insomnia response-ref / request tag (`{% response ... %}`) — the chaining "messy
- *  remainder" the deterministic importer cannot resolve; it becomes a TODO placeholder. */
+/** An Insomnia response-ref / request tag (`{% response... %}`) — the chaining "messy
+ * remainder" the deterministic importer cannot resolve; it becomes a TODO placeholder. */
 const RESPONSE_TAG = /\{%[\s\S]*?%\}/;
 /** Marks a request the importer could not resolve. `atp validate` fails while one survives. */
 export const CHAIN_PLACEHOLDER = "__TODO_CHAIN__";
 /** The placeholder assertion every scaffolded request carries until golden-master parity
- *  assertions replace it (a request that merely didn't 5xx — deliberately weak, see §19). */
+ * assertions replace it (a request that merely didn't 5xx — deliberately weak, see ). */
 const STATUS_ASSERT = `[{ path: "status", op: "lt", value: 500 }]`;
 
-/** Map Insomnia template tags: `{{ _.foo }}` → `{{env.foo}}`, and any `{% ... %}` response-ref
- *  tag → a `__TODO_CHAIN__` placeholder (the agent/prompt wires the real chain). */
+/** Map Insomnia template tags: `{{ _.foo }}` → `{{env.foo}}`, and any `{%... %}` response-ref
+ * tag → a `__TODO_CHAIN__` placeholder (the agent/prompt wires the real chain). */
 function mapTemplateTags(text: string): string {
   return text
     .replace(new RegExp(INSOMNIA_VAR_TAG, "g"), (_m, name: string) => `{{env.${name}}}`)
@@ -72,7 +72,7 @@ function objKey(key: string): string {
 }
 
 /** Render a JSON-ish value as a pretty TS object literal (bare identifier keys, `{{...}}`
- *  templates preserved as strings). Used for request headers/body in the generated source. */
+ * templates preserved as strings). Used for request headers/body in the generated source. */
 function renderLiteral(value: unknown, indent = ""): string {
   if (value === null) return "null";
   if (typeof value === "string") return JSON.stringify(value);
@@ -129,7 +129,7 @@ interface InsomniaRequest {
   children?: InsomniaRequest[];
 }
 
-/** True if any part of a raw request still carries an Insomnia `{% ... %}` response-ref tag. */
+/** True if any part of a raw request still carries an Insomnia `{%... %}` response-ref tag. */
 function hasResponseTag(req: InsomniaRequest): boolean {
   const parts = [
     req.url ?? "",
@@ -155,7 +155,7 @@ function mapHeaders(headers: InsomniaHeader[] | undefined): Record<string, strin
 }
 
 /** Insomnia request body → a JS value: a JSON body becomes an object literal (tags mapped);
- *  any other text stays a mapped string. Absent/empty bodies yield `undefined`. */
+ * any other text stays a mapped string. Absent/empty bodies yield `undefined`. */
 function mapBody(body: InsomniaBody | undefined): unknown {
   if (!body || typeof body.text !== "string" || body.text.trim() === "") return undefined;
   const mapped = mapTemplateTags(body.text);
@@ -170,7 +170,7 @@ function mapBody(body: InsomniaBody | undefined): unknown {
 }
 
 /** The `{{secrets.*}}` KEY for a bearer token, from the referenced Insomnia var
- *  (`{{ _.apiToken }}` → `API_TOKEN`; falls back to `<DOMAIN>_TOKEN`). */
+ * (`{{ _.apiToken }}` → `API_TOKEN`; falls back to `<DOMAIN>_TOKEN`). */
 function tokenSecretKey(domain: string, token: string | undefined): string {
   const ref = token?.match(INSOMNIA_VAR_TAG);
   return ref ? upperSnake(ref[1]!) : `${upperSnake(domain)}_TOKEN`;
@@ -183,7 +183,7 @@ function identifier(name: string): string {
 }
 
 /** A name deduper: returns `base`, then `base-2`, `base-3`, … so ids/paths never collide
- *  (silent clobber/collapse otherwise loses a whole request). */
+ * (silent clobber/collapse otherwise loses a whole request). */
 function makeUniquifier(): (base: string) => string {
   const used = new Set<string>();
   return (base) => {
@@ -195,7 +195,7 @@ function makeUniquifier(): (base: string) => string {
 }
 
 /** Depth-first flatten: every request (method-bearing item) under `items`, descending into
- *  folders. Nested folders collapse into their nearest suite so no empty suite is emitted. */
+ * folders. Nested folders collapse into their nearest suite so no empty suite is emitted. */
 function collectRequests(items: InsomniaRequest[]): InsomniaRequest[] {
   const out: InsomniaRequest[] = [];
   for (const item of items) {
@@ -211,7 +211,7 @@ function todoLines(notes: string[], indent: string): string {
 }
 
 /** Per-request scaffolding extras: the resolved `authRef` (bearer only) and any TODO notes for
- *  the parts the deterministic transform can't finish (non-bearer auth, response-ref chaining). */
+ * the parts the deterministic transform can't finish (non-bearer auth, response-ref chaining). */
 function requestExtras(
   req: InsomniaRequest,
   providerFor: Map<string, string>,
@@ -248,8 +248,8 @@ function mapRequest(req: InsomniaRequest, authRef: string | undefined): Record<s
 }
 
 /** Plan one reusable bearer provider per *distinct* token across all requests, so two requests
- *  with different tokens never collapse onto one wrong credential. A collection with a single
- *  bearer token keeps the tidy `<domain>` provider id; multiple tokens disambiguate by secret. */
+ * with different tokens never collapse onto one wrong credential. A collection with a single
+ * bearer token keeps the tidy `<domain>` provider id; multiple tokens disambiguate by secret. */
 function planAuth(
   domain: string,
   requests: InsomniaRequest[],
@@ -315,9 +315,9 @@ ${todoLines(todos, "    ")}    {
   return { file: { path, content }, mapping };
 }
 
-/** Emit a `defineSuite` module for one Insomnia folder / request group (§13.1). Every request
- *  under the folder (nested folders flattened) becomes an inline node; response-ref chaining and
- *  non-bearer auth are left as TODO comments for the agent/prompt to finish. */
+/** Emit a `defineSuite` module for one Insomnia folder / request group. Every request
+ * under the folder (nested folders flattened) becomes an inline node; response-ref chaining and
+ * non-bearer auth are left as TODO comments for the agent/prompt to finish. */
 function emitSuite(
   domain: string,
   folder: InsomniaRequest,
@@ -375,7 +375,7 @@ ${nodeSrc.join("\n")}
   return { file: { path, content }, mapping };
 }
 
-/** Emit `tests/_shared/auth/<providerId>.ts` — a reusable bearer provider (§13.1). */
+/** Emit `tests/_shared/auth/<providerId>.ts` — a reusable bearer provider. */
 function emitAuth(providerId: string, secretKey: string): GeneratedFile {
   const content = `import { bearerAuth } from "@atp/engine";
 
@@ -387,7 +387,7 @@ export const ${identifier(providerId)} = bearerAuth({
   return { path: `tests/_shared/auth/${providerId}.ts`, content };
 }
 
-/** Emit `tests/_shared/env/<domain>.ts` from the collection's environment data (§13.1). */
+/** Emit `tests/_shared/env/<domain>.ts` from the collection's environment data. */
 function emitEnv(domain: string, env: InsomniaEnvironment): GeneratedFile {
   const data = env.data ?? {};
   const entries = Object.entries(data)
@@ -445,7 +445,7 @@ function mdCell(value: string): string {
   return value.replace(/\|/g, "\\|");
 }
 
-/** Render `MIGRATION.md` — the Insomnia-id → IR-id mapping table for incremental cutover (§19). */
+/** Render `MIGRATION.md` — the Insomnia-id → IR-id mapping table for incremental cutover. */
 export function renderMigration(mapping: MappingEntry[], source: string): string {
   const rows = mapping
     .map(
@@ -455,8 +455,8 @@ export function renderMigration(mapping: MappingEntry[], source: string): string
     .join("\n");
   return `# Migration — Insomnia → IR
 
-Generated by \`atp import ${source}\`. Insomnia YAML is a *source*, converted into the typed IR
-(research §19). Track cutover here and retire the Insomnia file once the namespace reaches parity.
+Generated by \`atp import ${source}\`. Insomnia YAML is a *source*, converted into the typed IR.
+Track cutover here and retire the Insomnia file once the namespace reaches parity.
 
 | Insomnia id | Insomnia name | IR id | kind | source |
 |---|---|---|---|---|
@@ -471,7 +471,7 @@ export interface WriteImportResult {
 }
 
 /** Read an Insomnia YAML export, scaffold the IR drafts + `MIGRATION.md`, and write them under
- *  `root`. The `atp import` CLI command layer; the pure transform is {@link importInsomnia}. */
+ * `root`. The `atp import` CLI command layer; the pure transform is {@link importInsomnia}. */
 export async function writeImport(yamlPath: string, root: string): Promise<WriteImportResult> {
   const yamlText = await readFile(resolve(yamlPath), "utf8");
   const { files, mapping } = importInsomnia(yamlText);

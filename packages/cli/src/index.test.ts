@@ -124,7 +124,7 @@ describe("import (Insomnia scaffolder)", () => {
   });
 });
 
-describe("import → validate (the §19 strictness gate)", () => {
+describe("import → validate (the strictness gate)", () => {
   // The drafts must compile from a root *under* the repo so `@atp/engine` resolves.
   let dir: string;
   let errors: string[];

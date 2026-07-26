@@ -4,7 +4,7 @@
     "noEmit": true,
     // The authoritative check emits nothing, so declaration-portability (TS2742) is moot.
     // Turning it off lets corpus files use the ergonomic `export default defineTest({…})`
-    // without a per-file type annotation to name the nested `zod` path (research §7.1 DX).
+    // without a per-file type annotation to name the nested `zod` path (DX).
     "declaration": false
   },
   "include": [

@@ -9,12 +9,12 @@ import type {
 import type { AuthProvider } from "./context";
 
 /**
- * Authoring entry points (research §7.1 / §7.2). `defineTest`/`defineSuite`/`defineEnv`
+ * Authoring entry points. `defineTest`/`defineSuite`/`defineEnv`
  * are typed identity functions: they keep the authored, function-carrying form intact
  * (the `params` builder and `fn` predicates the normalizer will later hash) while giving
  * IDE/type checking at authoring time. They also run cheap structural guards so obvious
  * mistakes fail fast where they're written, not at run time. `useTest`/`useStep` are the
- * by-reference composition helpers (research §12: reference, never copy).
+ * by-reference composition helpers (: reference, never copy).
  */
 export function defineTest<T extends AuthoredTestCase>(test: T): T {
   if (!test.id || typeof test.id !== "string") {
@@ -49,7 +49,7 @@ export function defineAuth<T extends AuthProvider>(provider: T): T {
   return provider;
 }
 
-/** A suite composes tests/steps into a DAG (research §7.2 / §12). */
+/** A suite composes tests/steps into a DAG. */
 export function defineSuite<T extends AuthoredSuite>(suite: T): T {
   if (!suite.id || typeof suite.id !== "string") {
     throw new Error("defineSuite: `id` must be a non-empty string");

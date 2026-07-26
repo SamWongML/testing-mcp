@@ -6,7 +6,7 @@ import { assertScope, type Scope } from "./auth";
 import type { ServerContext } from "./context";
 
 /**
- * Handler-side authorization + audit (research §15, ADR-007). The HTTP layer validates the
+ * Handler-side authorization + audit. The HTTP layer validates the
  * token and threads the {@link AuthInfo} into every request's `extra`; these helpers enforce
  * the per-tool scope and record the audit trail. Both no-op gracefully off the auth/db path so
  * the same handlers run unauthenticated in dev/test.
@@ -18,7 +18,7 @@ export interface AuthedExtra {
 }
 
 /** Enforce `required` on the caller. No-op when auth is disabled (`ctx.authn` absent); otherwise
- *  throws {@link ScopeError} (→ an MCP error result) unless the token carries the scope. */
+ * throws {@link ScopeError} (→ an MCP error result) unless the token carries the scope. */
 export function guardScope(ctx: ServerContext, extra: AuthedExtra, required: Scope): void {
   if (!ctx.authn) return;
   assertScope(extra.authInfo?.scopes, required);
@@ -36,7 +36,7 @@ export interface AuditRunInput {
 }
 
 /** Keys whose values are masked before an audit row is written. Matched case-insensitively as a
- *  substring, so `password`, `apiKey`, `access_token`, and `clientSecret` all hit. */
+ * substring, so `password`, `apiKey`, `access_token`, and `clientSecret` all hit. */
 const SECRET_KEY_PATTERN = /pass|secret|token|credential|api[-_]?key|authorization|cookie/i;
 
 const AUDIT_MASK = "[REDACTED]";
@@ -55,7 +55,7 @@ function redactValue(value: unknown): unknown {
 }
 
 /**
- * Mask secret-shaped params before they are persisted to `audit_log` (§21 "redact before
+ * Mask secret-shaped params before they are persisted to `audit_log` ("redact before
  * persist"). This is **key**-based on purpose: the engine's `redact()` masks known secret
  * *values* inside request/response snapshots, but a tool-call `params` bag is arbitrary caller
  * input whose secrets are only identifiable by name — the corpus's own `identity.login` takes a
@@ -68,8 +68,8 @@ export function redactAuditParams(
   return redactValue(params) as Record<string, unknown>;
 }
 
-/** Record a run-invoking call in the audit log (§16.1). No-op without a db (the audit log lives
- *  in Postgres); the principal + scopes come from the validated token. */
+/** Record a run-invoking call in the audit log. No-op without a db (the audit log lives
+ * in Postgres); the principal + scopes come from the validated token. */
 export async function auditRun(
   ctx: ServerContext,
   extra: AuthedExtra,

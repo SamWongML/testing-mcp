@@ -8,16 +8,16 @@ import {
 import { ConsoleSpanExporter, type SpanExporter } from "@opentelemetry/sdk-trace-base";
 
 /**
- * Telemetry destination selection (P11; research §15, ADR-008). `initTelemetry` takes the
+ * Telemetry destination selection. `initTelemetry` takes the
  * exporters as arguments — this is the piece that turns configuration into them, so the
- * P11 `observability` CDK stack's collector endpoint is all that changes between dev and
+ * `observability` CDK stack's collector endpoint is all that changes between dev and
  * production. Tests inject in-memory exporters and never go through here.
  */
 
 export interface ExporterConfig {
   OTEL_EXPORTER?: "console" | "otlp";
   /** Base OTLP/HTTP endpoint of the collector (the ADOT sidecar / gateway), e.g.
-   *  `http://localhost:4318`. Signal paths (`/v1/traces`, `/v1/metrics`) are appended. */
+   * `http://localhost:4318`. Signal paths (`/v1/traces`, `/v1/metrics`) are appended. */
   OTEL_EXPORTER_OTLP_ENDPOINT?: string;
   /** How often metrics are pushed to the collector. */
   OTEL_METRIC_EXPORT_INTERVAL_MS?: number;

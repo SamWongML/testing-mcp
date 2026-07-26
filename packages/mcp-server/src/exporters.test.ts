@@ -7,7 +7,7 @@ import { resolveExporters } from "./exporters";
 
 /**
  * The exporter *selection* is the seam: which destination telemetry goes to is a deployment
- * decision (console in dev, OTLP → the CloudWatch/X-Ray collector in production, P11's
+ * decision (console in dev, OTLP → the CloudWatch/X-Ray collector in production,
  * observability stack) and everything downstream — `withSpan`, `RunMetrics` — is unchanged.
  */
 describe("resolveExporters", () => {

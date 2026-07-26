@@ -4,7 +4,7 @@ import { diagnose } from "./diagnose";
 import { escapeXml, fmtValue, ms } from "./util";
 
 /**
- * Self-contained HTML report (research §14) — a single file with inlined CSS and no
+ * Self-contained HTML report — a single file with inlined CSS and no
  * external references, for humans: a status header, the heuristic likely cause, and an
  * execution timeline where each step's redacted request/response trace is expandable via
  * a native `<details>` element (no JS needed). Every dynamic value is HTML-escaped.

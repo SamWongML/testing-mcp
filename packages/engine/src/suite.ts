@@ -4,7 +4,7 @@ import { topoSort } from "./graph";
 import { resolveParams } from "./params";
 
 /**
- * Suite normalization (research §7.2 / §12): flatten an authored suite's node map into
+ * Suite normalization: flatten an authored suite's node map into
  * an ordered, executable plan the DAG runner consumes.
  *
  * Each authored node — a `useTest` reference, a `useStep` reference, or an inline step —
@@ -25,14 +25,14 @@ export interface PlanNode {
 }
 
 /** Discriminate an authored definition: a suite has a `nodes` map, a test has `steps`.
- *  This authored-vs-suite fork is the core mental model (CLAUDE.md); it lives here as the
- *  one canonical guard the normalizer and downstream consumers (e.g. the CLI) share. */
+ * This authored-vs-suite fork is the core mental model (CLAUDE.md); it lives here as the
+ * one canonical guard the normalizer and downstream consumers (e.g. the CLI) share. */
 export function isSuite(def: AuthoredTestCase | AuthoredSuite): def is AuthoredSuite {
   return "nodes" in def;
 }
 
 /** Resolve a `useTest` node's params, wrapping Zod failures with the node context
- *  (mirrors the single-test runner's friendly `invalid params:` message). */
+ * (mirrors the single-test runner's friendly `invalid params:` message). */
 function resolveNodeParams(
   id: string,
   test: AuthoredTestCase,

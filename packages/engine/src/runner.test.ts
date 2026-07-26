@@ -22,7 +22,7 @@ afterEach(async () => {
   await agent.close();
 });
 
-describe("runTest — happy path (research §7.1)", () => {
+describe("runTest — happy path", () => {
   const login = defineTest({
     id: "identity.login",
     version: 1,
@@ -452,7 +452,7 @@ describe("runTest — cancellation", () => {
   });
 });
 
-describe("runTest — onProgress (P8 worker k/n progress)", () => {
+describe("runTest — onProgress (worker k/n progress)", () => {
   it("fires onProgress once per executed step with completed/total and the step id", async () => {
     const pool = agent.get("https://api.example.com");
     pool.intercept({ path: "/one", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
@@ -479,7 +479,7 @@ describe("runTest — onProgress (P8 worker k/n progress)", () => {
   });
 });
 
-describe("runTest — matrix cell execution (§7.3)", () => {
+describe("runTest — matrix cell execution", () => {
   it("runs one cell with {{matrix.*}} populated and the per-cell env applied", async () => {
     agent
       .get("https://us.api.example.com")

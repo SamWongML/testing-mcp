@@ -16,7 +16,7 @@ import { loadTrace } from "./run-store";
 import { injectTraceContext, type TraceCarrier } from "./telemetry";
 
 /**
- * Task-lifecycle glue (SEP-1686 §11.1) mapping the async run surface onto P6's durable
+ * Task-lifecycle glue (SEP-1686) mapping the async run surface onto durable
  * queue (`jobs`) + hot task state (`tasks`). A submission durably enqueues a job **and**
  * creates the `working` task row in one transaction; the worker later claims the job, runs
  * the engine, and drives the task to a terminal state. `getRun`/`getRunResult`/`cancelRun`
@@ -29,18 +29,18 @@ import { injectTraceContext, type TraceCarrier } from "./telemetry";
 export const DEFAULT_TASK_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** The serializable run spec stored in `jobs.spec` — everything the worker needs to execute
- *  an entry. `entryId` addresses the manifest; the worker derives kind from the entry. */
+ * an entry. `entryId` addresses the manifest; the worker derives kind from the entry. */
 export interface RunSpec {
   entryId: string;
   params?: Record<string, unknown>;
   env?: Record<string, string>;
   /** W3C trace context of the submitting request, so the worker's run span joins the same
-   *  trace across the process boundary (§15). Absent when telemetry is off. */
+   * trace across the process boundary. Absent when telemetry is off. */
   trace?: TraceCarrier;
 }
 
 /** Narrow the opaque `jobs.spec` jsonb back to a `RunSpec` (defensive — a malformed spec is
- *  a worker-side error, surfaced as a failed run rather than a crash). */
+ * a worker-side error, surfaced as a failed run rather than a crash). */
 export function parseSpec(spec: unknown): RunSpec {
   if (typeof spec !== "object" || spec === null || !("entryId" in spec)) {
     throw new Error("job spec is missing entryId");
@@ -56,8 +56,8 @@ export function parseSpec(spec: unknown): RunSpec {
 }
 
 /** Map an engine `ExecutionStatus` onto the SEP-1686 terminal `TaskState`. A run that
- *  errored (an infra/config fault) is reported as a failed task — the distinction is kept
- *  in the persisted result's own `status`/`error`. */
+ * errored (an infra/config fault) is reported as a failed task — the distinction is kept
+ * in the persisted result's own `status`/`error`. */
 export function resultStateFor(status: ExecutionStatus): TaskState {
   switch (status) {
     case "passed":
@@ -70,7 +70,7 @@ export function resultStateFor(status: ExecutionStatus): TaskState {
 }
 
 /** Require a configured db for the async path, with a client-facing message. Shared by the
- *  worker and the SDK task adapter (which pass their own message). */
+ * worker and the SDK task adapter (which pass their own message). */
 export function requireDb(
   ctx: ServerContext,
   message = "asynchronous runs require a configured run database (set DATABASE_URL)",
@@ -80,7 +80,7 @@ export function requireDb(
 }
 
 /**
- * Resolve the hot task store for this deployment (P11). Absent provider ⇒ the stage-1
+ * Resolve the hot task store for this deployment. Absent provider ⇒ the stage-1
  * Postgres store bound to `db` (which may be a transaction). Every task read/write in this
  * package goes through here, which is what makes Postgres↔DynamoDB a config switch.
  */
@@ -90,15 +90,15 @@ export function taskStoreFor(ctx: ServerContext, db: Db): TaskStateStore {
 
 export interface SubmitRunInput extends RunSpec {
   /** Dedupe key: a resubmission with the same key returns the original run instead of
-   *  enqueuing a duplicate (idempotency, research §16.2). Becomes the `runId`. */
+   * enqueuing a duplicate (idempotency). Becomes the `runId`. */
   idempotencyKey?: string;
   /** Higher runs first in the queue. */
   priority?: number;
   /** Result-retention TTL; defaults to {@link DEFAULT_TASK_TTL_MS}. */
   ttlMs?: number;
-  /** Run this on a dedicated one-off Fargate task rather than the shared pool (§11.3 mode 2).
-   *  For very long or resource-hungry runs that would otherwise monopolise a pooled worker.
-   *  Requires the escape hatch to be configured; ignored (with a log) when it is not. */
+  /** Run this on a dedicated one-off Fargate task rather than the shared pool (mode 2).
+   * For very long or resource-hungry runs that would otherwise monopolise a pooled worker.
+   * Requires the escape hatch to be configured; ignored (with a log) when it is not. */
   isolated?: boolean;
 }
 
@@ -114,12 +114,12 @@ export interface SubmittedRun {
  * idempotency key. Two shapes, chosen by which task store is configured:
  *
  * - **Postgres (stage 1, transactional).** Both writes happen in one transaction, and the
- *   insert-only `create` *is* the dedupe — so the idempotency key has to *be* the run id.
+ * insert-only `create` *is* the dedupe — so the idempotency key has to *be* the run id.
  * - **DynamoDB (stage 2).** The task store is external to the queue, so a dedicated
- *   `idempotency` table (§16.2) elects the run id first and the task item is created before
- *   the job is enqueued. A crash between the two leaves a `working` task with no job, which
- *   expires by TTL; an enqueue *error* is surfaced by failing the task rather than leaving a
- *   client polling something no worker will ever run.
+ * `idempotency` table elects the run id first and the task item is created before
+ * the job is enqueued. A crash between the two leaves a `working` task with no job, which
+ * expires by TTL; an enqueue *error* is surfaced by failing the task rather than leaving a
+ * client polling something no worker will ever run.
  */
 export async function submitRun(ctx: ServerContext, input: SubmitRunInput): Promise<SubmittedRun> {
   const db = requireDb(ctx);
@@ -188,7 +188,7 @@ export async function submitRun(ctx: ServerContext, input: SubmitRunInput): Prom
 }
 
 /**
- * Launch a dedicated Fargate worker for an already-enqueued run (§11.3 mode 2). Deliberately
+ * Launch a dedicated Fargate worker for an already-enqueued run (mode 2). Deliberately
  * best-effort: the job is durable and the shared pool is the backstop, so a throttled or
  * capacity-starved `RunTask` degrades to "runs a bit later" rather than failing the
  * submission the caller has already been told is durable.
@@ -227,7 +227,7 @@ export interface RunResult {
   /** Pointer to the persisted artifacts, present when a trace was written. */
   artifactUri?: string;
   /** Terminal diagnostic when the run produced no trace (cancelled while still queued, or an
-   *  error before execution) — surfaced instead of the absent report. */
+   * error before execution) — surfaced instead of the absent report. */
   error?: string;
 }
 
@@ -251,8 +251,8 @@ export async function getRunResult(ctx: ServerContext, runId: string): Promise<R
 }
 
 /** Request cancellation: flag the job (so a running worker aborts between nodes) and the
- *  task row. The worker finalizes the terminal `cancelled` state. Returns whether a
- *  non-terminal run was flagged. */
+ * task row. The worker finalizes the terminal `cancelled` state. Returns whether a
+ * non-terminal run was flagged. */
 export async function cancelRun(ctx: ServerContext, runId: string): Promise<boolean> {
   const db = requireDb(ctx);
   const tasks = taskStoreFor(ctx, db);

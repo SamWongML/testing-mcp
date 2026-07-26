@@ -5,7 +5,7 @@ import type { Db } from "./db/client";
 import { assertionResults, runs, stepResults } from "./db/schema";
 
 /**
- * Run history — the record (research §16.1). `recordRun` persists an `ExecutionResult`
+ * Run history — the record. `recordRun` persists an `ExecutionResult`
  * as a `runs` row plus its `step_results` and `assertion_results` in one transaction;
  * `listRuns` is the flakiness-friendly history query the MCP `list_runs` tool serves.
  */
@@ -80,7 +80,7 @@ export interface ListRunsFilter {
   limit?: number;
 }
 
-/** History query, newest first — filter by test, status, and recency (§16.1). */
+/** History query, newest first — filter by test, status, and recency. */
 export async function listRuns(db: Db, filter: ListRunsFilter = {}): Promise<Run[]> {
   const conds = [];
   if (filter.entryId !== undefined) conds.push(eq(runs.entryId, filter.entryId));

@@ -5,9 +5,9 @@ import { matrixSchema, stepSchema } from "./test";
 import { uniqueById } from "./util";
 
 /**
- * Suites compose tests/steps into a DAG (research §7.2 / §12).
+ * Suites compose tests/steps into a DAG.
  *
- * Authored suites key nodes by id (`nodes: { auth: useTest(...), ... }`) and a node
+ * Authored suites key nodes by id (`nodes: { auth: useTest(...),... }`) and a node
  * may be a reused test, a reused step, or an inline step. The normalizer inlines all
  * three into concrete request nodes, so the *normalized* node here is simply a step
  * with explicit `needs` edges — the array form the manifest loads.
@@ -36,7 +36,7 @@ export type Suite = z.infer<typeof suiteSchema>;
 
 export interface UseTestNode {
   use: "test";
-  /** The reused test, embedded by reference (research §12: reference, never copy). */
+  /** The reused test, embedded by reference (: reference, never copy). */
   test: AuthoredTestCase;
   /** Override the reused test's params. */
   params?: Record<string, unknown>;
@@ -48,7 +48,7 @@ export interface UseStepNode {
   /** The reused shared step, embedded by reference. */
   step: AuthoredStep;
   /** Bind the reused step's inputs, exposed to it as `{{params.*}}`
-   *  (e.g. `{ token: "{{nodes.auth.authToken}}" }`). */
+   * (e.g. `{ token: "{{nodes.auth.authToken}}" }`). */
   with?: Record<string, unknown>;
   needs?: string[];
 }
@@ -67,7 +67,7 @@ export interface AuthoredSuite {
   timeoutMs?: number;
   env?: AuthoredEnv;
   matrix?: Record<string, unknown[]>;
-  /** Force Task augmentation (P8). If omitted, the normalizer infers from timeoutMs. */
+  /** Force Task augmentation. If omitted, the normalizer infers from timeoutMs. */
   isLongRunning?: boolean;
   /** Authored nodes are keyed by node id. */
   nodes: Record<string, AuthoredSuiteNode>;

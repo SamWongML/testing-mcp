@@ -5,7 +5,7 @@ import { sendRequest } from "./http";
 import { resolveTemplates } from "./variables";
 
 /**
- * Authentication providers (research §10.2/§10.3). A step's `request.authRef` names a
+ * Authentication providers. A step's `request.authRef` names a
  * provider; `applyAuth` looks it up in the run's registry and lets it inject credentials
  * into the already-template-resolved request. Providers are the reusable building block
  * that lives in `tests/_shared/auth` — `bearer`, `basic`, `api-key`,

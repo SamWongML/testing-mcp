@@ -4,7 +4,7 @@ import { diagnose } from "./diagnose";
 import { ms } from "./util";
 
 /**
- * `llm_summary` (research §14) — a compact, token-efficient synopsis an autonomous agent
+ * `llm_summary` — a compact, token-efficient synopsis an autonomous agent
  * can act on without reading the full trace: what ran, what failed, the likely cause, and
  * the next action. A passing run is a single line; a failure adds the offending steps and
  * the heuristic diagnosis.

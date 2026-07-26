@@ -4,7 +4,7 @@ import { listAudit, recordAudit } from "./audit";
 import { makeTestDb, pgAvailable, type TestDb } from "./db/test-db";
 
 /**
- * The audit log (research §15/§16.1): who invoked which run with which params and scopes,
+ * The audit log: who invoked which run with which params and scopes,
  * fed by the OAuth identity. pg-gated — skips offline like the rest of the store suite.
  */
 describe.skipIf(!pgAvailable)("audit log", () => {

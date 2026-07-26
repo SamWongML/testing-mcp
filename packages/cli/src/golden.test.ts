@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { goldenAssertions, goldenFromResult, renderAssertions } from "./golden";
 
 /**
- * Golden-master parity (research §19 step 4): capture a baseline response for a migrated
+ * Golden-master parity (step 4): capture a baseline response for a migrated
  * request, derive assertions that prove a re-run reproduces it (status + key-field shape).
  */
 describe("goldenAssertions — baseline → parity assertions", () => {

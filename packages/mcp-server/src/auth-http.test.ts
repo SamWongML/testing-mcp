@@ -20,7 +20,7 @@ import {
 } from "./testkit";
 
 /**
- * Auth over the wire (research §15, ADR-007). Proves the P10 exit criterion end to end: with
+ * Auth over the wire, end to end: with
  * auth enabled the server rejects unauthenticated + under-scoped calls and admits properly
  * scoped ones, and advertises RFC 9728 metadata for discovery. Uses a real Streamable-HTTP
  * round-trip with an `Authorization` header, against the offline test authenticator.
@@ -54,8 +54,8 @@ describe("auth-enabled HTTP surface", () => {
   };
 
   /** A raw JSON-RPC POST to `/mcp` — the seam the SEP-1686 `tasks/*` methods arrive on. The SDK
-   *  client can't easily be made to issue an unscoped `tasks/*` call, and these assertions are
-   *  about the HTTP gate itself, so they're made against the wire directly. */
+   * client can't easily be made to issue an unscoped `tasks/*` call, and these assertions are
+   * about the HTTP gate itself, so they're made against the wire directly. */
   const rpc = (method: string, token?: string): Promise<Response> =>
     fetch(`${http.url}/mcp`, {
       method: "POST",
@@ -120,7 +120,7 @@ describe("auth-enabled HTTP surface", () => {
   // The SEP-1686 `tasks/*` JSON-RPC methods are handled *generically* by the SDK's `Protocol`
   // (straight into the injected `SdkTaskStore`), so they never reach a tool handler and cannot
   // be gated by `guardScope`. They are gated at the HTTP layer instead — these tests are the
-  // regression barrier for that bypass (P10 review Blocker).
+  // regression barrier for that bypass.
   it("denies tasks/cancel to a read-only token — it mutates, so it needs test:run", async () => {
     const res = await rpc("tasks/cancel", await auth.mint({ scopes: [SCOPES.READ] }));
     expect(res.status).toBe(403);
@@ -177,7 +177,7 @@ describe("auth-enabled HTTP surface", () => {
 });
 
 /**
- * The durable half of the `tasks/*` bypass (P10 review Blocker). The tests above prove the HTTP
+ * The durable half of the `tasks/*` bypass. The tests above prove the HTTP
  * gate answers 403; this proves the *effect* is actually prevented — with the async surface
  * really registered (it only exists when a db is configured), an under-scoped `tasks/cancel`
  * must not reach `SdkTaskStore` and must leave the run's durable cancel flag untouched.

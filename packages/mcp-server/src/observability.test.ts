@@ -23,7 +23,7 @@ import {
 import { claimAndRun } from "./worker";
 
 /**
- * Observability end-to-end (research §15) — the P10 exit criterion that a full async run emits
+ * Observability end-to-end — a full async run emits
  * correlated logs + spans + metrics, plus audit rows on run-invoking calls. Gated on
  * `ATP_TEST_DATABASE_URL` (the durable queue is Postgres); telemetry is read back through
  * in-memory exporters, so no collector is needed.
@@ -104,7 +104,7 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
   it("links the worker's run span to the submitting request's trace (one trace, two processes)", async () => {
     // The enqueue→claim hop crosses a process boundary, so without a W3C `traceparent` in the
     // job spec the worker would start a brand-new trace and agent→server→worker→SUT would be
-    // three disconnected traces (the P10 gap).
+    // three disconnected traces.
     const submitSpan = tel.tracer.startSpan("mcp submit");
     const submitTraceId = submitSpan.spanContext().traceId;
     const { runId } = await context.with(trace.setSpan(context.active(), submitSpan), () =>
@@ -145,7 +145,7 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
 
   it("never persists a secret-shaped param to the audit log", async () => {
     // `identity.login` really declares a `password` param, so this is the live leak path, not a
-    // hypothetical one (P10 review Major).
+    // hypothetical one.
     const conn = await connectClient(ctx);
     try {
       await conn.client.callTool({

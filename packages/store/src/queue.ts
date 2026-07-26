@@ -6,8 +6,7 @@ import type { Db } from "./db/client";
 import { jobs } from "./db/schema";
 
 /**
- * Durable job queue on Postgres — the no-broker dispatch pattern (research §11.2,
- * ADR-004). A worker claims exactly one job with `FOR UPDATE SKIP LOCKED` so many
+ * Durable job queue on Postgres — the no-broker dispatch pattern ( * ). A worker claims exactly one job with `FOR UPDATE SKIP LOCKED` so many
  * workers contend safely; a heartbeat keeps the lease fresh and a reaper requeues
  * jobs whose worker died. Cancellation is a `cancel_requested` flag the worker polls
  * between nodes.
@@ -43,10 +42,10 @@ export async function enqueue(db: Db, input: EnqueueInput = {}): Promise<Job> {
 }
 
 export interface ClaimOptions {
-  /** Claim only this run's job. Used by the §11.3 mode-2 one-off worker, which exists to
-   *  give one *particular* run a dedicated container — an untargeted claim would let it
-   *  pick up whatever is at the head of the queue instead. `null` if that job is no longer
-   *  claimable (a pooled worker got there first), which is a clean exit, not an error. */
+  /** Claim only this run's job. Used by the mode-2 one-off worker, which exists to
+   * give one *particular* run a dedicated container — an untargeted claim would let it
+   * pick up whatever is at the head of the queue instead. `null` if that job is no longer
+   * claimable (a pooled worker got there first), which is a clean exit, not an error. */
   runId?: string;
 }
 
@@ -141,7 +140,7 @@ export async function requestCancel(db: Db, runId: string): Promise<boolean> {
 
 /**
  * The number of ready-to-claim jobs — `queued` and past their `run_after`. This is the
- * `queue_depth` metric (§15) that drives worker autoscaling: it counts work waiting for a
+ * `queue_depth` metric that drives worker autoscaling: it counts work waiting for a
  * worker, excluding claimed (`running`) and future-scheduled jobs.
  */
 export async function queueDepth(db: Db): Promise<number> {

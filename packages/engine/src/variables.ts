@@ -2,14 +2,14 @@ import type { RunContext } from "./context";
 import { getBySegments, mapDeepStrings } from "./util";
 
 /**
- * `{{scope.path}}` template resolution against a scoped `RunContext` (research §10.2).
+ * `{{scope.path}}` template resolution against a scoped `RunContext`.
  *
  * Scopes: `env`, `params`, `secrets`, `matrix`, `vars`, `nodes` (`nodes.X.var`).
  * Two substitution modes:
- *  - **whole-value** — a string that is exactly one template (`"{{params.count}}"`)
- *    resolves to the raw value, preserving its type (number, object, …).
- *  - **interpolation** — templates embedded in text (`"{{env.baseUrl}}/login"`)
- *    are stringified in place.
+ * - **whole-value** — a string that is exactly one template (`"{{params.count}}"`)
+ * resolves to the raw value, preserving its type (number, object, …).
+ * - **interpolation** — templates embedded in text (`"{{env.baseUrl}}/login"`)
+ * are stringified in place.
  * Resolution is recursive (bounded): a value that is itself a template — e.g. a
  * param default of `"{{secrets.QA_PASSWORD}}"` — is resolved again.
  */

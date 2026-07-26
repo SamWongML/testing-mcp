@@ -4,7 +4,7 @@ import type { Db } from "./db/client";
 import { auditLog } from "./db/schema";
 
 /**
- * Audit log (research §15/§16.1) — the durable record of who invoked which run, with which
+ * Audit log — the durable record of who invoked which run, with which
  * params and scopes, fed by the OAuth identity. Written on every run-invoking MCP call so a
  * run is always attributable; queryable for security review.
  */

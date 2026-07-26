@@ -29,7 +29,7 @@ const options = {
 };
 
 describe("createEcsRunTaskLauncher", () => {
-  it("launches a one-shot Fargate worker for a single run (§11.3 mode 2)", async () => {
+  it("launches a one-shot Fargate worker for a single run (mode 2)", async () => {
     const { client, sent } = fakeEcs();
     const launcher = createEcsRunTaskLauncher({ client, ...options });
 

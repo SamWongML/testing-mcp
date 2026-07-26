@@ -3,7 +3,7 @@ import { request } from "undici";
 import type { EngineResponse, ResolvedRequest } from "./context";
 
 /**
- * undici-based HTTP client (research §4.2, §10.3). Captures timing, enforces a
+ * undici-based HTTP client. Captures timing, enforces a
  * per-step timeout, and threads an `AbortSignal` for cooperative cancellation. Uses
  * undici's global dispatcher so tests intercept with `MockAgent` — no live network.
  *

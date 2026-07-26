@@ -1,5 +1,5 @@
 /**
- * The DynamoDB item shape for the hot task state + idempotency tables (research §16.2).
+ * The DynamoDB item shape for the hot task state + idempotency tables.
  * Attribute names are snake_case to match the research spec and the CDK table definitions,
  * and several of them (`state`, `error`, `ttl`) are DynamoDB reserved words — every
  * expression that mentions one must alias it through `ExpressionAttributeNames`.

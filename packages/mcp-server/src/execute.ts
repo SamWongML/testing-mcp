@@ -7,10 +7,10 @@ import type { ExecutionResult, ManifestEntry } from "@atp/schema";
 import type { ServerContext } from "./context";
 
 /**
- * The shared execution seam (research §10.3, §12). Imports the authored definition (which
+ * The shared execution seam. Imports the authored definition (which
  * carries the functions the manifest strips), enumerates its matrix cell, and dispatches to
  * `runTest`/`runSuite` — the single code path used by both the synchronous inline `run_test`
- * tool and the asynchronous P8 worker. The worker adds `signal` (cancellation), `runId`
+ * tool and the asynchronous worker. The worker adds `signal` (cancellation), `runId`
  * (so the durable task and the engine result share an id), and `onProgress` (k/n ticks).
  */
 export interface ExecuteOptions {

@@ -49,7 +49,7 @@ describe("validate", () => {
   });
 
   it("finds no strictness violations in the sample corpus", async () => {
-    // Every corpus node pins an exact status or a body field, so the §19 rules are green on
+    // Every corpus node pins an exact status or a body field, so the strictness rules are green on
     // `main` — the check imposes no migration burden on the existing tests.
     expect((await validate(repoRoot)).violations).toEqual([]);
   });
@@ -61,7 +61,7 @@ describe("runById", () => {
     expect(result.status).toBe("passed");
     expect(result.entryId).toBe("identity.login");
     expect(result.metrics.failedAssertions).toBe(0);
-    // The run records provenance (research §21).
+    // The run records provenance.
     expect(result.manifestHash).toMatch(/^sha256:/);
   });
 

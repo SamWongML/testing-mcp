@@ -4,7 +4,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { ArtifactStore, PutResult } from "../artifacts";
 
 /**
- * S3-backed artifacts (research §16.3, ADR-005) behind the same {@link ArtifactStore} seam
+ * S3-backed artifacts behind the same {@link ArtifactStore} seam
  * as `LocalArtifactStore`: blobs (trace.json, report.html/md, logs) live in the bucket,
  * only pointers live in Postgres. Keys come from `artifactKey()` — the shared
  * `{env}/{yyyy}/{mm}/{dd}/{runId}/{name}` layout the bucket's lifecycle rules partition on.
@@ -53,8 +53,8 @@ export class S3ArtifactStore implements ArtifactStore {
     return Buffer.from(await Body.transformToByteArray());
   }
 
-  /** A time-limited HTTPS URL the holder can GET with no AWS credentials (§16.3) — how
-   *  `get_report` and the `run://` resources hand large artifacts to agents and humans. */
+  /** A time-limited HTTPS URL the holder can GET with no AWS credentials — how
+   * `get_report` and the `run://` resources hand large artifacts to agents and humans. */
   async presign(key: string, expiresSec: number = this.presignExpiresSec): Promise<string> {
     return getSignedUrl(
       this.client,

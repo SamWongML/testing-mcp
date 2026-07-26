@@ -10,7 +10,7 @@ import { cancelRun, DEFAULT_TASK_TTL_MS, getRun, getRunResult, submitRun } from 
 import { findEntry, jsonResult, selectEntries, textResult } from "./tools";
 
 /**
- * The P8 asynchronous run surface (research §8.2/§8.5). `run_suite` is task-augmented
+ * The asynchronous run surface. `run_suite` is task-augmented
  * (SEP-1686): a task-speaking client drives it via `tasks/get|result|cancel`, backed by the
  * {@link SdkTaskStore} adapter. `run_selection` (batch) and the `get_run`/`get_run_result`/
  * `cancel_run` mirror tools give the *same* durable semantics to clients that don't speak
@@ -25,11 +25,11 @@ const idArg = z.string().describe('The test or suite id, e.g. "billing.e2e-refun
 const paramsArg = z
   .record(z.string(), z.unknown())
   .optional()
-  .describe("Values for the entry's params schema (see describe_test).");
+.describe("Values for the entry's params schema (see describe_test).");
 const envArg = z
   .record(z.string(), z.string())
   .optional()
-  .describe("Env overrides merged over the entry's baked-in env, e.g. { baseUrl }.");
+.describe("Env overrides merged over the entry's baked-in env, e.g. { baseUrl }.");
 const isolatedArg = z
   .boolean()
   .optional()
@@ -38,8 +38,8 @@ const isolatedArg = z
   );
 
 /** `run_suite` — task-augmented (SEP-1686). The `createTask` handler mints a durable task +
- *  job (via the injected task store) that the worker executes; `getTask`/`getTaskResult`
- *  read the same durable run. Suites are long-running, so task augmentation is required. */
+ * job (via the injected task store) that the worker executes; `getTask`/`getTaskResult`
+ * read the same durable run. Suites are long-running, so task augmentation is required. */
 export function registerRunSuite(server: McpServer, ctx: ServerContext): void {
   server.experimental.tasks.registerToolTask(
     "run_suite",
@@ -86,7 +86,7 @@ export function registerRunSuite(server: McpServer, ctx: ServerContext): void {
 }
 
 /** `run_selection` — submit an async run for every catalog entry matching a tag/query batch,
- *  returning their run ids (poll each via `get_run`). The plain, non-Task batch surface. */
+ * returning their run ids (poll each via `get_run`). The plain, non-Task batch surface. */
 export function registerRunSelection(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     "run_selection",
@@ -153,7 +153,7 @@ export function registerGetRun(server: McpServer, ctx: ServerContext): void {
 }
 
 /** `get_run_result` — mirror of `tasks/result`: the rendered report once the run is terminal,
- *  else the current state with `ready:false` so a poller keeps waiting. */
+ * else the current state with `ready:false` so a poller keeps waiting. */
 export function registerGetRunResult(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     "get_run_result",
@@ -166,7 +166,7 @@ export function registerGetRunResult(server: McpServer, ctx: ServerContext): voi
         format: z
           .enum(REPORT_FORMATS as [ReportFormat, ...ReportFormat[]])
           .optional()
-          .describe("Report format; defaults to markdown."),
+.describe("Report format; defaults to markdown."),
       },
     },
     async ({ runId, format }, extra) => {

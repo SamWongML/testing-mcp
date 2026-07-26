@@ -11,7 +11,7 @@ import { matchesJsonSchema } from "./jsonschema";
 import { deepEqual, getByPath } from "./util";
 
 /**
- * Assertion evaluation (research §10.2). Consumes *authored* assertions — the
+ * Assertion evaluation. Consumes *authored* assertions — the
  * declarative `{ path, op, value }` form and the `fn` escape hatch, which the
  * engine executes directly against the response `{ status, headers, body }`.
  */

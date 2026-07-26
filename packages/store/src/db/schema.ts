@@ -11,8 +11,8 @@ import {
 
 /**
  * Drizzle schema — the typed query surface over the Postgres system-of-record + queue
- * (research §16.1) plus the stage-1 `tasks` table that collapses DynamoDB's hot task
- * state into Postgres while the corpus is small (§18 "dozens" row, ADR-004/005).
+ * plus the stage-1 `tasks` table that collapses DynamoDB's hot task
+ * state into Postgres while the corpus is small ("dozens" row).
  *
  * The authoritative DDL lives in `migrations/*.sql` (hand-authored, applied by
  * `migrate()`); this file mirrors it for typed inserts/selects and is kept in sync by
@@ -42,7 +42,7 @@ export const catalogEntries = pgTable(
   (t) => [primaryKey({ columns: [t.manifestHash, t.id] })],
 );
 
-/** Durable job queue claimed with `FOR UPDATE SKIP LOCKED` (§11.2). */
+/** Durable job queue claimed with `FOR UPDATE SKIP LOCKED`. */
 export const jobs = pgTable("jobs", {
   id: text("id").primaryKey(),
   runId: text("run_id"),
@@ -60,9 +60,9 @@ export const jobs = pgTable("jobs", {
 export const runs = pgTable("runs", {
   id: text("id").primaryKey(),
   entryId: text("entry_id"),
-  // Reproducibility (§21 invariant): every run records the manifest hash + git sha it
+  // Reproducibility (invariant): every run records the manifest hash + git sha it
   // ran against. gitSha is denormalized onto the run (not only `manifests`) so a run row
-  // is self-describing without waiting on the P7 catalog-snapshot writer.
+  // is self-describing without waiting on the catalog-snapshot writer.
   manifestHash: text("manifest_hash"),
   gitSha: text("git_sha"),
   status: text("status"),
@@ -110,7 +110,7 @@ export const auditLog = pgTable("audit_log", {
 });
 
 /**
- * Stage-1 task state (§18): the fields DynamoDB would hold (§16.2), kept in Postgres
+ * Stage-1 task state: the fields DynamoDB would hold, kept in Postgres
  * so "dozens" scale needs no second datastore. `expiresAt` is the TTL analog — a
  * cleanup deletes rows past it, mirroring DynamoDB's TTL result expiry.
  */

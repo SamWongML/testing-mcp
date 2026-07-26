@@ -4,7 +4,7 @@ import { z } from "zod";
 import { deriveParamsSchema, jsonSchemaSchema, zodToJsonSchema } from "./params";
 
 describe("deriveParamsSchema", () => {
-  it("derives a JSON Schema from an authored params builder (§7.1)", () => {
+  it("derives a JSON Schema from an authored params builder", () => {
     const jsonSchema = deriveParamsSchema((z) =>
       z.object({
         email: z.string().email().default("qa@example.com"),

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { redactAuditParams } from "./guard";
 
 /**
- * Audit-param redaction (§21 "redact before persist", applied to the audit log). The engine's
+ * Audit-param redaction ("redact before persist", applied to the audit log). The engine's
  * `redact()` is *value*-based — it masks known secret values inside request/response snapshots —
  * so it cannot help here: a tool-call `params` bag is arbitrary caller input whose secrets are
  * identifiable only by key. The corpus's own `identity.login` declares a `password` param, so an

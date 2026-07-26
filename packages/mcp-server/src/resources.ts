@@ -10,7 +10,7 @@ import { loadTrace } from "./run-store";
 import { findEntry } from "./tools";
 
 /**
- * The read-only resource surface (research §8). Resources mirror the tools as addressable,
+ * The read-only resource surface. Resources mirror the tools as addressable,
  * cacheable URIs: `test://catalog` and `test://{id}` expose the boot manifest; the
  * `run://{runId}/…` templates expose a persisted run's report and canonical trace. Every
  * read resolves against the injected {@link ServerContext} only — no per-request state.

@@ -3,7 +3,7 @@ import type { RetryOn, RetryPolicy } from "@atp/schema";
 import { sleep } from "./util";
 
 /**
- * Per-step retry (research §10.2/§10.3). The caller runs one attempt and reports
+ * Per-step retry. The caller runs one attempt and reports
  * which retryable conditions it hit (`network`, `4xx`, `5xx`, `assertion`);
  * `withRetry` re-runs while an attempt remains and at least one reported condition
  * is in the policy's `on` list, honoring `backoffMs` and cooperative cancellation.

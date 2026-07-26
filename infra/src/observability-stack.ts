@@ -15,7 +15,7 @@ import {
 } from "./metrics";
 
 /**
- * Dashboards + alarms over the metrics P10's `RunMetrics` publishes (research §15). The
+ * Dashboards + alarms over the metrics `RunMetrics` publishes. The
  * signals are the ones that tell you the *platform* is unhealthy, as distinct from a test
  * legitimately failing: a queue that isn't draining, runs getting slower, workers erroring,
  * and a pass rate that falls off a cliff (which usually means the SUT or auth broke, not
@@ -112,7 +112,7 @@ export class ObservabilityStack extends Stack {
     });
 
     // 3. Pass rate: completed / (completed + failed), so a spike of failures pages even when
-    //    total volume is low. A platform fault usually shows up here first.
+    // total volume is low. A platform fault usually shows up here first.
     const passRate = new cloudwatch.MathExpression({
       expression: "100 * completed / (completed + failed)",
       usingMetrics: { completed: runsCompleted, failed: runsFailed },

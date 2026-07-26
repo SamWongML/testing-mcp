@@ -13,7 +13,7 @@ import { resolveExpiry } from "../tasks";
 import { TASK_ATTRS, TASK_KEY_ATTR, fromEpochSeconds, toEpochSeconds } from "./attributes";
 
 /**
- * Hot task state on DynamoDB (research §16.2, ADR-005) — the §18 "hundreds" stage, where
+ * Hot task state on DynamoDB — the "hundreds" stage, where
  * `tasks/get` polling moves off Postgres onto a single-digit-ms keyed lookup with native
  * TTL expiry. It implements the same {@link TaskStateStore} seam as `PostgresTaskStore`,
  * so nothing above the store changes when config selects it.
@@ -28,7 +28,7 @@ export interface DynamoTaskStoreOptions {
   client: DynamoDBDocumentClient;
   tableName: string;
   /** Max items per `Scan` page in {@link DynamoTaskStore.deleteExpired}. Bounds the working
-   *  set per round-trip; tests set it small to exercise the pagination loop deterministically. */
+   * set per round-trip; tests set it small to exercise the pagination loop deterministically. */
   scanPageSize?: number;
 }
 
@@ -184,7 +184,7 @@ export class DynamoTaskStore implements TaskStateStore {
         new PutCommand({
           TableName: this.tableName,
           Item: item,
-          // Insert-only: the `ON CONFLICT DO NOTHING` equivalent (§16.2). An existing run
+          // Insert-only: the `ON CONFLICT DO NOTHING` equivalent. An existing run
           // is left untouched and the caller sees `null`.
           ConditionExpression: "attribute_not_exists(#pk)",
           ExpressionAttributeNames: { "#pk": TASK_KEY_ATTR },

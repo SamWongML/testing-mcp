@@ -27,7 +27,7 @@ import { type PlanNode, planSuite } from "./suite";
 import { createRunContext, resolveTemplates } from "./variables";
 
 /**
- * Execution (research §10.3). A test is a one-node-at-a-time run over its steps;
+ * Execution. A test is a one-node-at-a-time run over its steps;
  * a suite (`runSuite`) is a topologically-scheduled DAG over the same node runner,
  * with independent branches running under a bounded concurrency limit. Each node:
  * resolve templates → apply auth → send → assert → extract → publish, with per-step
@@ -38,7 +38,7 @@ import { createRunContext, resolveTemplates } from "./variables";
  * a single cell — `opts.matrix` populates `{{matrix.*}}` and selects the per-cell env.
  */
 
-/** A single k/n progress tick emitted as a node/step settles (research §11.2). */
+/** A single k/n progress tick emitted as a node/step settles. */
 export interface ProgressUpdate {
   /** Settled nodes so far (1-based; reaches `total` when the run finishes). */
   completed: number;
@@ -52,21 +52,21 @@ export interface ProgressUpdate {
 export interface RunOptionsBase {
   env?: Record<string, unknown>;
   secrets?: Record<string, string>;
-  /** Auth providers a step's `request.authRef` may select (research §10.3). */
+  /** Auth providers a step's `request.authRef` may select. */
   auth?: AuthProvider[];
   /** Matrix-cell coordinates for this run — populates the `{{matrix.*}}` scope and, when
-   *  `env` isn't passed explicitly, is fed to a matrix-derived `env` builder (§7.3).
-   *  Use `expandUnits` to enumerate a matrixed definition's cells. */
+   * `env` isn't passed explicitly, is fed to a matrix-derived `env` builder.
+   * Use `expandUnits` to enumerate a matrixed definition's cells. */
   matrix?: Record<string, unknown>;
   signal?: AbortSignal;
   /** Fired as each node/step settles (passed, failed, skipped, or cancelled) so a driver
-   *  can surface k/n progress — the P8 worker maps this onto task progress + MCP progress
-   *  notifications. `completed` counts settled nodes, `total` the plan size. */
+   * can surface k/n progress — the worker maps this onto task progress + MCP progress
+   * notifications. `completed` counts settled nodes, `total` the plan size. */
   onProgress?: (update: ProgressUpdate) => void;
   runId?: string;
   /** The executable-unit id recorded as the result's `entryId` (defaults to the
-   *  test/suite id). For a matrix cell, pass the cell-addressed id, e.g.
-   *  `identity.login.matrix#region=us,tier=free`. */
+   * test/suite id). For a matrix cell, pass the cell-addressed id, e.g.
+   * `identity.login.matrix#region=us,tier=free`. */
   entryId?: string;
   /** Env name recorded on the result (the resolved env values come from `env`). */
   envName?: string;
@@ -103,7 +103,7 @@ async function attemptStep(
 ): Promise<Attempt<StepResult>> {
   let request: ResolvedRequest;
   try {
-    // Resolve templates, then inject auth (research §10.3 seam) — a provider may fetch
+    // Resolve templates, then inject auth (seam) — a provider may fetch
     // a token, so this can await and can be aborted by cancellation.
     request = await applyAuth(resolveTemplates(step.request, ctx), ctx);
   } catch (err) {
@@ -247,7 +247,7 @@ export async function runTest(
     });
   }
 
-  // A matrix run populates `{{matrix.*}}`; env may be a per-cell builder (§7.3), so when
+  // A matrix run populates `{{matrix.*}}`; env may be a per-cell builder, so when
   // the caller doesn't pass a resolved `env` we call the authored builder with the coords.
   const matrix = opts.matrix ?? {};
   const ctx = createRunContext({
@@ -325,12 +325,12 @@ function finalize(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Suite execution — DAG scheduling over the shared node runner (research §12).
+// Suite execution — DAG scheduling over the shared node runner.
 // ---------------------------------------------------------------------------
 
 export interface RunSuiteOptions extends RunOptionsBase {
   /** Max nodes executing at once; independent branches run in parallel up to this.
-   *  Non-positive or invalid values fall back to the default (never 0, which would hang). */
+   * Non-positive or invalid values fall back to the default (never 0, which would hang). */
   concurrency?: number;
 }
 
@@ -358,7 +358,7 @@ function scheduleNodes(
   // dependents, so readiness keys off `results` while `started` guards against relaunch.
   const started = new Set<string>();
 
-  // Record a node's terminal result and emit a k/n progress tick (§11.2) — every settle
+  // Record a node's terminal result and emit a k/n progress tick — every settle
   // site (ran, skipped, cancelled) goes through here so `completed` reaches `total`.
   const settle = (nodeId: string, result: StepResult): void => {
     results.set(nodeId, result);

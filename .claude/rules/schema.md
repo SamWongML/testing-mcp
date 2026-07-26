@@ -15,7 +15,7 @@ content hash computed by the **engine**, not here — this package only models t
 the `params` builder with a JSON Schema. Normalized assertion is
 `declarativeAssertionSchema | fnAssertionSchema`. **The manifest carries no functions.**
 
-**Change a representation here first and let consumers adapt — never fork the shape** (ADR-003).
+**Change a representation here first and let consumers adapt — never fork the shape**.
 
 ## Rules that live here
 

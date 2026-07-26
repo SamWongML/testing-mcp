@@ -1,5 +1,5 @@
 /**
- * Postgres connection-string resolution (P11). On ECS the database credential arrives as the
+ * Postgres connection-string resolution. On ECS the database credential arrives as the
  * RDS-managed **Secrets Manager JSON blob** injected whole into the task, not as a ready-made
  * URL — assembling it here (rather than in a shell entrypoint) keeps the credential handling
  * typed, testable, and correctly percent-encoded, and leaves the app's config surface as the

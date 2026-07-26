@@ -22,7 +22,7 @@ import { persistRun } from "./run-store";
 import { extractTraceContext, withSpan } from "./telemetry";
 
 /**
- * The async worker (research §11.2/§11.3, ADR-004). It claims queued jobs with
+ * The async worker. It claims queued jobs with
  * `FOR UPDATE SKIP LOCKED`, runs the engine under an `AbortSignal`, streams k/n progress
  * into the hot task state, persists artifacts + history, and drives the task to a terminal
  * state — then a reaper requeues jobs whose worker died (lease expiry). No broker: the
@@ -43,13 +43,13 @@ export interface WorkerOptions {
   /** How often the loop sweeps expired task rows (SEP-1686 result retention). */
   sweepMs?: number;
   /** Stop after this many runs. `1` is the one-shot mode an `ecs:RunTask`-launched task uses
-   *  (§11.3 mode 2): claim one job, finish it, exit. Unset ⇒ run until stopped. */
+   * (mode 2): claim one job, finish it, exit. Unset ⇒ run until stopped. */
   maxRuns?: number;
-  /** Claim only this run's job (§11.3 mode 2). The one-off task was launched for one
-   *  specific run and must not drain arbitrary queue head. */
+  /** Claim only this run's job (mode 2). The one-off task was launched for one
+   * specific run and must not drain arbitrary queue head. */
   runId?: string;
   /** Stop after this long with nothing claimed. Bounds a one-off task whose run was already
-   *  taken by a pooled worker, so it exits instead of idling as billable capacity. */
+   * taken by a pooled worker, so it exits instead of idling as billable capacity. */
   idleTimeoutMs?: number;
 }
 
@@ -101,7 +101,7 @@ export async function runClaimedJob(
   const tasks = taskStoreFor(ctx, db);
   const runId = job.runId ?? job.id;
   const heartbeatMs = opts.heartbeatMs ?? DEFAULTS.heartbeatMs;
-  // Correlation ids thread through every line this run emits (§15).
+  // Correlation ids thread through every line this run emits.
   const log = ctx.logger?.child({ runId, taskId: runId });
 
   // Cancel-while-queued: a job flagged before it was claimed never runs.
@@ -142,7 +142,7 @@ export async function runClaimedJob(
   }, heartbeatMs);
 
   // Wrap execution in a run span (when telemetry is on) so the engine's undici SUT calls nest
-  // under it — the MCP-call → run → SUT-call trace (§15).
+  // under it — the MCP-call → run → SUT-call trace.
   const execute = (): Promise<ExecutionResult> =>
     executeEntry(ctx, entry, {
       params: spec.params,
@@ -164,7 +164,7 @@ export async function runClaimedJob(
     const result = ctx.telemetry
       ? await withSpan(ctx.telemetry.tracer, `run ${entry.id}`, execute, {
           attributes: { "atp.run_id": runId, "atp.entry_id": entry.id },
-          // Re-parent onto the submitting request's trace (§15) — the enqueue→claim hop
+          // Re-parent onto the submitting request's trace — the enqueue→claim hop
           // crosses processes, so the context travels in the job spec.
           parent: extractTraceContext(spec.trace),
         })
@@ -202,8 +202,8 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Publish the per-run metrics (§15): the terminal-count/duration + one assertion-failure tick
- *  per failed assertion, tagged by test for the `assertion_failures_total{test}` breakdown. */
+/** Publish the per-run metrics: the terminal-count/duration + one assertion-failure tick
+ * per failed assertion, tagged by test for the `assertion_failures_total{test}` breakdown. */
 function recordRunMetrics(
   ctx: ServerContext,
   entryId: string,
@@ -232,7 +232,7 @@ async function finalizeError(
 }
 
 /** Claim one ready job and run it; returns false when the queue was empty. Samples `queue_depth`
- *  before claiming so the autoscaling metric reflects the backlog each poll (§15). */
+ * before claiming so the autoscaling metric reflects the backlog each poll. */
 export async function claimAndRun(
   ctx: ServerContext,
   workerId: string,

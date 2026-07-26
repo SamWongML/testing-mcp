@@ -1,7 +1,7 @@
 import type { AuthoredStep } from "@atp/schema";
 
 /**
- * A reusable step (research §7 `_shared/steps`). Suites embed it by reference with
+ * A reusable step (`_shared/steps`). Suites embed it by reference with
  * `useStep(createOrder, { with: { token } })`; the `with` bag populates this step's
  * `{{params.*}}` scope, so the caller binds the bearer token without duplicating the step.
  */

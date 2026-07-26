@@ -3,10 +3,10 @@ import { z } from "zod";
 import { uniqueById } from "./util";
 
 /**
- * Normalized (serializable) test IR. See research §7.1 / §10.1.
+ * Normalized (serializable) test IR.
  *
  * "Authored" forms (what a human writes in `defineTest`) carry real functions —
- * `fn` predicates and a `params` builder. The normalizer (engine, P2/P4) replaces
+ * `fn` predicates and a `params` builder. The normalizer (in `@atp/engine`) replaces
  * those with serializable markers: `fn` → `{ fnHash }`, `params` → JSON Schema.
  * The schemas below describe the *normalized* form that lands in the manifest;
  * authored-only types live at the bottom of this file.
@@ -132,9 +132,9 @@ export type TestCase = z.infer<typeof testCaseSchema>;
 export type ParamsBuilder = (zod: typeof z) => z.ZodType;
 
 /**
- * Authored env source (research §7.3). Either a static object, or — for a matrixed
+ * Authored env source. Either a static object, or — for a matrixed
  * test/suite — a builder called once per cell with that cell's `{{matrix.*}}`
- * coordinates, so env can vary by region/tier. The engine (P3) resolves the builder
+ * coordinates, so env can vary by region/tier. The engine resolves the builder
  * per cell; the normalized manifest carries only the resolved object per unit.
  */
 export type AuthoredEnv =
@@ -169,7 +169,7 @@ export interface AuthoredTestCase {
   env?: AuthoredEnv;
   params?: ParamsBuilder;
   matrix?: Record<string, unknown[]>;
-  /** Force Task augmentation (P8). If omitted, the normalizer infers from timeoutMs. */
+  /** Force Task augmentation. If omitted, the normalizer infers from timeoutMs. */
   isLongRunning?: boolean;
   steps: AuthoredStep[];
 }

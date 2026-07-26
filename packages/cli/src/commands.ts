@@ -11,7 +11,7 @@ import { startMockSut, type MockSut } from "./mock-sut";
 import { strictViolations, type Violation } from "./strict";
 
 /**
- * The `atp` CLI's command layer (research §P4). `list`/`validate` are thin views over an
+ * The `atp` CLI's command layer. `list`/`validate` are thin views over an
  * in-memory `compile()` (always fresh — no stale `dist/manifest.json`). `run` locates an
  * entry's source by id, imports the authored definition (which carries the real functions
  * the manifest strips), and executes it in-process via the engine against the local mock
@@ -42,7 +42,7 @@ export interface ValidateResult {
 }
 
 /**
- * Compile the corpus (throws on a compile error) and check it against the §19 strictness
+ * Compile the corpus (throws on a compile error) and check it against the strictness
  * rules. Violations are returned, not thrown, so the caller can print every one of them.
  */
 export async function validate(root: string = process.cwd()): Promise<ValidateResult> {
@@ -99,8 +99,8 @@ export async function runById(id: string, opts: RunOptions = {}): Promise<Execut
 
 /**
  * Run `id` once against a **real** SUT and derive golden-master parity assertions from what
- * it answered (research §19 step 4) — the capture step that replaces `atp import`'s
- * deliberately weak `status lt 500` scaffold.
+ * it answered — the capture step that replaces `atp import`'s deliberately weak
+ * `status lt 500` scaffold.
  *
  * The base URL must be explicit (`--base-url` or `ATP_BASE_URL`). `runById` starts a local
  * mock when neither is present, and assertions captured from the mock would describe fixture
@@ -118,7 +118,7 @@ export async function captureGolden(id: string, opts: RunOptions = {}): Promise<
 }
 
 /**
- * Render `result` in the given format and write it as a local artifact (P5 CLI wiring).
+ * Render `result` in the given format and write it as a local artifact (CLI wiring).
  * Defaults the filename to `<sanitized-entryId>.<ext>` in `cwd`; `out` overrides the path.
  * Returns the path written so the caller can report it.
  */
@@ -149,7 +149,7 @@ function mark(status: StepStatus): string {
   return glyphs[status];
 }
 
-/** One line per entry: `id  kind  [tags]  owner`. */
+/** One line per entry: `id kind [tags] owner`. */
 export function formatList(entries: ManifestEntry[]): string {
   if (entries.length === 0) return "(no tests found)";
   return entries

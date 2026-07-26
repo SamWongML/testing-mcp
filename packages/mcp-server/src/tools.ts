@@ -13,8 +13,8 @@ import { loadTrace, persistRun } from "./run-store";
 import { submitRun } from "./tasks";
 
 /** A tool result: the structured payload plus a JSON text mirror. Every tool returns
- *  both — `structuredContent` for programmatic clients, `text` for ones that only read
- *  `content` (and for our own tests, which parse either). */
+ * both — `structuredContent` for programmatic clients, `text` for ones that only read
+ * `content` (and for our own tests, which parse either). */
 export function jsonResult(payload: Record<string, unknown>): CallToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(payload) }],
@@ -23,13 +23,13 @@ export function jsonResult(payload: Record<string, unknown>): CallToolResult {
 }
 
 /** A tool result whose primary payload is rendered text (a report), with structured
- *  metadata alongside for programmatic clients. */
+ * metadata alongside for programmatic clients. */
 export function textResult(text: string, meta: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text }], structuredContent: meta };
 }
 
 /** Look an entry up by id, throwing a client-facing error if absent. A thrown `Error`
- *  is turned by the SDK into an `isError` tool result carrying the message. */
+ * is turned by the SDK into an `isError` tool result carrying the message. */
 export function findEntry(ctx: ServerContext, id: string): ManifestEntry {
   const entry = ctx.manifest.entries.find((e) => e.id === id);
   if (!entry) throw new Error(`No test or suite with id "${id}"`);
@@ -37,8 +37,8 @@ export function findEntry(ctx: ServerContext, id: string): ManifestEntry {
 }
 
 /** The catalog projection of a manifest entry — the routing-relevant fields an agent
- *  needs to pick a test (research §8.2): identity, kind, tags/owner to filter on,
- *  `isLongRunning` to know it can't be run inline (P8), and the params JSON Schema. */
+ * needs to pick a test: identity, kind, tags/owner to filter on,
+ * `isLongRunning` to know it can't be run inline, and the params JSON Schema. */
 function catalogView(entry: ManifestEntry): Record<string, unknown> {
   return {
     id: entry.id,
@@ -52,7 +52,7 @@ function catalogView(entry: ManifestEntry): Record<string, unknown> {
 }
 
 /** The catalog filter shared by `list_tests` and `run_selection`: tag/owner/kind plus a
- *  free-text `query` over id+title. Returns matching entries, id-sorted. */
+ * free-text `query` over id+title. Returns matching entries, id-sorted. */
 export interface EntryFilter {
   tags?: string[];
   owner?: string;
@@ -74,7 +74,7 @@ export function selectEntries(ctx: ServerContext, filter: EntryFilter): Manifest
 }
 
 /** `list_tests` — the catalog query. Filters the boot manifest by tag/owner/kind and a
- *  free-text `query` over id+title; returns id-sorted catalog views. */
+ * free-text `query` over id+title; returns id-sorted catalog views. */
 export function registerListTests(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     "list_tests",
@@ -89,7 +89,7 @@ export function registerListTests(server: McpServer, ctx: ServerContext): void {
         query: z
           .string()
           .optional()
-          .describe("Case-insensitive substring match over id and title."),
+.describe("Case-insensitive substring match over id and title."),
       },
     },
     ({ tags, owner, kind, query }, extra) => {
@@ -101,7 +101,7 @@ export function registerListTests(server: McpServer, ctx: ServerContext): void {
 }
 
 /** `describe_test` — the detail view. Returns the full manifest entry (nodes, params
- *  schema, env, matrix, source path) for one id, or an error result if it's unknown. */
+ * schema, env, matrix, source path) for one id, or an error result if it's unknown. */
 export function registerDescribeTest(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     "describe_test",
@@ -119,8 +119,8 @@ export function registerDescribeTest(server: McpServer, ctx: ServerContext): voi
 }
 
 /** The client-facing summary of a completed run — status + metrics for a verdict, plus
- *  the trace uri so the caller can fetch the full report (`get_report`, `run://` resources).
- *  Shared by the sync `run_test` result and the async task-result payload so both match. */
+ * the trace uri so the caller can fetch the full report (`get_report`, `run://` resources).
+ * Shared by the sync `run_test` result and the async task-result payload so both match. */
 export function runSummary(result: ExecutionResult, artifactUri: string): Record<string, unknown> {
   return {
     runId: result.runId,
@@ -136,9 +136,9 @@ export function runSummary(result: ExecutionResult, artifactUri: string): Record
 }
 
 /** `run_test` — execute one test and return its verdict. A fast test runs **synchronously**
- *  and persists its trace; a long-running test is **auto-enqueued** as a durable async run
- *  (returning a `runId` to poll via `get_run`/`get_run_result`). Suites always use the async
- *  path (`run_suite`). The caller supplies `params` and an `env` override (e.g. `baseUrl`). */
+ * and persists its trace; a long-running test is **auto-enqueued** as a durable async run
+ * (returning a `runId` to poll via `get_run`/`get_run_result`). Suites always use the async
+ * path (`run_suite`). The caller supplies `params` and an `env` override (e.g. `baseUrl`). */
 export function registerRunTest(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     "run_test",
@@ -151,11 +151,11 @@ export function registerRunTest(server: McpServer, ctx: ServerContext): void {
         params: z
           .record(z.string(), z.unknown())
           .optional()
-          .describe("Values for the test's params schema (see describe_test)."),
+.describe("Values for the test's params schema (see describe_test)."),
         env: z
           .record(z.string(), z.string())
           .optional()
-          .describe("Env overrides merged over the test's baked-in env, e.g. { baseUrl }."),
+.describe("Env overrides merged over the test's baked-in env, e.g. { baseUrl }."),
       },
     },
     async ({ id, params, env }, extra) => {
@@ -186,7 +186,7 @@ export function registerRunTest(server: McpServer, ctx: ServerContext): void {
 }
 
 /** `get_report` — render a stored run's report on demand. Loads the persisted trace by id
- *  (via the run-store pointer) and runs it through the chosen renderer (markdown default). */
+ * (via the run-store pointer) and runs it through the chosen renderer (markdown default). */
 export function registerGetReport(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     "get_report",
@@ -200,7 +200,7 @@ export function registerGetReport(server: McpServer, ctx: ServerContext): void {
           // Derived from reporting's own format list so the two never drift.
           .enum(REPORT_FORMATS as [ReportFormat, ...ReportFormat[]])
           .optional()
-          .describe("Report format; defaults to markdown."),
+.describe("Report format; defaults to markdown."),
       },
     },
     async ({ runId, format }, extra) => {
@@ -229,7 +229,7 @@ function runView(row: Run): Record<string, unknown> {
 }
 
 /** `list_runs` — the run-history query (newest first). Without a configured db the history
- *  is empty (offline/dev); with one it reads `@atp/store`, filterable by entry/status/recency. */
+ * is empty (offline/dev); with one it reads `@atp/store`, filterable by entry/status/recency. */
 export function registerListRuns(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
     "list_runs",
@@ -243,7 +243,7 @@ export function registerListRuns(server: McpServer, ctx: ServerContext): void {
         since: z
           .string()
           .optional()
-          .describe("ISO-8601 instant; only runs started at or after it."),
+.describe("ISO-8601 instant; only runs started at or after it."),
         limit: z.number().int().positive().max(1000).optional().describe("Max rows (default 100)."),
       },
     },

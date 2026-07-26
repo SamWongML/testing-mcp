@@ -12,7 +12,7 @@ import {
 import type { StoreClient } from "@atp/store";
 
 /** Read a tool call's structured payload (tools return `structuredContent` + a JSON
- *  text mirror). */
+ * text mirror). */
 function payload<T>(result: unknown): T {
   return (result as { structuredContent: T }).structuredContent;
 }
@@ -51,7 +51,7 @@ describe("list_tests", () => {
       "billing.get-invoice",
       "identity.login",
     ]);
-    // Catalog view carries the fields agents filter/route on (§8.2).
+    // Catalog view carries the fields agents filter/route on.
     const login = entries.find((e) => e.id === "identity.login");
     expect(login).toMatchObject({ kind: "test", isLongRunning: false });
   });
@@ -104,7 +104,7 @@ describe("describe_test", () => {
     expect(entry.id).toBe("identity.login");
     expect(entry.kind).toBe("test");
     // The detail view carries what the catalog omits: the executable node graph, the
-    // params JSON Schema, the resolved env, and the authored source path (§8.2).
+    // params JSON Schema, the resolved env, and the authored source path.
     expect(entry.nodes.map((n) => n.id)).toEqual(["post-login"]);
     expect(entry.paramsSchema?.type).toBe("object");
     expect(entry.env).toMatchObject({ baseUrl: expect.any(String) });
@@ -155,7 +155,7 @@ describe("run_test", () => {
     expect(run.artifactUri).toContain(`${run.runId}/trace.json`);
   });
 
-  it("rejects suites — inline run_test is for a single test (async suites are P8)", async () => {
+  it("rejects suites — inline run_test is for a single test (async suites go through run_suite)", async () => {
     const res = await conn.client.callTool({
       name: "run_test",
       arguments: { id: "billing.e2e-refund", env: { baseUrl: sut.url } },
@@ -239,7 +239,7 @@ describe("list_runs", () => {
       await conn.client.callTool({ name: "list_runs", arguments: {} }),
     );
     // Offline the surface is still callable — inline runs execute and persist artifacts,
-    // history is just empty (§8, ADR-002).
+    // history is just empty.
     expect(runs).toEqual([]);
     await conn.close();
   });

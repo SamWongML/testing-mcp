@@ -3,9 +3,9 @@ import { z } from "zod";
 import type { ParamsBuilder } from "./test";
 
 /**
- * Zod → JSON Schema derivation for a test's `params` (research §7.1, ADR-003).
+ * Zod → JSON Schema derivation for a test's `params`.
  *
- * `describe_test` (P7) and the manifest's `paramsSchema` both rely on this: the
+ * `describe_test` and the manifest's `paramsSchema` both rely on this: the
  * authored, function-built Zod object becomes a serializable JSON Schema that an
  * MCP client can render as a tool input schema.
  */
@@ -24,7 +24,7 @@ export function zodToJsonSchema(schema: z.ZodType): JsonSchema {
  *
  * Uses `io: "input"` so a param with a `.default()` is optional in the derived
  * schema — an MCP client may omit it and let the engine supply the default. This is
- * the tool *input* schema `describe_test` (P7) advertises.
+ * the tool *input* schema `describe_test` advertises.
  */
 export function deriveParamsSchema(builder: ParamsBuilder): JsonSchema {
   return z.toJSONSchema(builder(z), { io: "input" }) as JsonSchema;

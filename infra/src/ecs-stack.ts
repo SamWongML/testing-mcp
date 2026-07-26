@@ -16,10 +16,10 @@ import { METRIC_NAMESPACE, QUEUE_DEPTH_METRIC } from "./metrics";
 import { DEFAULT_CONTAINER_PORT } from "./network-stack";
 
 /**
- * The compute tier (research §17.1/§17.3): one **stateless** ALB'd `mcp-server` service that
+ * The compute tier: one **stateless** ALB'd `mcp-server` service that
  * scales on requests-per-target, and one **worker** service that scales on the `queue_depth`
- * metric the P10 telemetry publishes. Splitting them is what keeps a 20-minute suite from
- * occupying a request-path task (§11.3 mode 1).
+ * metric the telemetry publishes. Splitting them is what keeps a 20-minute suite from
+ * occupying a request-path task (mode 1).
  *
  * Everything the containers need to pick their storage adapters is injected as environment
  * (`TASK_STORE`/`ARTIFACT_STORE` + table/bucket names) so the same image runs against the
@@ -32,30 +32,30 @@ export interface EcsStackProps extends StackProps {
   /** Shared task security group from the network stack (already allowed into Postgres). */
   appSecurityGroup: ec2.ISecurityGroup;
   /** The ALB's security group, also from the network stack — see `NetworkStack` for why
-   *  both live there rather than here. */
+   * both live there rather than here. */
   albSecurityGroup: ec2.ISecurityGroup;
   database: rds.DatabaseInstance;
   tasksTable: dynamodb.Table;
   idempotencyTable: dynamodb.Table;
   artifactBucket: s3.Bucket;
   /** Fully-qualified image URI to deploy (e.g. `<acct>.dkr.ecr.<region>.amazonaws.com/atp:v3`),
-   *  built from the repo `Dockerfile` and pushed by the pipeline. Referencing a pushed image
-   *  rather than a CDK Docker *asset* is deliberate: it keeps `cdk synth` free of a Docker
-   *  daemon, which is what lets CI synthesize the stacks on every PR. */
+   * built from the repo `Dockerfile` and pushed by the pipeline. Referencing a pushed image
+   * rather than a CDK Docker *asset* is deliberate: it keeps `cdk synth` free of a Docker
+   * daemon, which is what lets CI synthesize the stacks on every PR. */
   imageUri: string;
   /** Container image override (tests inject one; the deploy path uses `imageUri`). */
   image?: ecs.ContainerImage;
   serverDesiredCount?: number;
   workerDesiredCount?: number;
-  /** Enable the §11.3 mode-2 escape hatch: the server may launch one-off Fargate run tasks. */
+  /** Enable the mode-2 escape hatch: the server may launch one-off Fargate run tasks. */
   enableRunTask?: boolean;
-  /** OAuth 2.1 gate (ADR-007). Off ⇒ the internal-deployment path (ALB-level protection). */
+  /** OAuth 2.1 gate. Off ⇒ the internal-deployment path (ALB-level protection). */
   auth?: { issuer: string; resource: string; jwksUri: string };
-  /** OTLP collector endpoint for traces/metrics (P10 `initTelemetry` exporter selection). */
+  /** OTLP collector endpoint for traces/metrics (`initTelemetry` exporter selection). */
   otlpEndpoint?: string;
   /** ACM certificate for the ALB. **Strongly recommended**: without it the listener is plain
-   *  HTTP, so OAuth bearer tokens (ADR-007) would cross the network in cleartext. Only omit
-   *  for a private, non-authenticated deployment behind another TLS boundary. */
+   * HTTP, so OAuth bearer tokens would cross the network in cleartext. Only omit
+   * for a private, non-authenticated deployment behind another TLS boundary. */
   certificateArn?: string;
 }
 
@@ -93,7 +93,7 @@ export class EcsStack extends Stack {
       SERVICE_NAME: `atp-${mode}`,
       PORT: String(CONTAINER_PORT),
       MANIFEST_PATH: "/app/dist/manifest.json",
-      // Store selection — the P11 exit criterion: Postgres↔DynamoDB is config, not code.
+      // Store selection is config, not code: Postgres↔DynamoDB is an environment flip.
       TASK_STORE: "dynamodb",
       DYNAMO_TASKS_TABLE: props.tasksTable.tableName,
       DYNAMO_IDEMPOTENCY_TABLE: props.idempotencyTable.tableName,
@@ -136,7 +136,7 @@ export class EcsStack extends Stack {
         ? {
             certificate: acm.Certificate.fromCertificateArn(this, "Cert", props.certificateArn),
             protocol: elbv2.ApplicationProtocol.HTTPS,
-            // Anything arriving on :80 is bounced to :443 rather than served in the clear.
+            // Anything arriving on:80 is bounced to:443 rather than served in the clear.
             redirectHTTP: true,
           }
         : {}),
@@ -205,7 +205,7 @@ export class EcsStack extends Stack {
     });
 
     // Step scaling, not target tracking: queue depth is bursty and a backlog of 100 wants a
-    // bigger jump than a backlog of 20 (§17.3).
+    // bigger jump than a backlog of 20.
     this.workerService
       .autoScaleTaskCount({ minCapacity: props.workerDesiredCount ?? 2, maxCapacity: 50 })
       .scaleOnMetric("QueueDepth", {
@@ -237,7 +237,7 @@ export class EcsStack extends Stack {
       );
     }
 
-    // ---- least-privilege task roles (§17.2) ----------------------------------------------
+    // ---- least-privilege task roles ----------------------------------------------
     const serverRole = server.taskDefinition.taskRole;
     const workerRole = workerTaskDef.taskRole;
 
@@ -254,7 +254,7 @@ export class EcsStack extends Stack {
     props.artifactBucket.grantRead(serverRole);
 
     if (props.enableRunTask) {
-      // §11.3 mode 2: the server may launch a one-off Fargate task for a very long run.
+      // mode 2: the server may launch a one-off Fargate task for a very long run.
       // The app launches by *family* (`RUN_TASK_DEFINITION` below), so the grant must cover
       // every revision of that family — a grant pinned to one revision breaks the next deploy.
       serverRole.addToPrincipalPolicy(
