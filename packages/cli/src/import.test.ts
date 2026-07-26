@@ -5,7 +5,7 @@ import { compile } from "@atp/compile";
 import type { Manifest } from "@atp/schema";
 import { describe, expect, it } from "vitest";
 
-import { importInsomnia, renderMigration, type ImportResult } from "./import";
+import { importInsomnia, renderMigration, writeImport, type ImportResult } from "./import";
 import { strictViolations } from "./strict";
 
 /** Repo root (module resolution for `@atp/engine` in the generated drafts walks up to it). */
@@ -297,5 +297,60 @@ describe("renderMigration", () => {
     );
     expect(md).toContain("A \\| B");
     expect(md).not.toContain("A | B |");
+  });
+});
+
+describe("writeImport — one migration ledger per namespace", () => {
+  /** A minimal one-request collection named `name`, written to `root` as a yaml source. */
+  async function collection(root: string, name: string): Promise<string> {
+    const path = resolve(root, `${name}.insomnia.yaml`);
+    await writeFile(
+      path,
+      `type: collection.insomnia.rest/5.0
+name: ${name}
+collection:
+  - name: Ping
+    url: "{{ _.baseUrl }}/ping"
+    method: GET
+    meta:
+      id: req_${name}_ping
+environments:
+  name: Base
+  data:
+    baseUrl: https://api.${name}.example
+`,
+      "utf8",
+    );
+    return path;
+  }
+
+  it("writes the ledger beside the corpus it describes, not at the root", async () => {
+    const root = await mkdtemp(resolve(repoRoot, ".atp-import-md-"));
+    try {
+      await writeImport(await collection(root, "alpha"), root);
+      const ledger = await readFile(resolve(root, "tests/alpha/MIGRATION.md"), "utf8");
+      expect(ledger).toContain("alpha.ping");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps each collection's ledger when a second is imported into the same root", async () => {
+    // A single root-level MIGRATION.md is overwritten wholesale on every import, so importing
+    // a second collection silently destroys the first namespace's cutover record.
+    const root = await mkdtemp(resolve(repoRoot, ".atp-import-md-"));
+    try {
+      await writeImport(await collection(root, "alpha"), root);
+      await writeImport(await collection(root, "beta"), root);
+
+      expect(await readFile(resolve(root, "tests/alpha/MIGRATION.md"), "utf8")).toContain(
+        "req_alpha_ping",
+      );
+      expect(await readFile(resolve(root, "tests/beta/MIGRATION.md"), "utf8")).toContain(
+        "req_beta_ping",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

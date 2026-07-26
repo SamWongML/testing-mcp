@@ -34,6 +34,10 @@ export interface MappingEntry {
 export interface ImportResult {
   files: GeneratedFile[];
   mapping: MappingEntry[];
+  /** The corpus namespace these drafts land in, slugged from the collection name. Also the
+   * directory the migration ledger belongs in — one per namespace, since parity is reached
+   * (and the Insomnia source retired) a namespace at a time. */
+  domain: string;
 }
 
 /** Lowercase kebab slug for names → file/id segments ("Get Invoice" → "get-invoice"). */
@@ -464,7 +468,7 @@ export function importInsomnia(yamlText: string): ImportResult {
   }
 
   files.push(...authFiles);
-  return { files, mapping };
+  return { files, mapping, domain };
 }
 
 /** Escape a value for a Markdown table cell so a literal `|` can't break the column layout. */
@@ -501,12 +505,15 @@ export interface WriteImportResult {
  * `root`. The `atp import` CLI command layer; the pure transform is {@link importInsomnia}. */
 export async function writeImport(yamlPath: string, root: string): Promise<WriteImportResult> {
   const yamlText = await readFile(resolve(yamlPath), "utf8");
-  const { files, mapping } = importInsomnia(yamlText);
+  const { files, mapping, domain } = importInsomnia(yamlText);
 
   const written: string[] = [];
+  // The ledger goes beside the corpus it describes. A single root-level MIGRATION.md is
+  // rewritten wholesale on every import, so a second collection silently destroys the first
+  // namespace's cutover record — and the mapping is per-namespace anyway.
   for (const file of [
     ...files,
-    { path: "MIGRATION.md", content: renderMigration(mapping, yamlPath) },
+    { path: `tests/${domain}/MIGRATION.md`, content: renderMigration(mapping, yamlPath) },
   ]) {
     const target = resolve(root, file.path);
     await mkdir(dirname(target), { recursive: true });

@@ -169,11 +169,13 @@ describe("import (Insomnia scaffolder)", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("scaffolds the corpus and a MIGRATION.md under the root → 0", async () => {
+  it("scaffolds the corpus and a per-namespace MIGRATION.md → 0", async () => {
     expect(await run(["import", insomniaFixture], dir)).toBe(0);
     expect(await exists(join(dir, "tests/petstore/login.test.ts"))).toBe(true);
     expect(await exists(join(dir, "tests/petstore/billing.suite.ts"))).toBe(true);
-    const migration = await readFile(join(dir, "MIGRATION.md"), "utf8");
+    // Beside the corpus it describes, so importing another collection cannot clobber it.
+    expect(await exists(join(dir, "MIGRATION.md"))).toBe(false);
+    const migration = await readFile(join(dir, "tests/petstore/MIGRATION.md"), "utf8");
     expect(migration).toContain("petstore.login");
     expect(migration).toContain("req_login");
   });

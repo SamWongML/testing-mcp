@@ -29,7 +29,7 @@ last-writer-wins and only reliable down a single chain. Suites embed tests **by 
 
 ## Migrate from Insomnia — `import_insomnia_collection`
 
-`pnpm atp import <file.yaml>` scaffolds drafts plus a `MIGRATION.md` (transform:
+`pnpm atp import <file.yaml>` scaffolds drafts plus a `tests/<domain>/MIGRATION.md` (transform:
 `packages/cli/src/import.ts`). The agent's job is what the transform cannot do:
 
 - Replace every `__TODO_CHAIN__` with a real response-ref. Until then the request hits a literal
