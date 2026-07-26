@@ -15,8 +15,10 @@ manifest, not the source files, is what the server loads at runtime.
 ```bash
 pnpm test:quiet              # the in-loop default (dot reporter); pnpm test when something fails
 pnpm compile                 # discovery → dist/manifest.json; run after touching tests/
+pnpm validate                # compile + the strictness rules below — CI runs this
 pnpm atp list|run|validate   # dev CLI over the tests/ corpus
 pnpm atp import <file.yaml>  # scaffold defineTest/defineSuite drafts from Insomnia v5
+pnpm atp golden <id> --base-url <url>   # run once against a real SUT → paste-ready parity asserts
 pnpm synth                   # cdk synth, all four stacks — needs no AWS creds and no Docker
 pnpm format                  # prettier; Markdown is deliberately excluded
 ```
@@ -25,6 +27,12 @@ Narrow the loop: `pnpm exec vitest run <path>` · `-t "<substring>"` · `pnpm --
 
 ## Gotchas
 
+- **A test that cannot fail is a build error.** `pnpm validate` compiles the corpus and then
+  applies two strictness rules (`packages/cli/src/strict.ts`): no `__TODO_CHAIN__` placeholder may
+  survive into a request, and no node may assert only a *range* on `status`. Together those are
+  what let a half-finished Insomnia migration pass while testing nothing. Strict by default — there
+  is no opt-out flag, so fix the node rather than reaching for one. An exact `status eq 204` with no
+  body assert is deliberately legal.
 - **Test-file location matters.** Platform unit tests sit beside their source under
   `packages/**/src/**/*.test.ts`. The `tests/` corpus is *also* `*.test.ts` but is deliberately not
   matched by `vitest.config.ts` — it is the product corpus, not unit tests.

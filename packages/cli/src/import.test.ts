@@ -2,9 +2,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { compile } from "@atp/compile";
+import type { Manifest } from "@atp/schema";
 import { describe, expect, it } from "vitest";
 
 import { importInsomnia, renderMigration, type ImportResult } from "./import";
+import { strictViolations } from "./strict";
 
 /** Repo root (module resolution for `@atp/engine` in the generated drafts walks up to it). */
 const repoRoot = resolve(__dirname, "../../..");
@@ -15,8 +17,8 @@ async function importFixture(): Promise<ImportResult> {
   return importInsomnia(yaml);
 }
 
-/** Compile a set of generated drafts in a throwaway corpus under repoRoot; returns entry ids. */
-async function compileDrafts(result: ImportResult): Promise<string[]> {
+/** Compile a set of generated drafts in a throwaway corpus under repoRoot. */
+async function compileDrafts(result: ImportResult): Promise<Manifest> {
   const tmp = await mkdtemp(resolve(repoRoot, ".atp-import-rt-"));
   try {
     for (const f of result.files) {
@@ -24,11 +26,15 @@ async function compileDrafts(result: ImportResult): Promise<string[]> {
       await mkdir(dirname(abs), { recursive: true });
       await writeFile(abs, f.content, "utf8");
     }
-    const manifest = await compile({ root: tmp });
-    return manifest.entries.map((e) => e.id);
+    return await compile({ root: tmp });
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+}
+
+/** The entry ids a set of drafts compiles to. */
+async function compiledIds(result: ImportResult): Promise<string[]> {
+  return (await compileDrafts(result)).entries.map((e) => e.id);
 }
 
 /** Find the one generated file whose path ends with `suffix` (fails if absent/ambiguous). */
@@ -128,9 +134,31 @@ describe("importInsomnia — Insomnia id → IR id mapping (MIGRATION.md)", () =
 
 describe("importInsomnia — generated drafts compile", () => {
   it("writes drafts that `compile()` normalizes into manifest entries", async () => {
-    const ids = await compileDrafts(await importFixture());
+    const ids = await compiledIds(await importFixture());
     expect(ids).toContain("petstore.login");
     expect(ids).toContain("petstore.billing");
+  });
+});
+
+describe("importInsomnia — fresh drafts are inert until finished", () => {
+  it("fails `atp validate` strictness, so a half-migrated corpus cannot ship green", async () => {
+    const violations = strictViolations(await compileDrafts(await importFixture()));
+    const nodesFlagged = (rule: string) =>
+      violations
+        .filter((v) => v.rule === rule)
+        .map((v) => `${v.entryId}#${v.nodeId}`)
+        .sort();
+
+    // The refund request chains off Get Invoice via an Insomnia `{% response %}` tag, which the
+    // deterministic importer leaves as `__TODO_CHAIN__` in the body — an unwired request that
+    // would 404 in a real run.
+    expect(nodesFlagged("unwired-chain")).toEqual(["petstore.billing#refund-invoice"]);
+    // And every scaffolded node carries only `status lt 500`, which that 404 satisfies.
+    expect(nodesFlagged("non-pinning-assert")).toEqual([
+      "petstore.billing#get-invoice",
+      "petstore.billing#refund-invoice",
+      "petstore.login#login",
+    ]);
   });
 });
 
@@ -160,7 +188,7 @@ environments:
     expect(suite).toContain('"deep-get"');
     expect(suite).toContain('method: "GET"');
     // And it must actually compile.
-    expect(await compileDrafts(result)).toContain("nested.outer");
+    expect(await compiledIds(result)).toContain("nested.outer");
   });
 
   it("disambiguates colliding name-slugs instead of silently clobbering", async () => {

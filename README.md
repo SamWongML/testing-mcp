@@ -17,7 +17,7 @@ and executed by a pure in-house DAG engine.
 | `packages/reporting` | `@atp/reporting` | `ExecutionResult` → Markdown / HTML / JUnit / `llm_summary` |
 | `packages/store` | `@atp/store` | Persistence: Postgres record + queue, DynamoDB task state, S3/local artifacts |
 | `packages/mcp-server` | `@atp/mcp-server` | Stateless MCP server + async worker |
-| `packages/cli` | `@atp/cli` | Local DX: `atp compile` / `list` / `run` / `validate` |
+| `packages/cli` | `@atp/cli` | Local DX: `atp compile` / `list` / `run` / `validate` / `import` / `golden` |
 | `tools/compile` | `@atp/compile` | Discovery: `*.test.ts`/`*.suite.ts` → `dist/manifest.json` |
 | `infra/` | `@atp/infra` | AWS CDK stacks: network / data / ecs / observability ([runbook](docs/deploy.md)) |
 | `tests/` | — | The test corpus (grows to thousands) |
