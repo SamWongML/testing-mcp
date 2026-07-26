@@ -41,6 +41,15 @@ describe("renderHtml", () => {
     expect(out).toContain("assertion-failed");
   });
 
+  it("gives the diagnosis panel a readable foreground in both colour schemes", () => {
+    // The page declares `color-scheme: light dark`, so a light panel that inherits the
+    // viewer's text colour is unreadable in dark mode — precisely where the failure
+    // explanation lives.
+    const out = renderHtml(failingSuite);
+    expect(out).toMatch(/\.diagnosis \{[^}]*color:/);
+    expect(out).toMatch(/@media \(prefers-color-scheme: dark\) \{ \.diagnosis \{[^}]*color:/);
+  });
+
   for (const [name, result] of Object.entries(allFixtures)) {
     it(`golden: ${name}`, async () => {
       await expect(renderHtml(result)).toMatchFileSnapshot(`__snapshots__/${name}.report.html`);

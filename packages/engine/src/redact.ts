@@ -27,6 +27,18 @@ function maskSecrets(input: string, secrets: readonly string[]): string {
   return out;
 }
 
+/**
+ * Mask a header/query value that is only *typed* as a string. A whole-value template keeps
+ * its source type — `{{params.sleepMs}}` on a numeric param resolves to a number — so the
+ * resolved request can carry a non-string here even though `RequestSpec` says otherwise.
+ * undici stringifies it on the wire, so the snapshot records the string form; masking the
+ * raw value instead used to throw (`out.split is not a function`) and error the whole run
+ * from the *persistence* path, which is the last place that should be able to fail a test.
+ */
+function maskValue(value: unknown, secrets: readonly string[]): string {
+  return maskSecrets(typeof value === "string" ? value : String(value), secrets);
+}
+
 function redactDeep(value: unknown, secrets: readonly string[]): unknown {
   return mapDeepStrings(value, (s) => maskSecrets(s, secrets));
 }
@@ -38,7 +50,7 @@ function redactHeaders(
   if (!headers) return headers;
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(headers)) {
-    out[k] = SENSITIVE_HEADERS.has(k.toLowerCase()) ? MASK : maskSecrets(v, secrets);
+    out[k] = SENSITIVE_HEADERS.has(k.toLowerCase()) ? MASK : maskValue(v, secrets);
   }
   return out;
 }
@@ -49,7 +61,7 @@ function redactQuery(
 ): Record<string, string> | undefined {
   if (!query) return query;
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(query)) out[k] = maskSecrets(v, secrets);
+  for (const [k, v] of Object.entries(query)) out[k] = maskValue(v, secrets);
   return out;
 }
 

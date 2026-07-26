@@ -127,6 +127,14 @@ const badgeColors: Record<StepStatus, string> = {
   cancelled: "#946200",
 };
 
+/**
+ * Inlined stylesheet. Kept comment-free — every byte here ships in every rendered report.
+ *
+ * `.diagnosis` pins both background *and* foreground, and overrides the pair under
+ * `prefers-color-scheme: dark`: the document declares `color-scheme: light dark`, so a light
+ * panel that inherited the viewer's text colour was unreadable in dark mode — on the one
+ * element that explains why a run failed.
+ */
 const STYLE = `
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
@@ -141,7 +149,8 @@ ${(Object.keys(badgeColors) as StepStatus[]).map((k) => `.badge-${k} { backgroun
 .meta dt { font-weight: 600; opacity: .7; margin: 0; }
 .meta dd { margin: 0; }
 .run-error { color: #b3261e; font-weight: 600; }
-.diagnosis { background: #fbe9e7aa; border-left: 4px solid #b3261e; padding: .5rem 1rem; border-radius: 4px; }
+.diagnosis { background: #fbe9e7; color: #1f1f1f; border-left: 4px solid #b3261e; padding: .5rem 1rem; border-radius: 4px; }
+@media (prefers-color-scheme: dark) { .diagnosis { background: #3a1a16; color: #f6e3e0; } }
 .diagnosis .next { font-style: italic; opacity: .85; }
 .steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .5rem; }
 .step { border: 1px solid #8883; border-radius: 6px; padding: .5rem .75rem; }

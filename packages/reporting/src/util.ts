@@ -16,9 +16,15 @@ export function escapeXml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** `42ms`, or `—` when the timing is unknown. */
+/**
+ * `42ms`, or `—` when the timing is unknown. Timings come from `performance.now()` deltas, so
+ * the raw value carries sub-nanosecond noise (`0.9669160000048578ms` in a real report). Round
+ * for display: one decimal below 10ms, where the fraction still says something, whole
+ * milliseconds above it.
+ */
 export function ms(value: number | undefined): string {
-  return value === undefined ? "—" : `${value}ms`;
+  if (value === undefined) return "—";
+  return `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}ms`;
 }
 
 /** Seconds (JUnit `time=`), always a plain number string; unknown → `0`. */

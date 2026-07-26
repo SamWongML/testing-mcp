@@ -31,6 +31,23 @@ describe("redactRequest", () => {
     expect(out.body).toEqual({ password: "***", note: "pw is ***", nested: { p: "***" } });
   });
 
+  it("survives a non-string query value and records the form that went on the wire", () => {
+    // A whole-value template preserves its param's type, so a numeric param lands here as a
+    // number despite `RequestSpec.query` being typed `Record<string, string>`. Redaction used
+    // to throw on it and error the run from the persistence path.
+    const out = redactRequest(
+      {
+        method: "GET",
+        url: "https://x/slow",
+        query: { ms: 250 as unknown as string, key: "s3cret" },
+        headers: { "x-attempt": 2 as unknown as string },
+      },
+      ["s3cret"],
+    );
+    expect(out.query).toEqual({ ms: "250", key: "***" });
+    expect(out.headers).toEqual({ "x-attempt": "2" });
+  });
+
   it("masks secret values in query parameters (e.g. an api-key)", () => {
     const out = redactRequest(
       { method: "GET", url: "https://x/y", query: { api_key: "s3cret", page: "2" } },

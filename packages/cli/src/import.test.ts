@@ -195,6 +195,31 @@ environments:
     expect(await compiledIds(result)).toContain("nested.outer");
   });
 
+  it("emits a legal identifier for a multi-word collection name", async () => {
+    // The domain is a kebab slug — correct for ids and paths, but `export const mock-mart`
+    // does not parse, so every draft in the namespace failed to compile.
+    const result = importInsomnia(`
+type: collection.insomnia.rest/5.0
+name: Mock Mart
+collection:
+  - name: Ping
+    method: GET
+    url: "{{ _.baseUrl }}/ping"
+    meta: { id: req_ping }
+environments:
+  data:
+    baseUrl: https://x
+`);
+    const env = fileEndingWith(result, "tests/_shared/env/mock-mart.ts");
+    expect(env).toContain("export const mock_mart = defineEnv({");
+    const ping = fileEndingWith(result, "tests/mock-mart/ping.test.ts");
+    expect(ping).toContain('import { mock_mart } from "../_shared/env/mock-mart"');
+    expect(ping).toContain("env: mock_mart,");
+    // Ids and paths keep the slug; only the binding is coerced.
+    expect(ping).toContain('id: "mock-mart.ping"');
+    expect(await compiledIds(result)).toContain("mock-mart.ping");
+  });
+
   it("disambiguates colliding name-slugs instead of silently clobbering", async () => {
     const { mapping, files } = importInsomnia(`
 type: collection.insomnia.rest/5.0

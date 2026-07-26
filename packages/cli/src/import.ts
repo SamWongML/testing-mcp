@@ -295,14 +295,14 @@ function emitTest(
 
   const content = `import { defineTest } from "@atp/engine";
 
-${auth.imports}import { ${domain} } from "../_shared/env/${domain}";
+${auth.imports}import { ${envIdentifier(domain)} } from "../_shared/env/${domain}";
 
 export default defineTest({
   id: "${id}",
   version: 1,
   title: ${JSON.stringify(req.name ?? name)},
   tags: [${JSON.stringify(domain)}],
-  env: ${domain},
+  env: ${envIdentifier(domain)},
 ${auth.field}  steps: [
 ${todoLines(todos, "    ")}    {
       id: "${name}",
@@ -369,14 +369,14 @@ function emitSuite(
   const auth = authWiring(domain, nodeAuthRefs);
   const content = `import { defineSuite } from "@atp/engine";
 
-${auth.imports}import { ${domain} } from "../_shared/env/${domain}";
+${auth.imports}import { ${envIdentifier(domain)} } from "../_shared/env/${domain}";
 
 export default defineSuite({
   id: "${id}",
   version: 1,
   title: ${JSON.stringify(folder.name ?? suiteName)},
   tags: [${JSON.stringify(domain)}],
-  env: ${domain},
+  env: ${envIdentifier(domain)},
 ${auth.field}  nodes: {
 ${nodeSrc.join("\n")}
   },
@@ -418,6 +418,13 @@ function authWiring(domain: string, providerIds: string[]): { imports: string; f
   return { imports, field };
 }
 
+/** The exported binding for a domain's env module. The domain is a *slug* — fine for ids and
+ * paths, but `mock-mart` is not a legal identifier, so a two-word collection name emitted an
+ * env module that could not parse. Coerce it the same way provider bindings are coerced. */
+function envIdentifier(domain: string): string {
+  return identifier(domain);
+}
+
 /** Emit `tests/_shared/env/<domain>.ts` from the collection's environment data. */
 function emitEnv(domain: string, env: InsomniaEnvironment): GeneratedFile {
   const data = env.data ?? {};
@@ -426,7 +433,7 @@ function emitEnv(domain: string, env: InsomniaEnvironment): GeneratedFile {
     .join("\n");
   const content = `import { defineEnv } from "@atp/engine";
 
-export const ${domain} = defineEnv({
+export const ${envIdentifier(domain)} = defineEnv({
 ${entries}
 });
 `;
