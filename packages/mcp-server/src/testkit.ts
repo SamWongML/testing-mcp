@@ -175,14 +175,14 @@ export interface TestSut {
 }
 
 export interface TestSutOptions {
-  /** When false, the ledger route never returns `settled`, so `billing.e2e-refund`'s
+  /** When false, the ledger route never returns `settled`, so `alpha.widget-lifecycle`'s
    *  polling `verify` node stays in flight — the deterministic window a cancel test needs. */
   ledgerSettles?: boolean;
 }
 
-/** A tiny mock SUT covering the routes the corpus tests + the `billing.e2e-refund` suite
- *  hit, so an inline `run_test` or a worker-run suite executes offline. Ephemeral loopback
- *  port; inject its URL as `{{env.baseUrl}}`. */
+/** A tiny mock SUT covering the routes the fixture corpus hits, so an inline `run_test` or a
+ *  worker-run suite executes offline. Ephemeral loopback port; inject its URL as
+ *  `{{env.baseUrl}}`. */
 export function startTestSut(opts: TestSutOptions = {}): Promise<TestSut> {
   const ledgerSettles = opts.ledgerSettles ?? true;
   const server: Server = createServer((req, res) => {

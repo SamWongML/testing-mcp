@@ -12,6 +12,9 @@ export default defineTest({
   params: (z) =>
     z.object({
       sku: z.string().default("SKU-1"),
+      // Secret-shaped on purpose: the audit-redaction test needs an entry that really
+      // declares one, so it covers the live leak path rather than a hypothetical key.
+      password: z.string().default("fixture-password"),
     }),
   steps: [
     {
@@ -20,7 +23,7 @@ export default defineTest({
         method: "POST",
         url: "{{env.baseUrl}}/orders",
         headers: { "content-type": "application/json" },
-        body: { sku: "{{params.sku}}" },
+        body: { sku: "{{params.sku}}", password: "{{params.password}}" },
       },
       assert: [
         { path: "status", op: "eq", value: 201 },

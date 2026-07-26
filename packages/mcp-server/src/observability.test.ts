@@ -71,7 +71,7 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
 
   it("emits correlated logs, spans (MCP→run→SUT), and metrics for a full async run", async () => {
     const { runId } = await submitRun(ctx, {
-      entryId: "billing.e2e-refund",
+      entryId: "alpha.widget-lifecycle",
       env: { baseUrl: sut.url },
     });
     expect(await claimAndRun(ctx, "worker-obs")).toBe(true);
@@ -81,7 +81,7 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
 
     // Spans: a run span carrying the runId, with the engine's SUT HTTP calls nested in its trace.
     const spans = spanExporter.getFinishedSpans();
-    const runSpan = spans.find((s) => s.name === "run billing.e2e-refund");
+    const runSpan = spans.find((s) => s.name === "run alpha.widget-lifecycle");
     expect(runSpan).toBeDefined();
     expect(runSpan!.attributes["atp.run_id"]).toBe(runId);
     const trace = runSpan!.spanContext().traceId;
@@ -108,7 +108,7 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
     const submitSpan = tel.tracer.startSpan("mcp submit");
     const submitTraceId = submitSpan.spanContext().traceId;
     const { runId } = await context.with(trace.setSpan(context.active(), submitSpan), () =>
-      submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } }),
+      submitRun(ctx, { entryId: "alpha.create-widget", env: { baseUrl: sut.url } }),
     );
     submitSpan.end();
 
@@ -116,7 +116,7 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
     await tel.forceFlush();
 
     const runSpan =
-      tel && spanExporter.getFinishedSpans().find((s) => s.name === "run identity.login");
+      tel && spanExporter.getFinishedSpans().find((s) => s.name === "run alpha.create-widget");
     expect(runSpan).toBeDefined();
     expect(runSpan!.attributes["atp.run_id"]).toBe(runId);
     expect(runSpan!.spanContext().traceId).toBe(submitTraceId);
@@ -128,7 +128,7 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
     try {
       await conn.client.callTool({
         name: "run_test",
-        arguments: { id: "identity.login", env: { baseUrl: sut.url }, params: {} },
+        arguments: { id: "alpha.create-widget", env: { baseUrl: sut.url }, params: {} },
       });
     } finally {
       await conn.close();
@@ -138,20 +138,22 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
     expect(
       rows.some(
         (r) =>
-          r.action === "run_test" && r.entryId === "identity.login" && r.principal === "anonymous",
+          r.action === "run_test" &&
+          r.entryId === "alpha.create-widget" &&
+          r.principal === "anonymous",
       ),
     ).toBe(true);
   });
 
   it("never persists a secret-shaped param to the audit log", async () => {
-    // `identity.login` really declares a `password` param, so this is the live leak path, not a
-    // hypothetical one.
+    // `alpha.create-widget` really declares a `password` param, so this is the live leak
+    // path, not a hypothetical one.
     const conn = await connectClient(ctx);
     try {
       await conn.client.callTool({
         name: "run_test",
         arguments: {
-          id: "identity.login",
+          id: "alpha.create-widget",
           env: { baseUrl: sut.url },
           params: { email: "qa@example.com", password: "s3cr3t-do-not-persist" },
         },
@@ -160,7 +162,7 @@ describe.skipIf(!pgAvailable)("observability integration", () => {
       await conn.close();
     }
 
-    const rows = await listAudit(store.db, { entryId: "identity.login" });
+    const rows = await listAudit(store.db, { entryId: "alpha.create-widget" });
     expect(rows.length).toBeGreaterThan(0);
     const persisted = JSON.stringify(rows.map((r) => r.params));
     expect(persisted).not.toContain("s3cr3t-do-not-persist");

@@ -47,8 +47,8 @@ describe("executeEntry — the shared test/suite executor", () => {
     expect(result.kind).toBe("suite");
     expect(result.status).toBe("passed");
     expect(result.runId).toBe("run-suite-1");
-    // The fixture suite has two nodes; progress ticks reach total for the worker's k/n.
-    expect(updates.at(-1)).toMatchObject({ completed: 2, total: 2 });
+    // The fixture suite has three nodes; progress ticks reach total for the worker's k/n.
+    expect(updates.at(-1)).toMatchObject({ completed: 3, total: 3 });
     expect(updates.map((u) => u.nodeId)).toContain("capture");
   });
 
