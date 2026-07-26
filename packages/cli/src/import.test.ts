@@ -87,10 +87,14 @@ describe("importInsomnia — headers, JSON body, auth", () => {
     // Bearer auth is referenced by id; the secret stays a {{secrets.*}} template.
     expect(login).toContain('authRef: "petstore"');
 
+    // The provider is declarative data, so the generated module has no engine import at all,
+    // and the entry carries it — an authRef with no declared provider fails `atp validate`.
     const auth = fileEndingWith(result, "tests/_shared/auth/petstore.ts");
-    expect(auth).toContain('import { bearerAuth } from "@atp/engine"');
+    expect(auth).not.toContain("@atp/engine");
+    expect(auth).toContain('type: "bearer"');
     expect(auth).toContain('id: "petstore"');
     expect(auth).toContain("{{secrets.");
+    expect(login).toContain("auth: [petstoreAuth]");
   });
 });
 

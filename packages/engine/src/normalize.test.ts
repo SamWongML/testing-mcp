@@ -5,7 +5,8 @@ import { defineSuite, defineTest, useStep, useTest } from "./define";
 import { hashFn } from "./fnHash";
 import { normalize } from "./normalize";
 
-const expiresPredicate = (res: unknown) => (res as { body: { expiresIn: number } }).body.expiresIn > 0;
+const expiresPredicate = (res: unknown) =>
+  (res as { body: { expiresIn: number } }).body.expiresIn > 0;
 
 const login = defineTest({
   id: "identity.login",
@@ -266,5 +267,46 @@ describe("normalize (compile-time guards)", () => {
       ],
     });
     expect(() => normalize(bad, "f.test.ts")).toThrow();
+  });
+});
+
+describe("normalize — auth providers", () => {
+  it("carries an entry's declared providers into the manifest entry", () => {
+    const [entry] = normalize(
+      defineTest({
+        id: "x.y",
+        version: 1,
+        auth: [{ id: "api", type: "bearer", token: "{{secrets.API_TOKEN}}" }],
+        steps: [
+          {
+            id: "s",
+            request: { method: "GET", url: "/", authRef: "api" },
+            assert: [{ path: "status", op: "eq", value: 200 }],
+          },
+        ],
+      }),
+      "tests/x/y.test.ts",
+    );
+    // The token stays a template: normalizing a resolved credential would bake it into the
+    // manifest, which is exactly what `{{secrets.*}}` exists to prevent.
+    expect(entry?.auth).toEqual([{ id: "api", type: "bearer", token: "{{secrets.API_TOKEN}}" }]);
+  });
+
+  it("defaults to no providers when none are declared", () => {
+    const [entry] = normalize(
+      defineTest({
+        id: "x.z",
+        version: 1,
+        steps: [
+          {
+            id: "s",
+            request: { method: "GET", url: "/" },
+            assert: [{ path: "status", op: "eq", value: 200 }],
+          },
+        ],
+      }),
+      "tests/x/z.test.ts",
+    );
+    expect(entry?.auth).toEqual([]);
   });
 });

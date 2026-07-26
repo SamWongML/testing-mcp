@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   AssertionResult,
+  AuthProviderSpec,
   AuthoredStep,
   AuthoredSuite,
   AuthoredTestCase,
@@ -15,7 +16,7 @@ import { executionResultSchema } from "@atp/schema";
 
 import { evaluateAssertions } from "./assertions";
 import { applyAuth, buildAuthRegistry } from "./auth";
-import type { AuthProvider, EngineResponse, ResolvedRequest, RunContext } from "./context";
+import type { EngineResponse, ResolvedRequest, RunContext } from "./context";
 import { extract } from "./extract";
 import { sendRequest } from "./http";
 import { resolveEnv } from "./matrix";
@@ -52,8 +53,9 @@ export interface ProgressUpdate {
 export interface RunOptionsBase {
   env?: Record<string, unknown>;
   secrets?: Record<string, string>;
-  /** Auth providers a step's `request.authRef` may select. */
-  auth?: AuthProvider[];
+  /** Auth provider declarations a step's `request.authRef` may select. Carried by the
+   * manifest entry, so a driver forwards `entry.auth` rather than constructing providers. */
+  auth?: AuthProviderSpec[];
   /** Matrix-cell coordinates for this run — populates the `{{matrix.*}}` scope and, when
    * `env` isn't passed explicitly, is fed to a matrix-derived `env` builder.
    * Use `expandUnits` to enumerate a matrixed definition's cells. */

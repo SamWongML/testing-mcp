@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadConfig } from "./config";
+import { loadConfig, secretsFromEnv } from "./config";
 
 describe("loadConfig", () => {
   it("applies defaults for an empty environment", () => {
@@ -59,5 +59,29 @@ describe("loadConfig", () => {
 
   it("fails fast on a non-boolean AUTH_ENABLED", () => {
     expect(() => loadConfig({ AUTH_ENABLED: "maybe" })).toThrow();
+  });
+});
+
+describe("secretsFromEnv", () => {
+  it("extracts prefixed variables, stripping the prefix", () => {
+    expect(secretsFromEnv({ ATP_SECRET_API_TOKEN: "tok", ATP_SECRET_DB_PASSWORD: "pw" })).toEqual({
+      API_TOKEN: "tok",
+      DB_PASSWORD: "pw",
+    });
+  });
+
+  it("takes only prefixed variables", () => {
+    // The prefix is a correctness requirement, not tidiness: the engine masks every secret
+    // *value* wherever it appears in a trace, so admitting the whole environment would blank
+    // unrelated substrings (PATH fragments, hostnames) out of persisted reports.
+    expect(secretsFromEnv({ PATH: "/usr/bin", HOME: "/root", API_TOKEN: "nope" })).toEqual({});
+  });
+
+  it("ignores an empty value rather than registering a mask that matches everything", () => {
+    expect(secretsFromEnv({ ATP_SECRET_EMPTY: "", ATP_SECRET_REAL: "v" })).toEqual({ REAL: "v" });
+  });
+
+  it("ignores the bare prefix with no key", () => {
+    expect(secretsFromEnv({ ATP_SECRET_: "v" })).toEqual({});
   });
 });

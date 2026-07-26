@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { compile } from "@atp/compile";
-import { type Config, type Manifest, manifestSchema } from "@atp/schema";
+import { type Config, type Manifest, manifestSchema, secretsFromEnv } from "@atp/schema";
 import { createArtifactStore } from "@atp/store";
 
 import { createAuthenticator } from "./auth";
@@ -94,6 +94,7 @@ export async function buildContext(config: Config): Promise<ServerContext> {
     sourceRoot,
     artifacts,
     artifactEnv: ARTIFACT_ENV,
+    secrets: secretsFromEnv(process.env),
     authn: buildAuthContext(config),
     runTaskLauncher: buildRunTaskLauncher(config),
   };

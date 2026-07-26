@@ -1,18 +1,9 @@
 import { MockAgent, setGlobalDispatcher } from "undici";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { RequestSpec } from "@atp/schema";
+import type { AuthProviderSpec, RequestSpec } from "@atp/schema";
 
-import {
-  apiKeyAuth,
-  applyAuth,
-  basicAuth,
-  bearerAuth,
-  buildAuthRegistry,
-  customAuth,
-  oauth2ClientCredentials,
-} from "./auth";
-import type { AuthProvider } from "./context";
+import { applyAuth, buildAuthRegistry } from "./auth";
 import { defineTest } from "./define";
 import { runTest } from "./runner";
 import { createRunContext } from "./variables";
@@ -35,8 +26,8 @@ afterEach(async () => {
   await agent.close();
 });
 
-function ctxWith(providers: AuthProvider[], extra: Record<string, unknown> = {}) {
-  return createRunContext({ auth: buildAuthRegistry(providers), ...extra });
+function ctxWith(specs: AuthProviderSpec[], extra: Record<string, unknown> = {}) {
+  return createRunContext({ auth: buildAuthRegistry(specs), ...extra });
 }
 
 /** Case-insensitive header lookup — undici may normalize header casing. */
@@ -47,8 +38,14 @@ function header(req: RequestSpec, name: string): string | undefined {
   return entry?.[1];
 }
 
-function oauthProvider(id = "cc"): AuthProvider {
-  return oauth2ClientCredentials({ id, tokenUrl: TOKEN_URL, clientId: "id", clientSecret: "sec" });
+function oauthProvider(id = "cc"): AuthProviderSpec {
+  return {
+    id,
+    type: "oauth2ClientCredentials",
+    tokenUrl: TOKEN_URL,
+    clientId: "id",
+    clientSecret: "sec",
+  };
 }
 
 describe("applyAuth", () => {
@@ -64,13 +61,13 @@ describe("applyAuth", () => {
   });
 
   it("bearer sets an Authorization: Bearer header", async () => {
-    const ctx = ctxWith([bearerAuth({ id: "api", token: "tok-123" })]);
+    const ctx = ctxWith([{ id: "api", type: "bearer", token: "tok-123" }]);
     const out = await applyAuth({ ...BASE, authRef: "api" }, ctx);
     expect(header(out, "authorization")).toBe("Bearer tok-123");
   });
 
   it("bearer resolves a templated token from secrets", async () => {
-    const ctx = ctxWith([bearerAuth({ id: "api", token: "{{secrets.API_TOKEN}}" })], {
+    const ctx = ctxWith([{ id: "api", type: "bearer", token: "{{secrets.API_TOKEN}}" }], {
       secrets: { API_TOKEN: "s3cr3t" },
     });
     const out = await applyAuth({ ...BASE, authRef: "api" }, ctx);
@@ -78,7 +75,7 @@ describe("applyAuth", () => {
   });
 
   it("bearer replaces a pre-existing same-name header case-insensitively", async () => {
-    const ctx = ctxWith([bearerAuth({ id: "api", token: "new" })]);
+    const ctx = ctxWith([{ id: "api", type: "bearer", token: "new" }]);
     const req: RequestSpec = { ...BASE, authRef: "api", headers: { Authorization: "Bearer OLD" } };
     const out = await applyAuth(req, ctx);
     const authKeys = Object.keys(out.headers ?? {}).filter(
@@ -89,7 +86,7 @@ describe("applyAuth", () => {
   });
 
   it("basic sets a base64 Authorization: Basic header", async () => {
-    const ctx = ctxWith([basicAuth({ id: "b", username: "alice", password: "pw" })]);
+    const ctx = ctxWith([{ id: "b", type: "basic", username: "alice", password: "pw" }]);
     const out = await applyAuth({ ...BASE, authRef: "b" }, ctx);
     expect(header(out, "authorization")).toBe(
       `Basic ${Buffer.from("alice:pw").toString("base64")}`,
@@ -97,27 +94,24 @@ describe("applyAuth", () => {
   });
 
   it("api-key sets a header by default", async () => {
-    const ctx = ctxWith([apiKeyAuth({ id: "k", name: "x-api-key", value: "abc" })]);
+    const ctx = ctxWith([
+      { id: "k", type: "apiKey", name: "x-api-key", value: "abc", in: "header" },
+    ]);
     const out = await applyAuth({ ...BASE, authRef: "k" }, ctx);
     expect(header(out, "x-api-key")).toBe("abc");
   });
 
   it("api-key can be placed in the query string", async () => {
-    const ctx = ctxWith([apiKeyAuth({ id: "k", name: "api_key", value: "abc", in: "query" })]);
+    const ctx = ctxWith([{ id: "k", type: "apiKey", name: "api_key", value: "abc", in: "query" }]);
     const out = await applyAuth({ ...BASE, authRef: "k" }, ctx);
     expect(out.query?.api_key).toBe("abc");
     expect(out.headers?.api_key).toBeUndefined();
   });
 
-  it("custom applies an arbitrary transform", async () => {
-    const ctx = ctxWith([
-      customAuth({
-        id: "c",
-        apply: (req) => ({ ...req, headers: { ...(req.headers ?? {}), "x-signed": "yes" } }),
-      }),
-    ]);
-    const out = await applyAuth({ ...BASE, authRef: "c" }, ctx);
-    expect(header(out, "x-signed")).toBe("yes");
+  it("rejects an unknown provider type rather than silently applying nothing", () => {
+    expect(() =>
+      buildAuthRegistry([{ id: "x", type: "magic" } as unknown as AuthProviderSpec]),
+    ).toThrow(/magic/);
   });
 });
 
@@ -125,8 +119,8 @@ describe("buildAuthRegistry", () => {
   it("throws on a duplicate provider id", () => {
     expect(() =>
       buildAuthRegistry([
-        bearerAuth({ id: "dup", token: "a" }),
-        bearerAuth({ id: "dup", token: "b" }),
+        { id: "dup", type: "bearer", token: "a" },
+        { id: "dup", type: "bearer", token: "b" },
       ]),
     ).toThrow(/duplicate/);
   });
@@ -211,7 +205,7 @@ describe("runTest with authRef (end-to-end seam)", () => {
     });
 
     const result = await runTest(test, {
-      auth: [bearerAuth({ id: "api", token: "{{secrets.TOKEN}}" })],
+      auth: [{ id: "api", type: "bearer", token: "{{secrets.TOKEN}}" }],
       secrets: { TOKEN: "run-token" },
     });
 
@@ -241,7 +235,9 @@ describe("runTest with authRef (end-to-end seam)", () => {
     });
 
     const result = await runTest(test, {
-      auth: [apiKeyAuth({ id: "k", name: "api_key", value: "{{secrets.API_KEY}}", in: "query" })],
+      auth: [
+        { id: "k", type: "apiKey", name: "api_key", value: "{{secrets.API_KEY}}", in: "query" },
+      ],
       secrets: { API_KEY: "run-key" },
     });
 

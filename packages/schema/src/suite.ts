@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import type { AuthoredEnv, AuthoredStep, AuthoredTestCase } from "./test";
-import { matrixSchema, stepSchema } from "./test";
+import type { AuthoredEnv, AuthoredStep, AuthoredTestCase, AuthProviderSpec } from "./test";
+import { authProviderSchema, matrixSchema, stepSchema } from "./test";
 import { uniqueById } from "./util";
 
 /**
@@ -26,6 +26,10 @@ export const suiteSchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
   env: z.record(z.string(), z.unknown()).optional(),
   matrix: matrixSchema.optional(),
+  auth: z
+    .array(authProviderSchema)
+    .default([])
+    .refine(uniqueById, "auth provider ids must be unique"),
   nodes: z.array(suiteNodeSchema).min(1).refine(uniqueById, "node ids must be unique"),
 });
 export type Suite = z.infer<typeof suiteSchema>;
@@ -69,6 +73,8 @@ export interface AuthoredSuite {
   matrix?: Record<string, unknown[]>;
   /** Force Task augmentation. If omitted, the normalizer infers from timeoutMs. */
   isLongRunning?: boolean;
+  /** Auth providers this suite's nodes may select by `request.authRef`. */
+  auth?: AuthProviderSpec[];
   /** Authored nodes are keyed by node id. */
   nodes: Record<string, AuthoredSuiteNode>;
 }

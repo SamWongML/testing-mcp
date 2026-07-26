@@ -11,6 +11,7 @@ function manifestOf(nodes: Array<Partial<Step> & Pick<Step, "id" | "request">>):
     version: 1,
     tags: [],
     isLongRunning: false,
+    auth: [],
     sourcePath: "tests/demo/entry.test.ts",
     nodes: nodes.map((n) => ({ assert: [], extract: [], needs: [], ...n })),
   };
@@ -169,14 +170,15 @@ describe("strictViolations — robustness on request shapes the schema allows", 
       ]),
     );
 
-    expect(violations).toEqual([
-      {
-        entryId: "demo.entry",
-        nodeId: "call",
-        rule: "unwired-chain",
-        detail: "unresolved __TODO_CHAIN__ in authRef",
-      },
-    ]);
+    // An unwired placeholder in `authRef` trips both rules, and both are true: the ref is
+    // unresolved *and* names no declared provider. The chain rule is the actionable one.
+    expect(violations.map((v) => v.rule).sort()).toEqual(["unknown-auth-ref", "unwired-chain"]);
+    expect(violations).toContainEqual({
+      entryId: "demo.entry",
+      nodeId: "call",
+      rule: "unwired-chain",
+      detail: "unresolved __TODO_CHAIN__ in authRef",
+    });
   });
 
   it("survives a body JSON cannot serialize instead of crashing on it", () => {
@@ -194,5 +196,29 @@ describe("strictViolations — robustness on request shapes the schema allows", 
         ]),
       ),
     ).not.toThrow();
+  });
+});
+
+describe("strictViolations — unresolvable authRef", () => {
+  it("flags a node selecting a provider the entry never declared", () => {
+    // `atp import` emits an `authRef` for every bearer-authenticated request. Without this
+    // rule a corpus can name a provider that does not exist and still validate clean, then
+    // error at first run with `unknown authRef` — a migration that looks finished but is not.
+    const manifest = manifestOf([
+      { id: "n", request: { method: "GET", url: "https://api.example/x", authRef: "missing" } },
+    ]);
+    const violations = strictViolations(manifest);
+    expect(violations).toContainEqual(
+      expect.objectContaining({ nodeId: "n", rule: "unknown-auth-ref" }),
+    );
+  });
+
+  it("accepts a node whose provider the entry declares", () => {
+    const manifest = manifestOf([
+      { id: "n", request: { method: "GET", url: "https://api.example/x", authRef: "api" } },
+    ]);
+    const entry = manifest.entries[0];
+    if (entry) entry.auth = [{ id: "api", type: "bearer", token: "{{secrets.T}}" }];
+    expect(strictViolations(manifest).filter((v) => v.rule === "unknown-auth-ref")).toEqual([]);
   });
 });

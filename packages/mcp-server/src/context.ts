@@ -1,4 +1,3 @@
-import type { AuthProvider } from "@atp/engine";
 import type { Manifest } from "@atp/schema";
 import type { ArtifactStore, Db, TaskStoreProvider } from "@atp/store";
 
@@ -33,6 +32,10 @@ export interface ServerContext {
   artifacts: ArtifactStore;
   /** The `{env}` segment of the artifact key layout, e.g. `"mcp"`. */
   artifactEnv: string;
+  /** The `{{secrets.*}}` bag every run resolves credentials against, collected from
+   * `ATP_SECRET_*` at boot. Empty when none are configured — a test that needs one then
+   * errors on the unresolved template rather than sending a blank credential. */
+  secrets: Record<string, string>;
   /** Postgres history. When present, inline runs are recorded and `list_runs` reads it;
    * when absent (offline/dev), runs still execute + persist artifacts and `list_runs`
    * reports an empty history — so the surface is always callable. */
@@ -45,8 +48,6 @@ export interface ServerContext {
   /** Launches a dedicated Fargate task for an isolated run (mode 2). Present only
    * when the escape hatch is configured; absent ⇒ every run goes to the worker pool. */
   runTaskLauncher?: RunTaskLauncher;
-  /** Auth providers a step's `request.authRef` may select. */
-  auth?: AuthProvider[];
   /** OAuth authN/Z gate. When present, the surface is authenticated + scope-gated. */
   authn?: AuthContext;
   /** Structured logger. When present, the worker/request paths log correlated lines;

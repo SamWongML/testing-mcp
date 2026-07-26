@@ -81,3 +81,37 @@ describe("manifestSchema", () => {
     ).toThrow();
   });
 });
+
+describe("manifestEntrySchema — auth providers", () => {
+  const entry = {
+    id: "x.y",
+    kind: "test" as const,
+    version: 1,
+    nodes: [{ id: "s", request: { method: "GET", url: "/" }, assert: [] }],
+    sourcePath: "tests/x/y.test.ts",
+  };
+
+  it("carries the entry's declared providers into the manifest", () => {
+    const parsed = manifestEntrySchema.parse({
+      ...entry,
+      auth: [{ id: "api", type: "bearer", token: "{{secrets.API_TOKEN}}" }],
+    });
+    expect(parsed.auth).toEqual([{ id: "api", type: "bearer", token: "{{secrets.API_TOKEN}}" }]);
+  });
+
+  it("defaults to no providers", () => {
+    expect(manifestEntrySchema.parse(entry).auth).toEqual([]);
+  });
+
+  it("rejects duplicate provider ids — the ids are authRef addressing keys", () => {
+    expect(() =>
+      manifestEntrySchema.parse({
+        ...entry,
+        auth: [
+          { id: "api", type: "bearer", token: "a" },
+          { id: "api", type: "bearer", token: "b" },
+        ],
+      }),
+    ).toThrow();
+  });
+});

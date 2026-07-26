@@ -34,12 +34,17 @@ least one body assertion. A status-only `{ path: "status", op: "eq", value: 204 
 
 - `tests/<domain>/<name>.test.ts` — a `defineTest`
 - `tests/<domain>/<name>.suite.ts` — a `defineSuite` (DAG over `needs`)
-- `tests/_shared/{auth,env,steps}/` — reusable auth profiles, environments, step fragments
+- `tests/_shared/{auth,env,steps}/` — reusable auth declarations, environments, step fragments
 
 ## Authoring notes
 
 - Ids are addressing keys (`needs` edges, `{{nodes.<id>.*}}` templates, manifest lookup) and
   must be unique — duplicates are rejected at parse time.
+- **Auth is data.** A provider is a plain `AuthProviderSpec` (`{ id, type: "bearer" | "basic" |
+  "apiKey" | "oauth2ClientCredentials", … }`) listed in the entry's `auth` array and selected by
+  a step's `request.authRef`. Credentials are `{{secrets.*}}` templates, supplied at run time
+  from `ATP_SECRET_<KEY>` — never authored literals, so nothing sensitive reaches the manifest.
+  `atp validate` fails an `authRef` naming a provider the entry does not declare.
 - Template scopes: `{{env.*}}`, `{{params.*}}`, `{{secrets.*}}`, `{{matrix.*}}`,
   `{{nodes.<id>.<var>}}`, `{{vars.*}}`. Across parallel suite branches use
   `{{nodes.<id>.<var>}}` — `{{vars.*}}` is last-writer-wins and only reliable down a single

@@ -84,6 +84,7 @@ export function normalize(def: AuthoredDef, sourcePath: string): ManifestEntry[]
       owner: def.owner,
       timeoutMs: def.timeoutMs,
       isLongRunning,
+      auth: def.auth,
       paramsSchema,
       matrix: toCellMatrix(unit.matrix),
       env: unit.env,

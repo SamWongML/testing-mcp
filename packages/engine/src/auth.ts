@@ -1,18 +1,20 @@
-import type { RequestSpec } from "@atp/schema";
+import type { AuthProviderSpec, RequestSpec } from "@atp/schema";
 
 import type { AuthProvider, RunContext } from "./context";
 import { sendRequest } from "./http";
 import { resolveTemplates } from "./variables";
 
 /**
- * Authentication providers. A step's `request.authRef` names a
- * provider; `applyAuth` looks it up in the run's registry and lets it inject credentials
- * into the already-template-resolved request. Providers are the reusable building block
- * that lives in `tests/_shared/auth` — `bearer`, `basic`, `api-key`,
- * `oauth2-client-credentials` (token cached per run), and a `custom` escape hatch.
+ * Authentication providers. A step's `request.authRef` names a provider by id;
+ * `applyAuth` looks it up in the run's registry and lets it inject credentials into the
+ * already-template-resolved request.
+ *
+ * Providers are **built from declarations** ({@link AuthProviderSpec}) rather than authored as
+ * functions, so an entry's providers travel in the manifest and the engine needs no access to
+ * authored source to authenticate a run.
  *
  * After a provider runs, `applyAuth` re-resolves templates in the request so credentials
- * expressed as templates — e.g. `bearerAuth({ token: "{{secrets.API_TOKEN}}" })` —
+ * expressed as templates — e.g. `{ type: "bearer", token: "{{secrets.API_TOKEN}}" }` —
  * resolve against the run context. Redaction masks the auth header before persistence.
  */
 
@@ -34,7 +36,7 @@ function withHeaders(request: RequestSpec, headers: Record<string, string>): Req
 }
 
 /** `Authorization` bearer token. */
-export function bearerAuth(opts: { id: string; token: string }): AuthProvider {
+function bearerAuth(opts: { id: string; token: string }): AuthProvider {
   return {
     id: opts.id,
     apply: (request) => withHeaders(request, { authorization: `Bearer ${opts.token}` }),
@@ -42,7 +44,7 @@ export function bearerAuth(opts: { id: string; token: string }): AuthProvider {
 }
 
 /** HTTP basic auth: `Authorization: Basic base64(user:pass)`. */
-export function basicAuth(opts: { id: string; username: string; password: string }): AuthProvider {
+function basicAuth(opts: { id: string; username: string; password: string }): AuthProvider {
   const encoded = Buffer.from(`${opts.username}:${opts.password}`).toString("base64");
   return {
     id: opts.id,
@@ -51,7 +53,7 @@ export function basicAuth(opts: { id: string; username: string; password: string
 }
 
 /** API key passed either as a request header (default) or a query parameter. */
-export function apiKeyAuth(opts: {
+function apiKeyAuth(opts: {
   id: string;
   name: string;
   value: string;
@@ -72,7 +74,7 @@ export function apiKeyAuth(opts: {
  * nodes hits the token endpoint a single time. Concurrent nodes share the in-flight
  * fetch because the *promise* is cached.
  */
-export function oauth2ClientCredentials(opts: {
+function oauth2ClientCredentials(opts: {
   id: string;
   tokenUrl: string;
   clientId: string;
@@ -125,28 +127,40 @@ async function fetchClientCredentialsToken(
   return token;
 }
 
-/** Escape hatch: an arbitrary request transform (e.g. request signing). */
-export function customAuth(opts: {
-  id: string;
-  apply: (request: RequestSpec, ctx: RunContext) => RequestSpec | Promise<RequestSpec>;
-}): AuthProvider {
-  return { id: opts.id, apply: opts.apply };
+/** Build the executable provider for one declaration. The `default` arm is reachable only
+ * from an unvalidated spec (the Zod union rejects an unknown type), and throws rather than
+ * returning a no-op provider that would send the request unauthenticated. */
+export function buildAuthProvider(spec: AuthProviderSpec): AuthProvider {
+  switch (spec.type) {
+    case "bearer":
+      return bearerAuth(spec);
+    case "basic":
+      return basicAuth(spec);
+    case "apiKey":
+      return apiKeyAuth(spec);
+    case "oauth2ClientCredentials":
+      return oauth2ClientCredentials(spec);
+    default:
+      throw new Error(
+        `unknown auth provider type "${(spec as { type: string }).type}" for id "${(spec as { id: string }).id}"`,
+      );
+  }
 }
 
 /**
- * Index a list of providers by id into the registry the run context carries. Ids are
- * the `authRef` addressing keys, so a duplicate throws (mirroring `topoSort`/schema
- * `uniqueById`) rather than silently dropping a provider.
+ * Build the registry the run context carries, keyed by id. Ids are the `authRef` addressing
+ * keys, so a duplicate throws (mirroring `topoSort`/schema `uniqueById`) rather than silently
+ * dropping a provider.
  */
 export function buildAuthRegistry(
-  providers: AuthProvider[] | undefined,
+  specs: AuthProviderSpec[] | undefined,
 ): Record<string, AuthProvider> {
   const registry: Record<string, AuthProvider> = {};
-  for (const provider of providers ?? []) {
-    if (provider.id in registry) {
-      throw new Error(`duplicate auth provider id "${provider.id}"`);
+  for (const spec of specs ?? []) {
+    if (spec.id in registry) {
+      throw new Error(`duplicate auth provider id "${spec.id}"`);
     }
-    registry[provider.id] = provider;
+    registry[spec.id] = buildAuthProvider(spec);
   }
   return registry;
 }

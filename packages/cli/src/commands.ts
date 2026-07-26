@@ -4,7 +4,12 @@ import { resolve } from "node:path";
 import { compile, importDef } from "@atp/compile";
 import { expandUnits, isSuite, runSuite, runTest, type RunOptionsBase } from "@atp/engine";
 import { renderReport, reportExtension, type ReportFormat } from "@atp/reporting";
-import type { ExecutionResult, ManifestEntry, StepStatus } from "@atp/schema";
+import {
+  secretsFromEnv,
+  type ExecutionResult,
+  type ManifestEntry,
+  type StepStatus,
+} from "@atp/schema";
 
 import { goldenFromResult, type GoldenBlock, type GoldenCapture } from "./golden";
 import { startMockSut, type MockSut } from "./mock-sut";
@@ -44,9 +49,19 @@ export interface ValidateResult {
 /**
  * Compile the corpus (throws on a compile error) and check it against the strictness
  * rules. Violations are returned, not thrown, so the caller can print every one of them.
+ *
+ * An empty corpus throws instead: discovery finding nothing yields zero entries and therefore
+ * zero violations, so `atp validate` would report "ok" having checked nothing at all — the
+ * same trap the strictness rules close one level down.
  */
 export async function validate(root: string = process.cwd()): Promise<ValidateResult> {
   const manifest = await compile({ root });
+  if (manifest.entries.length === 0) {
+    throw new Error(
+      `no tests discovered under ${resolve(root, "tests")} — the corpus is empty, so validation ` +
+        `would pass vacuously. Check the root, or add a *.test.ts / *.suite.ts file.`,
+    );
+  }
   return { entries: manifest.entries.length, violations: strictViolations(manifest) };
 }
 
@@ -89,6 +104,8 @@ export async function runById(id: string, opts: RunOptions = {}): Promise<Execut
       entryId: id,
       manifestHash: manifest.manifestHash,
       gitSha: manifest.gitSha,
+      auth: entry.auth,
+      secrets: secretsFromEnv(process.env),
     };
     if (isSuite(def)) return await runSuite(def, common);
     return await runTest(def, { ...common, params: opts.params });
