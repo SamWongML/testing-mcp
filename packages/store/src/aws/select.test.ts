@@ -10,7 +10,7 @@ import { createTaskStoreProvider } from "./select";
 const config = (env: Record<string, string>) => loadConfig({ ...env });
 
 describe("createTaskStoreProvider", () => {
-  it("defaults to the Postgres task store (the §18 stage-1 collapse)", () => {
+  it("defaults to the Postgres task store (the stage-1 collapse)", () => {
     const provider = createTaskStoreProvider(config({}));
     // `null` stands in for the Db/transaction handle — selection must not touch it.
     expect(provider.forDb(null as never)).toBeInstanceOf(PostgresTaskStore);

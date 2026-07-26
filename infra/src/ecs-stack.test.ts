@@ -49,7 +49,7 @@ describe("EcsStack", () => {
   });
 
   it("runs the stateless server and the worker as two separate services", () => {
-    // §17.2: separate worker service "so long runs never block the request path".
+    //: separate worker service "so long runs never block the request path".
     template.resourceCountIs("AWS::ECS::Service", 2);
     expect(taskDefFor(template, "server")).toBeDefined();
     expect(taskDefFor(template, "worker")).toBeDefined();
@@ -60,7 +60,7 @@ describe("EcsStack", () => {
   it("health-checks the server on /healthz and drains connections on deploy", () => {
     template.hasResourceProperties("AWS::ElasticLoadBalancingV2::TargetGroup", {
       HealthCheckPath: "/healthz",
-      // Rolling deploys are safe only because the service is stateless (ADR-002).
+      // Rolling deploys are safe only because the service is stateless.
       TargetGroupAttributes: Match.arrayWith([
         Match.objectLike({ Key: "deregistration_delay.timeout_seconds" }),
       ]),
@@ -78,8 +78,8 @@ describe("EcsStack", () => {
     expect(rps).toBeDefined();
 
     // Step scaling puts the metric on the *alarm*, not the policy — so the check that the
-    // P10 `queue_depth` signal really drives the workers is: an alarm on that metric whose
-    // action is one of this stack's step-scaling policies (§11.3, §15).
+    // `queue_depth` signal really drives the workers is: an alarm on that metric whose
+    // action is one of this stack's step-scaling policies.
     const stepPolicyIds = Object.entries(policies)
       .filter(([, p]) => p.Properties?.PolicyType === "StepScaling")
       .map(([id]) => id);
@@ -93,7 +93,7 @@ describe("EcsStack", () => {
     expect(stepPolicyIds.some((id) => actionRefs.includes(id))).toBe(true);
   });
 
-  it("injects the store selection as config, not code (P11 exit criterion 3)", () => {
+  it("injects the store selection as config, not code", () => {
     const server = taskDefFor(template, "server");
     const containers = server.Properties as {
       ContainerDefinitions: {
@@ -148,7 +148,7 @@ describe("EcsStack", () => {
     }
   });
 
-  it("omits ecs:RunTask unless the escape hatch is enabled (§11.3 mode 2)", () => {
+  it("omits ecs:RunTask unless the escape hatch is enabled (mode 2)", () => {
     const hasRunTask = (t: Template): boolean =>
       Object.values(t.findResources("AWS::IAM::Policy")).some((p) =>
         JSON.stringify(p.Properties ?? {}).includes("ecs:RunTask"),
@@ -166,7 +166,7 @@ describe("EcsStack", () => {
     expect(protocols).toContain("HTTPS");
 
     // Without the redirect, an agent that forgets the scheme sends its OAuth bearer token
-    // (ADR-007) over cleartext and the ALB happily serves it.
+    // over cleartext and the ALB happily serves it.
     const http = listeners.find((l) => l.Properties?.Protocol === "HTTP");
     expect(http?.Properties?.DefaultActions?.[0]?.Type).toBe("redirect");
     expect(http?.Properties?.DefaultActions?.[0]?.RedirectConfig?.Protocol).toBe("HTTPS");

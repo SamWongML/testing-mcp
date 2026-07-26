@@ -38,7 +38,7 @@ function fileEndingWith(result: ImportResult, suffix: string): string {
   return matches[0]!.content;
 }
 
-describe("importInsomnia — request → defineTest (§13.1)", () => {
+describe("importInsomnia — request → defineTest", () => {
   it("maps a top-level request to a defineTest with the mapped id, method, and url", async () => {
     const result = await importFixture();
     const login = fileEndingWith(result, "tests/petstore/login.test.ts");
@@ -51,7 +51,7 @@ describe("importInsomnia — request → defineTest (§13.1)", () => {
   });
 });
 
-describe("importInsomnia — environment → tests/_shared/env (§13.1)", () => {
+describe("importInsomnia — environment → tests/_shared/env", () => {
   it("emits a defineEnv from environments.data and wires it into each entry", async () => {
     const result = await importFixture();
     const env = fileEndingWith(result, "tests/_shared/env/petstore.ts");
@@ -68,7 +68,7 @@ describe("importInsomnia — environment → tests/_shared/env (§13.1)", () => 
   });
 });
 
-describe("importInsomnia — headers, JSON body, auth (§13.1)", () => {
+describe("importInsomnia — headers, JSON body, auth", () => {
   it("maps headers, a JSON body (with template tags), and bearer auth to authRef", async () => {
     const result = await importFixture();
     const login = fileEndingWith(result, "tests/petstore/login.test.ts");
@@ -88,7 +88,7 @@ describe("importInsomnia — headers, JSON body, auth (§13.1)", () => {
   });
 });
 
-describe("importInsomnia — folder → defineSuite (§13.1)", () => {
+describe("importInsomnia — folder → defineSuite", () => {
   it("maps a request group to a suite with a node per child request", async () => {
     const result = await importFixture();
     const suite = fileEndingWith(result, "tests/petstore/billing.suite.ts");
@@ -105,7 +105,7 @@ describe("importInsomnia — folder → defineSuite (§13.1)", () => {
     const result = await importFixture();
     const suite = fileEndingWith(result, "tests/petstore/billing.suite.ts");
 
-    // The Insomnia `{% response ... %}` tag is not silently resolved: it becomes a TODO marker
+    // The Insomnia `{% response... %}` tag is not silently resolved: it becomes a TODO marker
     // plus a placeholder, so the deterministic scaffold compiles and the agent wires the chain.
     expect(suite).toContain("TODO");
     expect(suite).toContain("import_insomnia_collection");
@@ -113,7 +113,7 @@ describe("importInsomnia — folder → defineSuite (§13.1)", () => {
   });
 });
 
-describe("importInsomnia — Insomnia id → IR id mapping (MIGRATION.md, §19)", () => {
+describe("importInsomnia — Insomnia id → IR id mapping (MIGRATION.md)", () => {
   it("records a mapping row per request and folder, keyed by Insomnia meta id", async () => {
     const { mapping } = await importFixture();
     const by = (insomniaId: string) => mapping.find((m) => m.insomniaId === insomniaId);
@@ -126,7 +126,7 @@ describe("importInsomnia — Insomnia id → IR id mapping (MIGRATION.md, §19)"
   });
 });
 
-describe("importInsomnia — generated drafts compile (P9 exit criterion)", () => {
+describe("importInsomnia — generated drafts compile", () => {
   it("writes drafts that `compile()` normalizes into manifest entries", async () => {
     const ids = await compileDrafts(await importFixture());
     expect(ids).toContain("petstore.login");
@@ -137,7 +137,7 @@ describe("importInsomnia — generated drafts compile (P9 exit criterion)", () =
 describe("importInsomnia — robustness on realistic collection shapes", () => {
   it("flattens nested folders into suite nodes (never emits an empty, non-compiling suite)", async () => {
     // A folder whose only children are folders: the naive one-level filter would yield `nodes: {}`,
-    // which `defineSuite` rejects at compile → contradicts the exit criterion.
+    // which `defineSuite` rejects at compile → a scaffold that cannot compile.
     const result = importInsomnia(`
 type: collection.insomnia.rest/5.0
 name: Nested

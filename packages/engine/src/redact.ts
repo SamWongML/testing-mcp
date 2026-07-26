@@ -4,7 +4,7 @@ import type { EngineResponse, ResolvedRequest } from "./context";
 import { mapDeepStrings } from "./util";
 
 /**
- * Secret redaction (research §10.2, §21). Snapshots persisted to the store/S3 pass
+ * Secret redaction. Snapshots persisted to the store/S3 pass
  * through here first so tokens and PII never land at rest: sensitive header values
  * are masked wholesale, and any known secret *value* is masked wherever it appears
  * in headers or the (string-walked) body.

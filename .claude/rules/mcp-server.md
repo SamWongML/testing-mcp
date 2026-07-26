@@ -7,14 +7,29 @@ paths:
 
 ## The two invariants that shape every file here
 
-- **Stateless request path** (ADR-002). No cross-request memory. `http.ts` builds a **fresh**
+- **Stateless request path.** No cross-request memory. `http.ts` builds a **fresh**
   `McpServer` + `WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined })`
   **per request**. Anything that must outlive a request goes in `ServerContext` (injected at
   boot) or in the store — never in a module-level mutable. Because there is no session, a
   `runId` must be resolvable from durable state alone (hence the `{env}/index/run/{runId}`
   pointer object in `run-store.ts` — `ArtifactStore` has no `list()`).
 - **Additive tool surface.** Never rename or remove a tool or a field; add optional fields.
-  Existing clients must keep working across phases.
+  Existing clients must keep working across releases.
+
+## The surface
+
+Tests are *data*, so authoring a new test never needs a new tool. The surface is fixed:
+
+- **Sync tools.** `list_tests` (catalog query) · `describe_test` (one entry's node graph + params
+  schema) · `run_test` (sync verdict; auto-tasks a long-running test) · `get_report {runId, format}`
+  (re-render a stored run: md/html/junit/json/summary) · `list_runs` (history).
+- **Async tools** (need a run db). `run_suite` (an SEP-1686 Task) · `run_selection {tags}` (batch) ·
+  `get_run`/`get_run_result`/`cancel_run` — mirror tools observing the same durable state as the Task.
+- **Prompts** (`prompts/`, always registered). `import_insomnia_collection` · `author_new_test` ·
+  `triage_failure` · `generate_suite` · `regenerate_reports`. Each renders a concrete instruction
+  template over the real tools and CLI — edit the template, not each caller's prompt.
+- **Resources** (`resources.ts`). `test://catalog` (the manifest) · `test://{id}` (one normalized
+  entry) · `run://{runId}/report.md` · `run://{runId}/trace.json`.
 
 ## Authorization has two layers — know which one covers your code
 
@@ -28,19 +43,19 @@ straight into `SdkTaskStore` without a callback, and `TaskStore` is never given 
 
 **So:** adding a tool ⇒ add `guardScope` in its handler. Adding or enabling any *protocol-level*
 method the SDK handles for us ⇒ add it to `TASK_METHOD_SCOPES`, because no handler guard will run.
-P10 shipped this bypass initially (any zero-scope token could cancel any run); `auth-http.test.ts`
-holds the regression tests.
+This bypass shipped once (any zero-scope token could cancel any run); `auth-http.test.ts` holds the
+regression tests.
 
 ## Layout
 
 - `context.ts` — `ServerContext`, the composition root (manifest, sourceRoot, artifacts,
-  artifactEnv, optional `db`, engine `auth` providers, and P10's optional `authn`/`logger`/
+  artifactEnv, optional `db`, engine `auth` providers, and the optional `authn`/`logger`/
   `telemetry`). Injected, never per-request.
 - `server.ts` — `buildMcpServer(ctx)`: pure/stateless registration of tools + resources;
   enables the async task surface + `SdkTaskStore` + Tasks capability when `ctx.db` is present.
 - `tools.ts`, `resources.ts` — the sync surface itself. Every handler takes `extra` and calls
   `guardScope(ctx, extra, SCOPES.READ|RUN)`; the four run tools also `auditRun(...)`.
-- `auth.ts` — the pure OAuth core (P10, ADR-007): `parseBearerToken`, `SCOPES`, `assertScope`/
+- `auth.ts` — the pure OAuth core: `parseBearerToken`, `SCOPES`, `assertScope`/
   `ScopeError`, RFC 9728 `protectedResourceMetadata` + `wwwAuthenticate`, `createAuthenticator`
   (jose JWT verify: signature/issuer/RFC 8707 audience/expiry → SDK `AuthInfo`). Side-effect free.
 - `guard.ts` — handler-side `guardScope` / `auditRun` / `principalOf`; both the scope check and
@@ -54,7 +69,7 @@ holds the regression tests.
   from undici's diagnostics_channel, never an engine OTel import.
 - `execute.ts` — `executeEntry`: the shared test/suite executor (signal + `onProgress` +
   `runId`) used by both the inline `run_test` and the worker.
-- `tasks.ts` — async lifecycle glue over the P6 queue + `PostgresTaskStore`: `submitRun`
+- `tasks.ts` — async lifecycle glue over the queue + `PostgresTaskStore`: `submitRun`
   (atomic create-task + enqueue, idempotent), `getRun`/`getRunResult`/`cancelRun`.
 - `worker.ts` — the `MODE=worker` claim→execute→reap loop (`pnpm dev:worker`).
 - `sdk-tasks.ts` — `SdkTaskStore`: bridges the experimental MCP Tasks protocol onto the same
@@ -72,8 +87,7 @@ holds the regression tests.
 ## Working here
 
 - The engine stays pure: import `@atp/engine`, never the reverse.
-- Config lives in `@atp/schema`'s `configSchema` — add optional fields **there** first, then
-  consume (ADR-003).
+- Config lives in `@atp/schema`'s `configSchema` — add optional fields **there** first, then consume.
 - **The MCP SDK Task API is experimental — verify against the installed SDK `.d.ts` under
   `node_modules/@modelcontextprotocol/` or Context7, not memory.**
 - Tests here use the in-memory client from `testkit.ts`; db-backed paths skip without

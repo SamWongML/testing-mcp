@@ -4,7 +4,7 @@ import type { Db } from "./db/client";
 import { catalogEntries, manifests } from "./db/schema";
 
 /**
- * Catalog snapshot writer (research §16.1). The server records the manifest it loaded at
+ * Catalog snapshot writer. The server records the manifest it loaded at
  * boot — one `manifests` row plus a `catalog_entries` row per test/suite — so run history
  * (`runs.manifest_hash`, an FK-free `text` column) can be joined back to the catalog it
  * ran against. Idempotent: the manifest hash is content-addressed, so re-recording the

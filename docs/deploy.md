@@ -1,10 +1,9 @@
 # Deployment runbook
 
-> Index: [docs/PROGRESS.md](./PROGRESS.md) · Architecture: [docs/research.md](./research.md) §17
-> · Infra code: [`infra/`](../infra) · Container: [`Dockerfile`](../Dockerfile)
+> Architecture: [docs/research.md](./research.md) · Infra code: [`infra/`](../infra) · Container: [`Dockerfile`](../Dockerfile)
 
-How to get the platform onto AWS ECS and back off it again. Everything here is CDK
-(ADR-008); nothing is clicked in the console.
+How to get the platform onto AWS ECS and back off it again. Everything here is CDK; nothing is
+clicked in the console.
 
 ## What gets deployed
 
@@ -12,10 +11,10 @@ Four stacks (`infra/bin/app.ts`), deployed in this order — each depends on the
 
 | Stack | Contains | Why |
 |---|---|---|
-| `Atp-<env>-Network` | VPC (2 AZs), public + private subnets, 2 NAT gateways, **gateway endpoints** for DynamoDB + S3, the shared app/ALB security groups | Tasks run private; DynamoDB/S3 traffic skips the NAT (§17.2) |
-| `Atp-<env>-Data` | RDS PostgreSQL 16 **Multi-AZ**, DynamoDB `tasks` + `idempotency` tables (TTL on `ttl`), S3 artifact bucket (IA at 30d) | ADR-005 storage split |
-| `Atp-<env>-Ecs` | Fargate cluster, ALB'd `mcp-server` service (scales on RPS), `worker` service (scales on `queue_depth`), IAM task roles, Secrets Manager wiring | §17.1 |
-| `Atp-<env>-Observability` | CloudWatch dashboard + alarms (queue depth, p95 duration, pass rate, worker errors) | §15 |
+| `Atp-<env>-Network` | VPC (2 AZs), public + private subnets, 2 NAT gateways, **gateway endpoints** for DynamoDB + S3, the shared app/ALB security groups | Tasks run private; DynamoDB/S3 traffic skips the NAT |
+| `Atp-<env>-Data` | RDS PostgreSQL 16 **Multi-AZ**, DynamoDB `tasks` + `idempotency` tables (TTL on `ttl`), S3 artifact bucket (IA at 30d) | Storage split: record, hot state, blobs |
+| `Atp-<env>-Ecs` | Fargate cluster, ALB'd `mcp-server` service (scales on RPS), `worker` service (scales on `queue_depth`), IAM task roles, Secrets Manager wiring | The request path and the run path scale separately |
+| `Atp-<env>-Observability` | CloudWatch dashboard + alarms (queue depth, p95 duration, pass rate, worker errors) | Operational visibility |
 
 The **same image** runs all roles; `MODE` picks one:
 
@@ -102,10 +101,10 @@ Set through CDK context (`-c key=value`) and surfaced to the containers as envir
 | `env` | Environment name; prefixes stack + resource names. `prod` also enables deletion protection and `RETAIN` removal policies. |
 | `imageUri` | Image the services run. |
 | `alarmEmail` | Creates an SNS topic and subscribes the address to every alarm. Without it the alarms exist but page nobody. |
-| `certificateArn` | ACM certificate for the ALB. **Set this.** Without it the listener is plain **HTTP**, so OAuth bearer tokens (ADR-007) cross the network in cleartext. With it, `:80` redirects to `:443`. |
+| `certificateArn` | ACM certificate for the ALB. **Set this.** Without it the listener is plain **HTTP**, so OAuth bearer tokens cross the network in cleartext. With it, `:80` redirects to `:443`. |
 | `otlpEndpoint` | Turns on `OTEL_ENABLED` + `OTEL_EXPORTER=otlp` pointed at your collector. |
-| `authIssuer` / `authResource` / `authJwksUri` | All three ⇒ the OAuth 2.1 gate is enabled (ADR-007). Omit for the internal-deployment path where the ALB is the boundary. |
-| `enableRunTask` | `true` grants the server `ecs:RunTask` and configures the §11.3 mode-2 escape hatch (see below). |
+| `authIssuer` / `authResource` / `authJwksUri` | All three ⇒ the OAuth 2.1 gate is enabled. Omit for the internal-deployment path where the ALB is the boundary. |
+| `enableRunTask` | `true` grants the server `ecs:RunTask` and configures the mode-2 escape hatch (see below). |
 
 Container-level knobs (see `packages/schema/src/config.ts` for the full, validated list):
 `TASK_STORE` (`postgres`\|`dynamodb`), `ARTIFACT_STORE` (`local`\|`s3`), `DATABASE_SECRET`,
@@ -126,7 +125,7 @@ tasks re-read it.
 aws ecs update-service --cluster atp-prod --service <service> --force-new-deployment
 ```
 
-### Scaling from stage 1 to stage 2 (§18)
+### Scaling from stage 1 to stage 2
 
 `TASK_STORE` is the switch. `postgres` collapses hot task state into the Postgres `tasks`
 table (fewer moving parts, transactional with the queue); `dynamodb` moves polling onto
@@ -134,7 +133,7 @@ DynamoDB with native TTL. Nothing above `@atp/store` changes — flip the enviro
 variable and redeploy. The `Data` stack always provisions the DynamoDB tables, so the
 switch needs no infrastructure change.
 
-### Isolated runs (§11.3 mode 2)
+### Isolated runs (mode 2)
 
 With `-c enableRunTask=true`, a submission flagged `isolated: true` (on `run_suite` /
 `run_selection`) *also* launches a one-off Fargate task for that run. Use it for very long or
@@ -205,8 +204,7 @@ deletion protection, so they survive a stack delete and must be removed delibera
   and the `status` dimension on `runs_total`, **no metric reaches CloudWatch** — which means
   the dashboard is blank, every alarm sits in `INSUFFICIENT_DATA`, and the worker service's
   `queue_depth` step-scaling never fires (workers stay pinned at `desiredCount`). Run an ADOT
-  collector sidecar (or a central gateway) as part of your rollout. Tracked in
-  [deferred.md](./deferred.md).
+  collector sidecar (or a central gateway) as part of your rollout.
 - **Tracing.** With `otlpEndpoint` set and a collector running, one trace covers agent →
   server → worker → SUT: the `traceparent` travels in the job spec across the enqueue→claim
   process hop.

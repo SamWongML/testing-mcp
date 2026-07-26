@@ -3,7 +3,7 @@ import type { ExecutionResult, StepResult } from "@atp/schema";
 import { assertionLine } from "./util";
 
 /**
- * The heuristic "likely cause" classifier (research §14, ADR-006). Given a finished
+ * The heuristic "likely cause" classifier. Given a finished
  * `ExecutionResult`, it names the most probable reason a run did not pass and the next
  * action an agent should take — distinguishing auth (401/403) from a server error (5xx),
  * a timeout, a connection failure, a schema mismatch, and a plain assertion mismatch.

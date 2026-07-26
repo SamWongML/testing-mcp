@@ -13,8 +13,8 @@ function captureLogger(level = "info") {
 }
 
 /**
- * Structured logging (research §15): every line is JSON, correlation ids thread through child
- * loggers, and secret-shaped fields never reach the log (redaction before persist, §21).
+ * Structured logging: every line is JSON, correlation ids thread through child
+ * loggers, and secret-shaped fields never reach the log (redaction before persist).
  */
 describe("createLogger", () => {
   it("emits structured JSON carrying the message and level", () => {

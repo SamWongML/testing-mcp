@@ -26,7 +26,7 @@ import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 
 /**
- * OpenTelemetry tracing + metrics (research §15). A single provider pair is installed at boot
+ * OpenTelemetry tracing + metrics. A single provider pair is installed at boot
  * (`initTelemetry`); {@link withSpan} wraps the MCP-call → run → SUT-call hierarchy so an
  * agent-initiated run is traceable end to end, and {@link RunMetrics} publishes the run/queue
  * signals that drive dashboards and worker autoscaling (`queue_depth`). Exporters are injectable:
@@ -34,13 +34,13 @@ import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
  */
 
 /** The attribute key `runs_total`/`run_duration_ms` are dimensioned by. The CloudWatch alarms
- *  in `infra/src/observability-stack.ts` query this exact key (`RUN_STATE_DIMENSION`), and
- *  CloudWatch matches dimensions as an exact set — a mismatch silently yields no datapoints
- *  and leaves the alarms in INSUFFICIENT_DATA forever rather than erroring. Tests on both
- *  sides pin the literal. */
+ * in `infra/src/observability-stack.ts` query this exact key (`RUN_STATE_DIMENSION`), and
+ * CloudWatch matches dimensions as an exact set — a mismatch silently yields no datapoints
+ * and leaves the alarms in INSUFFICIENT_DATA forever rather than erroring. Tests on both
+ * sides pin the literal. */
 export const RUN_STATE_ATTRIBUTE = "status";
 
-/** The run/queue metric instruments (§15). Thin wrappers so callers record intent, not OTel. */
+/** The run/queue metric instruments. Thin wrappers so callers record intent, not OTel. */
 export interface RunMetrics {
   /** One run reached a terminal state — bumps `runs_total{status}` + records `run_duration_ms`. */
   recordRun(status: string, durationMs: number): void;
@@ -81,7 +81,7 @@ export function initTelemetry(opts: TelemetryOptions): Telemetry {
   tracerProvider.register();
   // Auto-instrument the engine's undici HTTP calls (via diagnostics_channel) so every request
   // to a system-under-test becomes a child span of the active run span — no engine coupling
-  // (the engine stays pure; §20 row 1).
+  // (the engine stays pure; row 1).
   registerInstrumentations({
     tracerProvider,
     instrumentations: [new UndiciInstrumentation()],
@@ -168,7 +168,7 @@ export async function withSpan<T>(
 }
 
 /**
- * Cross-process trace propagation (research §15). The server enqueues a job and a *different*
+ * Cross-process trace propagation. The server enqueues a job and a *different*
  * process claims it, so the W3C `traceparent` has to travel with the job — otherwise the
  * worker's run span starts a fresh trace and agent→server→worker→SUT is three disconnected
  * traces. {@link injectTraceContext} serializes the active context into the job spec at
@@ -177,7 +177,7 @@ export async function withSpan<T>(
 export type TraceCarrier = Record<string, string>;
 
 /** Serialize the currently-active span context into a carrier, or `undefined` when there is
- *  no active trace (telemetry off, or a submission outside any span). */
+ * no active trace (telemetry off, or a submission outside any span). */
 export function injectTraceContext(): TraceCarrier | undefined {
   const carrier: TraceCarrier = {};
   propagation.inject(otelContext.active(), carrier);
@@ -185,7 +185,7 @@ export function injectTraceContext(): TraceCarrier | undefined {
 }
 
 /** Rebuild the submitting process's context from a carrier; falls back to the active context
- *  when the job carries none (older jobs, or telemetry disabled at submit time). */
+ * when the job carries none (older jobs, or telemetry disabled at submit time). */
 export function extractTraceContext(carrier: TraceCarrier | undefined): Context {
   const active = otelContext.active();
   return carrier ? propagation.extract(active, carrier) : active;

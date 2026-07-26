@@ -5,8 +5,7 @@ declarative `defineTest`/`defineSuite` values, compiled to a normalized JSON man
 and executed by a pure in-house DAG engine.
 
 - **Architecture:** [docs/research.md](./docs/research.md)
-- **Implementation plan:** [docs/implementation-plan.md](./docs/implementation-plan.md)
-- **Live status:** [docs/PROGRESS.md](./docs/PROGRESS.md)
+- **Deployment runbook:** [docs/deploy.md](./docs/deploy.md)
 - **Agent guide:** [CLAUDE.md](./CLAUDE.md)
 
 ## Package map
@@ -30,7 +29,7 @@ pnpm install
 pnpm typecheck   # tsc --noEmit across the workspace
 pnpm lint        # eslint
 pnpm test        # vitest run
-pnpm compile     # build dist/manifest.json (P4+)
+pnpm compile     # build dist/manifest.json
 ```
 
 Requires Node 22+ and pnpm (`corepack enable`).

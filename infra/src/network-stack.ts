@@ -3,7 +3,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import type { Construct } from "constructs";
 
 /**
- * VPC + networking (research §17.1/§17.2). ECS tasks run in **private** subnets and reach
+ * VPC + networking. ECS tasks run in **private** subnets and reach
  * the systems under test through NAT; DynamoDB and S3 are reached through **gateway**
  * endpoints instead, which keeps that traffic private and off the NAT's per-GB bill.
  */
@@ -30,7 +30,7 @@ export class NetworkStack extends Stack {
    */
   readonly appSecurityGroup: ec2.SecurityGroup;
   /** The internet-facing ALB's security group. Owned here for the same reason: the ingress
-   *  rule it needs on {@link appSecurityGroup} is then a purely intra-stack edge. */
+   * rule it needs on {@link appSecurityGroup} is then a purely intra-stack edge. */
   readonly albSecurityGroup: ec2.SecurityGroup;
 
   constructor(scope: Construct, id: string, props: NetworkStackProps) {

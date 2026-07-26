@@ -1,16 +1,16 @@
-# Local dev + integration-test dependencies (research §16, P6 store · P11 AWS adapters).
+# Local dev + integration-test dependencies (store · AWS adapters).
 #
 # Bring the services up, then point the integration tests at them:
 #
-#   docker compose -f docker-compose.dev.yml up -d
-#   ATP_TEST_DATABASE_URL=postgresql://atp:atp@localhost:5432/atp \
-#   ATP_TEST_DYNAMO_ENDPOINT=http://localhost:8000 \
-#   ATP_TEST_S3_ENDPOINT=http://localhost:9000 \
-#     pnpm --filter @atp/store test
+# docker compose -f docker-compose.dev.yml up -d
+# ATP_TEST_DATABASE_URL=postgresql://atp:atp@localhost:5432/atp \
+# ATP_TEST_DYNAMO_ENDPOINT=http://localhost:8000 \
+# ATP_TEST_S3_ENDPOINT=http://localhost:9000 \
+# pnpm --filter @atp/store test
 #
 # Each suite gates on its own env var and `describe.skipIf`s out when it is unset, so
 # `pnpm test` stays green with no services running. Dev itself needs only Postgres;
-# dynamodb-local and MinIO exist to test the P11 DynamoTaskStore / S3ArtifactStore
+# dynamodb-local and MinIO exist to test the DynamoTaskStore / S3ArtifactStore
 # adapters against real AWS-protocol servers rather than mocks.
 
 services:
@@ -30,7 +30,7 @@ services:
     volumes:
       - atp_pgdata:/var/lib/postgresql/data
 
-  # Hot task state + idempotency (§16.2). In-memory so each `up` starts clean; the tests
+  # Hot task state + idempotency. In-memory so each `up` starts clean; the tests
   # create their own throwaway tables per suite anyway.
   dynamodb:
     image: amazon/dynamodb-local:2.5.2
@@ -38,7 +38,7 @@ services:
     ports:
       - "8000:8000"
 
-  # S3-compatible artifact storage (§16.3) for the S3ArtifactStore suite, incl. presigned URLs.
+  # S3-compatible artifact storage for the S3ArtifactStore suite, incl. presigned URLs.
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: ["server", "/data", "--console-address", ":9001"]

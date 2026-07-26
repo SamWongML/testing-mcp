@@ -3,7 +3,7 @@ import { defineTest } from "@atp/engine";
 import { local } from "../_shared/env/local";
 
 /**
- * A standalone test (research §7.1). Runnable on its own via `atp run identity.login` and
+ * A standalone test. Runnable on its own via `atp run identity.login` and
  * reused by `billing/end-to-end-refund.suite.ts` — one definition, two consumers. `params`
  * is a Zod schema, so the MCP tool input schema is derived from it. The `password` default
  * is a dev literal here; a real run passes it as a param or via `{{secrets.*}}`.

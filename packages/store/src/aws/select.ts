@@ -12,7 +12,7 @@ import { DynamoTaskStore } from "./dynamo-tasks";
 import { S3ArtifactStore } from "./s3-artifacts";
 
 /**
- * Config-driven store selection (P11; research §18's scalability curve). The whole point is
+ * Config-driven store selection. The whole point is
  * that **only this file** knows which backing is in play: callers ask the provider for a
  * task store and get the configured one, so moving from the stage-1 Postgres collapse to
  * DynamoDB is an environment change, not a code change.
@@ -27,9 +27,9 @@ export interface TaskStoreProvider {
   /** The task store to use, bound to `db` when the backing is transactional. */
   forDb: (db: Db) => TaskStateStore;
   /** True when the store shares the caller's Postgres transaction, so an insert-only
-   *  `create()` is itself a sufficient dedupe for a submission. */
+   * `create()` is itself a sufficient dedupe for a submission. */
   transactional: boolean;
-  /** Present only when a dedicated idempotency table is configured (§16.2). */
+  /** Present only when a dedicated idempotency table is configured. */
   idempotency?: IdempotencyStore;
   /** Release any SDK clients this provider owns. */
   close: () => void;
@@ -63,7 +63,7 @@ export function createTaskStoreProvider(config: Config): TaskStoreProvider {
 }
 
 /**
- * The artifact-store equivalent (§16.3): filesystem in dev/test, S3 in a deployment.
+ * The artifact-store equivalent: filesystem in dev/test, S3 in a deployment.
  *
  * Unlike {@link createTaskStoreProvider} this returns the store directly, with no `close`.
  * There is nowhere meaningful to call one from — `ServerContext` holds the store for the

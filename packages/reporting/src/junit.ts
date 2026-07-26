@@ -3,7 +3,7 @@ import type { ExecutionResult, StepResult } from "@atp/schema";
 import { assertionLine, escapeXml, secs } from "./util";
 
 /**
- * JUnit XML report (research §14) — drops straight into CI dashboards. One `<testsuite>`
+ * JUnit XML report — drops straight into CI dashboards. One `<testsuite>`
  * per run, one `<testcase>` per step: `failed` → `<failure>`, `errored` → `<error>`,
  * and `skipped`/`cancelled` → `<skipped>` (JUnit has no cancelled state). All dynamic
  * values are XML-escaped.

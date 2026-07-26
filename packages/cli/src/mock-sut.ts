@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 
 /**
  * A tiny local mock SUT (system under test) so the sample corpus runs offline via
- * `atp run` (research §P4). It is not a real API — just enough deterministic routes to
+ * `atp run`. It is not a real API — just enough deterministic routes to
  * exercise `identity.login`, `billing.get-invoice`, and the `billing.e2e-refund` chain.
  * Built on `node:http` (no framework dependency); each instance binds an ephemeral
  * loopback port so tests and CLI runs never collide.

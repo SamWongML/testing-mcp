@@ -38,7 +38,7 @@ request/response.
   includes the query string, not just headers and body: a secret-sourced api-key in `query`
   must not leak at rest.
 - **`fnHash`** is computed here from the authored `fn`; `@atp/schema` only models the marker.
-- Representation changes land in `@atp/schema` **first**, then this package adapts (ADR-003).
+- Representation changes land in `@atp/schema` **first**, then this package adapts.
 
 ## Conventions
 

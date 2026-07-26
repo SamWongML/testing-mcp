@@ -20,7 +20,7 @@ import {
 } from "./tools";
 
 /**
- * Build the MCP server for a given {@link ServerContext} (research §8, ADR-002). Pure and
+ * Build the MCP server for a given {@link ServerContext}. Pure and
  * stateless: it registers the tool/resource surface against the injected context and never
  * touches module-level mutable state, so a fresh server can be built per request in the
  * stateless HTTP path or once for an in-process client in tests.
@@ -29,7 +29,7 @@ import {
  * advertises the Tasks capability with a durable {@link SdkTaskStore} (so `run_suite` is a
  * real SEP-1686 task and `tasks/get|result|cancel` work), and registers the mirror tools
  * (`run_selection`/`get_run`/`get_run_result`/`cancel_run`) for non-Task clients. Without a
- * db the server is synchronous-only (the P7 surface) since async runs need durable state.
+ * db the server is synchronous-only (surface) since async runs need durable state.
  */
 export function buildMcpServer(ctx: ServerContext): McpServer {
   const asyncEnabled = Boolean(ctx.db);

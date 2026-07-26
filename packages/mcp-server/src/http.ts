@@ -16,7 +16,7 @@ import { buildMcpServer } from "./server";
 import { withSpan } from "./telemetry";
 
 /**
- * The HTTP surface (research §8, §15, ADR-002/007). MCP is served at `/mcp` over the
+ * The HTTP surface. MCP is served at `/mcp` over the
  * Streamable-HTTP transport in **stateless** mode: a fresh server + transport is built per
  * request and discarded, so no session state crosses requests. `/healthz` is liveness;
  * `/readyz` is readiness (the manifest loaded).

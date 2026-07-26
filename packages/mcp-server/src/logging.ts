@@ -1,10 +1,10 @@
 import pino, { type DestinationStream, type Logger } from "pino";
 
 /**
- * Structured logging (research §15). One Pino JSON logger per process; correlation ids
+ * Structured logging. One Pino JSON logger per process; correlation ids
  * (`runId`/`taskId`/`traceId`/`nodeId`) are attached via `logger.child({...})` at the point a
  * run/request/node is entered, so every downstream line carries them. Secret-shaped fields are
- * redacted before they can reach stdout (§21 "redact before persist" applied to logs).
+ * redacted before they can reach stdout ("redact before persist" applied to logs).
  */
 
 export type { Logger } from "pino";
@@ -18,7 +18,7 @@ export interface CorrelationIds {
 }
 
 /** Field paths scrubbed from every log line. Covers auth headers, bearer tokens, and the
- *  engine's `secrets` bag at the top level and one level of nesting (pino `*` is single-level). */
+ * engine's `secrets` bag at the top level and one level of nesting (pino `*` is single-level). */
 export const REDACT_PATHS = [
   "authorization",
   "token",
@@ -43,7 +43,7 @@ export interface LoggerOptions {
 
 /**
  * Build the process logger. `destination` lets tests capture output; in production pino
- * defaults to stdout (the ECS `awslogs` driver ships it to CloudWatch, §15).
+ * defaults to stdout (the ECS `awslogs` driver ships it to CloudWatch).
  */
 export function createLogger(opts: LoggerOptions = {}, destination?: DestinationStream): Logger {
   return pino(

@@ -4,9 +4,9 @@ import type { Db } from "./db/client";
 import { tasks } from "./db/schema";
 
 /**
- * Hot task state (SEP-1686 §11.1). The `TaskStateStore` interface is the seam the MCP
- * layer (P8) polls and cancels through; `PostgresTaskStore` is the stage-1 backing that
- * collapses DynamoDB into Postgres (§18). The P11 DynamoDB adapter will implement this
+ * Hot task state (SEP-1686). The `TaskStateStore` interface is the seam the MCP
+ * layer polls and cancels through; `PostgresTaskStore` is the stage-1 backing that
+ * collapses DynamoDB into Postgres. The DynamoDB adapter will implement this
  * same interface, so nothing above the store changes when it swaps in.
  */
 
@@ -22,7 +22,7 @@ export interface TaskRecord {
   cancelRequested: boolean;
   /** TTL: when the retained result expires and `deleteExpired` may reap it. */
   expiresAt: Date | null;
-  /** When the task was first created — SEP-1686 `Task.createdAt` (§11.1). */
+  /** When the task was first created — SEP-1686 `Task.createdAt`. */
   createdAt: Date;
   /** When the task row was last written — SEP-1686 `Task.lastUpdatedAt`. */
   updatedAt: Date;
@@ -55,8 +55,8 @@ export interface TaskStateStore {
   /** Create or fully replace a task row. */
   put(input: PutTaskInput): Promise<TaskRecord>;
   /** Insert-only create: returns the new row, or `null` if a task with that `runId`
-   *  already exists (leaving it untouched). The atomic primitive idempotent run
-   *  submission builds on — dedupe by the caller's idempotency key = runId. */
+   * already exists (leaving it untouched). The atomic primitive idempotent run
+   * submission builds on — dedupe by the caller's idempotency key = runId. */
   create(input: PutTaskInput): Promise<TaskRecord | null>;
   get(runId: string): Promise<TaskRecord | null>;
   /** Patch the provided fields; returns the new row, or null if the task is absent. */
@@ -87,7 +87,7 @@ function toRecord(row: Row): TaskRecord {
 }
 
 /** Absolute expiry from either an explicit date or a relative TTL. Shared with the DynamoDB
- *  adapter so the two backends can never disagree about what `ttlMs` means. */
+ * adapter so the two backends can never disagree about what `ttlMs` means. */
 export function resolveExpiry(input: Pick<PutTaskInput, "expiresAt" | "ttlMs">): Date | undefined {
   if (input.expiresAt) return input.expiresAt;
   if (input.ttlMs !== undefined) return new Date(Date.now() + input.ttlMs);
@@ -95,7 +95,7 @@ export function resolveExpiry(input: Pick<PutTaskInput, "expiresAt" | "ttlMs">):
 }
 
 /** The column values a task row is written with (shared by `put` and `create`). `updatedAt`
- *  is appended only by the upsert path; on insert the column default fills it. */
+ * is appended only by the upsert path; on insert the column default fills it. */
 function rowValues(input: PutTaskInput) {
   return {
     runId: input.runId,

@@ -1,15 +1,15 @@
 import type { AuthoredEnv } from "@atp/schema";
 
 /**
- * Matrix expansion (research §7.3 / §12): one authored file with a `matrix` becomes N
+ * Matrix expansion: one authored file with a `matrix` becomes N
  * discrete executable units — the cartesian product of its named dimensions. Each unit
  * is separately addressable (`identity.login.matrix#region=us,tier=free`) so an agent can
  * run one cell or all, while the corpus keeps a single authored definition.
  *
  * Expansion is a plan-time concern: `expandUnits` turns a definition into the list of
  * `{ id, matrix, env }` descriptors, then a caller runs each via `runTest`/`runSuite`
- * (passing the unit's `matrix` coords + resolved `env`). The `env: (m) => …` builder from
- * §7.3 (deferred from P1) is resolved here, per cell.
+ * (passing the unit's `matrix` coords + resolved `env`). The `env: (m) => …` builder is
+ * resolved here, per cell.
  */
 
 /** One cell of a matrix's cartesian product. */
@@ -27,7 +27,7 @@ export interface MatrixUnit {
   /** Coordinates that populate `{{matrix.*}}`; empty for a non-matrix unit. */
   matrix: Record<string, unknown>;
   /** Env resolved for this cell (authored `env` builder called with the cell's coords),
-   *  the static env object, or undefined when none is authored. */
+   * the static env object, or undefined when none is authored. */
   env?: Record<string, unknown>;
 }
 
@@ -39,7 +39,7 @@ function formatValue(value: unknown): string {
 /**
  * Cartesian product of a matrix's named dimensions, in authored (row-major) order:
  * the last dimension varies fastest. `{ region: ["us","eu"], tier: ["free","pro"] }`
- * → `region=us,tier=free` / `region=us,tier=pro` / `region=eu,tier=free` / … .
+ * → `region=us,tier=free` / `region=us,tier=pro` / `region=eu,tier=free` / ….
  * A matrix with no dimensions yields a single empty cell (the empty product).
  */
 export function expandMatrix(matrix: Record<string, unknown[]>): MatrixCell[] {
@@ -61,8 +61,8 @@ export function expandMatrix(matrix: Record<string, unknown[]>): MatrixCell[] {
 }
 
 /** Resolve an authored `env` for a cell: call the builder with the coords, or return the
- *  static object as-is. Shared with the runner so a direct `runTest(test, { matrix })`
- *  resolves a matrix-derived env too. */
+ * static object as-is. Shared with the runner so a direct `runTest(test, { matrix })`
+ * resolves a matrix-derived env too. */
 export function resolveEnv(
   env: AuthoredEnv | undefined,
   coords: Record<string, unknown>,

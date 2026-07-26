@@ -51,7 +51,7 @@ function oauthProvider(id = "cc"): AuthProvider {
   return oauth2ClientCredentials({ id, tokenUrl: TOKEN_URL, clientId: "id", clientSecret: "sec" });
 }
 
-describe("applyAuth (research §10.3)", () => {
+describe("applyAuth", () => {
   it("passes the request through unchanged when it has no authRef", async () => {
     const out = await applyAuth(BASE, createRunContext());
     expect(out).toEqual(BASE);

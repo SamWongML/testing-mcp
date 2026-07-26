@@ -13,7 +13,7 @@ import {
 import { makeTestAuth, type TestAuth } from "./testkit";
 
 /**
- * Auth core (research §15, ADR-007). The pure pieces — bearer parsing, scope checks, and the
+ * Auth core. The pure pieces — bearer parsing, scope checks, and the
  * RFC 9728 metadata — are unit-tested directly; token verification is exercised against a
  * locally-minted JWT so no authorization server is needed offline.
  */
@@ -121,7 +121,7 @@ describe("createAuthenticator.verify", () => {
 
   it("rejects a token with no exp claim — a non-expiring token must not be accepted", async () => {
     // jose validates `exp` only when present, so without `requiredClaims` a signed token that
-    // simply omits `exp` would verify forever (P10 review Minor).
+    // simply omits `exp` would verify forever.
     const token = await auth.mint({ scopes: [SCOPES.READ], noExpiry: true });
     await expect(auth.authenticator.verify(token)).rejects.toBeInstanceOf(
       errors.JWTClaimValidationFailed,

@@ -21,7 +21,7 @@ afterEach(async () => {
   await agent.close();
 });
 
-describe("runSuite — §7.2 billing.e2e-refund (adapted to MockAgent)", () => {
+describe("runSuite — billing.e2e-refund (adapted to MockAgent)", () => {
   it("runs the full login→order→capture→refund→verify chain, composing by reference", async () => {
     const pool = agent.get("https://api.example.com");
     pool
@@ -63,7 +63,7 @@ describe("runSuite — §7.2 billing.e2e-refund (adapted to MockAgent)", () => {
       ],
     });
 
-    // A reusable shared step — bound inputs arrive as {{params.*}} (research §7.2 / §13.1).
+    // A reusable shared step — bound inputs arrive as {{params.*}}.
     const createOrder = {
       id: "create-order",
       request: {
@@ -131,7 +131,7 @@ describe("runSuite — §7.2 billing.e2e-refund (adapted to MockAgent)", () => {
     });
     // useStep bound the chained token into the shared step's {{params.token}}: the /orders
     // mock only matched `Bearer tok-1`, so a passing `order` proves the token flowed —
-    // while the persisted snapshot is redacted to `***` (credential-at-rest, §21).
+    // while the persisted snapshot is redacted to `***` (credential-at-rest).
     expect(result.steps.find((s) => s.id === "order")?.status).toBe("passed");
     expect(result.steps.find((s) => s.id === "order")?.request?.headers?.authorization).toBe("***");
     // Poll re-read the ledger until it settled (first read was `pending`).
@@ -409,7 +409,7 @@ describe("runSuite — concurrency, skip cascade & redaction", () => {
   });
 });
 
-describe("runSuite — onProgress (P8 worker k/n progress)", () => {
+describe("runSuite — onProgress (worker k/n progress)", () => {
   it("fires onProgress once per settled node with monotonic completed/total and the node id", async () => {
     const pool = agent.get("https://api.example.com");
     pool.intercept({ path: "/a", method: "GET" }).reply(200, { ok: true }, JSON_HEADERS);
@@ -467,7 +467,7 @@ describe("runSuite — onProgress (P8 worker k/n progress)", () => {
   });
 });
 
-describe("runSuite — matrix cell execution (§7.3)", () => {
+describe("runSuite — matrix cell execution", () => {
   it("populates {{matrix.*}} across suite nodes and applies the per-cell env", async () => {
     agent
       .get("https://eu.api.example.com")

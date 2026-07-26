@@ -17,7 +17,7 @@ import {
 import { discover } from "./discover";
 
 /**
- * The compile step (research §9, §7.4, ADR-003): discover authored test/suite files,
+ * The compile step: discover authored test/suite files,
  * import each, `normalize()` it into serializable manifest entries, and emit a single
  * validated `dist/manifest.json` stamped with `gitSha` + `manifestHash`. The manifest is
  * the catalog the MCP server loads — pure JSON, no functions. Adding a test is dropping a
@@ -40,7 +40,7 @@ export interface CompileFailure {
 }
 
 /** Aggregated compile failure: every offending file is named with its reason so an
- *  author can fix all of them in one pass rather than one recompile at a time. */
+ * author can fix all of them in one pass rather than one recompile at a time. */
 export class CompileError extends Error {
   constructor(readonly failures: CompileFailure[]) {
     super(
@@ -55,7 +55,7 @@ const byId = (a: ManifestEntry, b: ManifestEntry): number =>
   a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
 /** Recursively strip `undefined` and sort object keys so a manifest's hash depends only
- *  on content, not on incidental key ordering from the authored source. */
+ * on content, not on incidental key ordering from the authored source. */
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === "object") {
@@ -70,7 +70,7 @@ function canonical(value: unknown): unknown {
 }
 
 /** A content hash over the entries (order-independent) — runs record it so a result can
- *  be traced back to the exact catalog it ran against (research §21). */
+ * be traced back to the exact catalog it ran against. */
 export function manifestHash(entries: ManifestEntry[]): string {
   const sorted = [...entries].sort(byId);
   const digest = createHash("sha256")
@@ -80,7 +80,7 @@ export function manifestHash(entries: ManifestEntry[]): string {
 }
 
 /** The git sha stamped onto the manifest: `$GITHUB_SHA` (CI) → `git rev-parse HEAD` →
- *  `"unknown"` (e.g. a non-git checkout). An explicit `opts.gitSha` overrides all three. */
+ * `"unknown"` (e.g. a non-git checkout). An explicit `opts.gitSha` overrides all three. */
 export function resolveGitSha(root: string): string {
   if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
   try {
@@ -96,8 +96,8 @@ export function resolveGitSha(root: string): string {
 }
 
 /** Import an authored test/suite module and return its default export (the
- *  `defineTest`/`defineSuite` value). Shared with the CLI's `run`, which loads a def's
- *  source to execute it. The bare message is deliberate — `compile` prefixes the file. */
+ * `defineTest`/`defineSuite` value). Shared with the CLI's `run`, which loads a def's
+ * source to execute it. The bare message is deliberate — `compile` prefixes the file. */
 export async function importDef(file: string): Promise<AuthoredTestCase | AuthoredSuite> {
   const mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
   if (!mod.default || typeof mod.default !== "object") {
@@ -107,7 +107,7 @@ export async function importDef(file: string): Promise<AuthoredTestCase | Author
 }
 
 /** Discover → import → normalize → validate the corpus into a single manifest. Per-file
- *  import/normalize errors are collected and thrown together as a `CompileError`. */
+ * import/normalize errors are collected and thrown together as a `CompileError`. */
 export async function compile(opts: CompileOptions = {}): Promise<Manifest> {
   const root = opts.root ?? process.cwd();
   const scanDir = resolve(root, opts.testsDir ?? "tests");
@@ -142,7 +142,7 @@ export async function writeManifest(manifest: Manifest, outPath: string): Promis
 }
 
 /** Compile the corpus and write `dist/manifest.json` under `root`. Returns the manifest
- *  and the path written — the one operation both `pnpm compile` and `atp compile` share. */
+ * and the path written — the one operation both `pnpm compile` and `atp compile` share. */
 export async function compileToFile(
   root: string,
 ): Promise<{ manifest: Manifest; outPath: string }> {

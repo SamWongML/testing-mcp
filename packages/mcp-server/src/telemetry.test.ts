@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { initTelemetry, RUN_STATE_ATTRIBUTE, withSpan, type Telemetry } from "./telemetry";
 
 /**
- * Tracing + metrics (research §15). Spans nest MCP-call → run → SUT-call so a run is traceable
+ * Tracing + metrics. Spans nest MCP-call → run → SUT-call so a run is traceable
  * end to end; the run/queue metrics feed dashboards + autoscaling. Both are read back through
  * in-memory exporters — no collector needed offline.
  */

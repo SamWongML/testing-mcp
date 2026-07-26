@@ -30,11 +30,11 @@ describe("DataStack", () => {
       StorageEncrypted: true,
       PubliclyAccessible: false,
     });
-    // §17.2: "Secrets via Secrets Manager injected at task start" — never a literal password.
+    //: "Secrets via Secrets Manager injected at task start" — never a literal password.
     template.resourceCountIs("AWS::SecretsManager::Secret", 1);
   });
 
-  it("creates the tasks and idempotency tables keyed and TTL'd per §16.2", () => {
+  it("creates the tasks and idempotency tables keyed and TTL'd", () => {
     const tables = Object.values(template.findResources("AWS::DynamoDB::Table"));
     expect(tables).toHaveLength(2);
 
@@ -50,7 +50,7 @@ describe("DataStack", () => {
     });
   });
 
-  it("stores artifacts in a private bucket that ages objects out (§16.3)", () => {
+  it("stores artifacts in a private bucket that ages objects out", () => {
     template.hasResourceProperties("AWS::S3::Bucket", {
       PublicAccessBlockConfiguration: {
         BlockPublicAcls: true,

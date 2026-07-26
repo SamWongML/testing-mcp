@@ -57,7 +57,7 @@ describe("resolveEnv", () => {
     });
   });
 
-  it("calls a matrix-derived env builder with the cell coordinates (§7.3)", () => {
+  it("calls a matrix-derived env builder with the cell coordinates", () => {
     const env = resolveEnv((m) => ({ baseUrl: `https://${String(m.region)}.api` }), {
       region: "eu",
     });
@@ -80,7 +80,7 @@ describe("expandUnits", () => {
     expect(expandUnits({ id: "t", matrix: {} })).toEqual([{ id: "t", matrix: {}, env: undefined }]);
   });
 
-  it("enumerates one discrete, named unit per matrix cell with per-cell env (§7.3)", () => {
+  it("enumerates one discrete, named unit per matrix cell with per-cell env", () => {
     const units = expandUnits({
       id: "identity.login.matrix",
       matrix: { region: ["us", "eu"], tier: ["free", "pro"] },

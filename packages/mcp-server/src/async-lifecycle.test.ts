@@ -28,7 +28,7 @@ async function waitFor<T>(fn: () => Promise<T>, timeoutMs = 4000): Promise<T> {
 }
 
 /**
- * P8 async lifecycle — end-to-end over Postgres (research §11, §8.5). Gated on
+ * async lifecycle — end-to-end over Postgres. Gated on
  * `ATP_TEST_DATABASE_URL`; skips offline (same posture as the `@atp/store` suite). Each test
  * drives the durable queue + task store through submit → worker → terminal → fetch.
  */
@@ -223,7 +223,7 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
 
   it("sweeps terminal tasks past their TTL, leaving live ones alone", async () => {
     // SEP-1686 retains a result "for a server-defined duration"; without a sweep the rows
-    // accumulate forever (the P8 gap). Live and un-expired tasks must survive it.
+    // accumulate forever. Live and un-expired tasks must survive it.
     const expired = await submitRun(ctx, {
       entryId: "identity.login",
       env: { baseUrl: sut.url },
@@ -236,7 +236,7 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
     expect(await getRun(ctx, live.runId)).not.toBeNull();
   });
 
-  it("a one-shot worker drains exactly one job and exits (the RunTask escape hatch, §11.3)", async () => {
+  it("a one-shot worker drains exactly one job and exits (the RunTask escape hatch)", async () => {
     const first = await submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } });
     const second = await submitRun(ctx, { entryId: "identity.login", env: { baseUrl: sut.url } });
 

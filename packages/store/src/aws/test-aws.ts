@@ -38,7 +38,7 @@ export interface TestTables {
   tasksTable: string;
   idempotencyTable: string;
   /** Raw item read, bypassing `DynamoTaskStore` — lets a test prove state really landed
-   *  in DynamoDB rather than trusting the adapter it is exercising. */
+   * in DynamoDB rather than trusting the adapter it is exercising. */
   taskItem: (runId: string) => Promise<Record<string, unknown> | null>;
   /** Raw scan of the tasks table, for assertions where the runId isn't known up front. */
   scanTasks: () => Promise<Record<string, unknown>[]>;
@@ -68,7 +68,7 @@ async function createKeyedTable(raw: DynamoDBClient, name: string, key: string):
   await waitUntilTableExists({ client: raw, maxWaitTime: 30 }, { TableName: name });
 }
 
-/** A private pair of `tasks` + `idempotency` tables (§16.2) for one suite. */
+/** A private pair of `tasks` + `idempotency` tables for one suite. */
 export async function makeTestTables(): Promise<TestTables> {
   const endpoint = TEST_DYNAMO_ENDPOINT;
   if (!endpoint) throw new Error("ATP_TEST_DYNAMO_ENDPOINT is not set");

@@ -53,7 +53,7 @@ describe.skipIf(!pgAvailable)("runs", () => {
       env: null,
       durationMs: 1501, // float rounded to int
       manifestHash: "sha256:abc",
-      gitSha: "deadbeef", // reproducibility invariant (§21): run is self-describing
+      gitSha: "deadbeef", // reproducibility invariant: run is self-describing
       invokedBy: "agent-1",
       artifactUri: "file:///a/run-1",
     });

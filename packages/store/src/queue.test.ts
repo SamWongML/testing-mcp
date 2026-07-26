@@ -162,7 +162,7 @@ describe.skipIf(!pgAvailable)("queue", () => {
   });
 
   it("claims a specific run when targeted, ignoring higher-priority work", async () => {
-    // The §11.3 mode-2 one-off task exists to give *one particular* run a dedicated
+    // The mode-2 one-off task exists to give *one particular* run a dedicated
     // container. An untargeted claim would let it pick up whatever is at the head of the
     // queue instead — the beefy isolated task running a trivial job while the long run it
     // was launched for goes to a pooled worker.

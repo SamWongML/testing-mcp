@@ -1,9 +1,9 @@
 import type { ExecutionResult, StepResult } from "@atp/schema";
 
 /**
- * Shared `ExecutionResult` fixtures for the renderer golden-file tests (research §14).
+ * Shared `ExecutionResult` fixtures for the renderer golden-file tests.
  * One canonical typed value feeds every renderer, so a single fixture set exercises
- * markdown / html / junit / trace / summary — proving no format drifts (ADR-006).
+ * markdown / html / junit / trace / summary — proving no format drifts.
  *
  * These are hand-authored (not engine output) so a renderer test never depends on the
  * engine; a `fixtures.test.ts` asserts each one still satisfies `executionResultSchema`.

@@ -6,10 +6,10 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import type { Construct } from "constructs";
 
 /**
- * The three stores of ADR-005, each used for its strength: **Postgres** (system of record +
+ * The three stores of, each used for its strength: **Postgres** (system of record +
  * `SKIP LOCKED` queue), **DynamoDB** (hot task state + idempotency, with TTL), **S3**
  * (artifacts, lifecycled). Attribute and key names mirror `@atp/store`'s adapters exactly —
- * `run_id`/`idem_key`/`ttl` (§16.2) — and the outputs here become the container config that
+ * `run_id`/`idem_key`/`ttl` — and the outputs here become the container config that
  * selects those adapters.
  */
 
@@ -18,7 +18,7 @@ export interface DataStackProps extends StackProps {
   vpc: ec2.IVpc;
   /** The ECS task security group (owned by the network stack) allowed to reach Postgres. */
   appSecurityGroup: ec2.ISecurityGroup;
-  /** How long artifacts are retained before expiry (§16.3). */
+  /** How long artifacts are retained before expiry. */
   artifactRetentionDays?: number;
   /** Postgres instance size. Defaults are deliberately small; scale per environment. */
   instanceType?: ec2.InstanceType;
@@ -46,7 +46,7 @@ export class DataStack extends Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       instanceType:
         props.instanceType ?? ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MEDIUM),
-      // Multi-AZ: the queue is the durability substrate for every in-flight run (ADR-004).
+      // Multi-AZ: the queue is the durability substrate for every in-flight run.
       multiAz: true,
       storageEncrypted: true,
       publiclyAccessible: false,
@@ -84,7 +84,7 @@ export class DataStack extends Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
-      // Artifacts are served through presigned URLs (§16.3), never public reads.
+      // Artifacts are served through presigned URLs, never public reads.
       lifecycleRules: [
         {
           enabled: true,

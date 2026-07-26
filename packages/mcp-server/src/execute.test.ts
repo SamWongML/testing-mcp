@@ -14,7 +14,7 @@ function entry(ctx: ServerContext, id: string): ManifestEntry {
   return e;
 }
 
-describe("executeEntry — the shared test/suite executor (P8)", () => {
+describe("executeEntry — the shared test/suite executor", () => {
   let ctx: ServerContext;
   let sut: TestSut;
   beforeEach(async () => {

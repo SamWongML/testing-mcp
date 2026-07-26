@@ -6,12 +6,12 @@ import { NetworkStack } from "../src/network-stack";
 import { ObservabilityStack } from "../src/observability-stack";
 
 /**
- * The CDK app (ADR-008). Everything environment-specific arrives as CDK **context**
+ * The CDK app. Everything environment-specific arrives as CDK **context**
  * (`-c key=value` or `cdk.context.json`), so the same code synthesizes dev/staging/prod and
  * `cdk synth` needs no AWS credentials — which is what lets CI synthesize on every PR.
  *
- *   cdk synth --all -c env=dev
- *   cdk deploy --all -c env=prod -c imageUri=<acct>.dkr.ecr.<region>.amazonaws.com/atp:v3
+ * cdk synth --all -c env=dev
+ * cdk deploy --all -c env=prod -c imageUri=<acct>.dkr.ecr.<region>.amazonaws.com/atp:v3
  */
 const app = new App();
 

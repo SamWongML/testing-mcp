@@ -5,7 +5,7 @@ import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { IDEM_KEY_ATTR, TTL_ATTR, toEpochSeconds } from "./attributes";
 
 /**
- * The `idempotency` table (research §16.2): `idem_key → run_id`, with a TTL so keys expire.
+ * The `idempotency` table: `idem_key → run_id`, with a TTL so keys expire.
  * It decouples a caller's dedupe key from the run id, which the stage-1 Postgres path could
  * not do — `submitRun` there dedupes by making the idempotency key *be* the `runId`, so a
  * key like `"nightly-smoke"` would become the run id itself. Claiming here lets the server
@@ -30,7 +30,7 @@ export interface IdempotencyClaim {
 }
 
 /** The seam the async submit path uses; kept separate from `TaskStateStore` because a
- *  Postgres deployment dedupes with the task row's insert-only `create` instead. */
+ * Postgres deployment dedupes with the task row's insert-only `create` instead. */
 export interface IdempotencyStore {
   claim(key: string, runId: string, ttlMs?: number): Promise<IdempotencyClaim>;
   get(key: string): Promise<string | null>;

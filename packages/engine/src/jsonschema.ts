@@ -1,8 +1,8 @@
 import { deepEqual } from "./util";
 
 /**
- * A minimal JSON Schema validator for the `jsonSchema` assertion operator
- * (research §10.2, "response-shape validation"). Supports the common subset —
+ * A minimal JSON Schema validator for the `jsonSchema` assertion operator —
+ * response-shape validation. Supports the common subset —
  * `type`, `properties`, `required`, `items`, `enum`, `const` — recursively. It is
  * intentionally not a full draft implementation; richer needs use a `fn` assertion.
  */

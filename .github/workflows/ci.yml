@@ -24,7 +24,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-      # DynamoDB task store + idempotency table (P11, research §16.2).
+      # DynamoDB task store + idempotency table.
       dynamodb:
         image: amazon/dynamodb-local:2.5.2
         ports:
@@ -36,7 +36,7 @@ jobs:
       # image/env/ports/options — no command. Using the same pinned tag as
       # docker-compose.dev.yml keeps local and CI on one image. Readiness is polled from the
       # runner, so it doesn't depend on which binaries the image happens to ship.
-      - name: Start MinIO (S3 artifact store, §16.3)
+      - name: Start MinIO (S3 artifact store)
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=atp -e MINIO_ROOT_PASSWORD=atpsecret \

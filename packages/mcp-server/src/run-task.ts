@@ -1,7 +1,7 @@
 import { ECSClient, RunTaskCommand, type RunTaskCommandOutput } from "@aws-sdk/client-ecs";
 
 /**
- * The §11.3 **mode 2** escape hatch: instead of waiting for the shared worker pool, the
+ * The **mode 2** escape hatch: instead of waiting for the shared worker pool, the
  * server launches a one-off Fargate task that executes a single run and exits. That buys
  * strong isolation and per-run resource limits for the very long / very heavy runs that
  * would otherwise monopolise a pooled worker (the noisy-neighbour case).
@@ -48,7 +48,7 @@ export function createEcsRunTaskLauncher(options: EcsRunTaskLauncherOptions): Ru
             awsvpcConfiguration: {
               subnets: options.subnets,
               securityGroups: options.securityGroups,
-              // Private subnets egress via NAT and the gateway endpoints (§17.2).
+              // Private subnets egress via NAT and the gateway endpoints.
               assignPublicIp: "DISABLED",
             },
           },

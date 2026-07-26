@@ -1,9 +1,9 @@
 /**
- * DAG helpers for suite composition (research §12). A suite is a set of nodes, each
+ * DAG helpers for suite composition. A suite is a set of nodes, each
  * with `needs` edges; the runner executes them in dependency order and can run
  * independent branches in parallel. `topoSort` validates the graph — duplicate ids,
  * `needs` pointing at unknown nodes, and cycles are authoring mistakes surfaced here
- * (compile-time in P4) rather than mid-run — and returns a deterministic topological
+ * (compile-time ) rather than mid-run — and returns a deterministic topological
  * ordering via Kahn's algorithm, ties broken by authored order.
  */
 

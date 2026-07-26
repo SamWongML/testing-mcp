@@ -1,13 +1,13 @@
-# The single image both ECS services run (research §17): `MODE` picks server, worker, or the
+# The single image both ECS services run: `MODE` picks server, worker, or the
 # one-off migrator. One image means the manifest, engine, and store adapters are provably
 # identical across the request path and the execution path.
 #
-#   docker build -t atp:dev .
-#   docker run --rm -e MODE=server -e DATABASE_URL=… -p 3000:3000 atp:dev
+# docker build -t atp:dev.
+# docker run --rm -e MODE=server -e DATABASE_URL=… -p 3000:3000 atp:dev
 #
 # The app runs from TypeScript sources under `tsx`, not a `tsc` bundle. That is deliberate:
 # the workspace's `@atp/*` packages resolve to their `src/index.ts` through the `exports`
-# field (CLAUDE.md / ADR-003), so there is no build step anywhere in the repo — and it means
+# field (CLAUDE.md / ), so there is no build step anywhere in the repo — and it means
 # `packages/store/src/db/migrations/*.sql` is simply present at runtime rather than needing a
 # copy step a `tsc` emit would have required.
 
@@ -35,7 +35,7 @@ COPY tsconfig.base.json tsconfig.json vitest.config.ts ./
 COPY packages ./packages
 COPY tools ./tools
 COPY tests ./tests
-# ADR-003: the server loads the manifest, not the source files. Baking it in makes container
+#: the server loads the manifest, not the source files. Baking it in makes container
 # start-up a file read instead of a corpus compile, and makes the image self-describing.
 RUN pnpm compile && test -s dist/manifest.json
 

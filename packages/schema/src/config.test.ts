@@ -40,7 +40,7 @@ describe("loadConfig", () => {
     expect(config.AUTH_RESOURCE).toBeUndefined();
   });
 
-  it("reads the P10 auth + observability fields, coercing boolean flags", () => {
+  it("reads the auth + observability fields, coercing boolean flags", () => {
     const config = loadConfig({
       AUTH_ENABLED: "true",
       AUTH_ISSUER: "https://auth.example.com",

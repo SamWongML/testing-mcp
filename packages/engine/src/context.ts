@@ -1,11 +1,11 @@
 import type { RequestSpec } from "@atp/schema";
 
 /**
- * The scoped variable bag a run resolves templates against (research §10.1).
+ * The scoped variable bag a run resolves templates against.
  *
  * `nodes` is keyed by node id → the vars that node published via `extract`. It is
  * empty for a single test's first step and grows as later steps/nodes run, so the
- * P3 DAG runner reuses this exact shape for `{{nodes.X.var}}` resolution.
+ * DAG runner reuses this exact shape for `{{nodes.X.var}}` resolution.
  */
 export interface RunContext {
   env: Record<string, unknown>;
@@ -15,7 +15,7 @@ export interface RunContext {
   nodes: Record<string, Record<string, unknown>>;
   /** Latest published extracts, flattened — addressed as `{{vars.*}}`. */
   vars: Record<string, unknown>;
-  /** Auth providers keyed by id; a request's `authRef` selects one (research §10.3). */
+  /** Auth providers keyed by id; a request's `authRef` selects one. */
   auth: Record<string, AuthProvider>;
   /** Per-run access-token cache for token-fetching providers (oauth2 client-credentials). */
   authCache: Map<string, Promise<string>>;
@@ -24,7 +24,7 @@ export interface RunContext {
 }
 
 /**
- * A pluggable authentication provider (research §10.1/§10.3). `apply` receives a
+ * A pluggable authentication provider. `apply` receives a
  * template-resolved request and returns it with credentials injected; the runner then
  * re-resolves templates in any values the provider added (e.g. `{{secrets.*}}`).
  */

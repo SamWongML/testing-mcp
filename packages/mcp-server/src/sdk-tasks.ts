@@ -35,7 +35,7 @@ import { runSummary } from "./tools";
  * `tasks` + `jobs` rows the worker uses, so a task created here is executed by a separate
  * worker process and its state/result flow back through here. Because it is durable and
  * keyed by `runId` (== `taskId`), it works across the stateless server's fresh-per-request
- * lifecycle — no session affinity (ADR-002).
+ * lifecycle — no session affinity.
  *
  * Only `run_suite`/`run_selection`-style tool calls are task-augmented; the adapter derives
  * the {@link RunSpec} to enqueue from the augmented request's tool arguments.
@@ -87,7 +87,7 @@ export class SdkTaskStore implements TaskStore {
       !provider || provider.transactional
         ? await this.db().transaction((tx) => create(taskStoreFor(this.ctx, tx), tx))
         : await create(provider.forDb(this.db()), this.db());
-    // §11.3 mode 2, after the job is durable — see `launchIsolated` in tasks.ts.
+    // mode 2, after the job is durable — see `launchIsolated` in tasks.ts.
     if (isIsolated(request)) await launchIsolatedRun(this.ctx, runId);
     return toSdkTask(rec);
   }
@@ -139,7 +139,7 @@ export class SdkTaskStore implements TaskStore {
   ): Promise<void> {
     if (status === "cancelled") {
       // Flag the job + task; the worker aborts the in-flight run and writes the terminal
-      // `cancelled` state (research §11.2). Don't force terminal here — a queued job is
+      // `cancelled` state. Don't force terminal here — a queued job is
       // finalized at claim time, a running one when its abort lands.
       await cancelRun(this.ctx, taskId);
       return;
@@ -159,7 +159,7 @@ export class SdkTaskStore implements TaskStore {
 }
 
 /** How often a task-streaming client re-polls `tasks/get` — advertised on every `Task` so
- *  polling stays fast for the whole run, not just after creation. */
+ * polling stays fast for the whole run, not just after creation. */
 const POLL_INTERVAL_MS = 500;
 
 /** Project a durable {@link TaskRecord} onto the SEP-1686 `Task` shape the protocol returns. */

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { artifactKey, LocalArtifactStore } from "./artifacts";
 
 describe("artifactKey", () => {
-  it("builds the §16.3 layout from a fixed date (UTC)", () => {
+  it("builds the layout from a fixed date (UTC)", () => {
     const key = artifactKey({
       env: "local",
       runId: "run-1",

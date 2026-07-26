@@ -3,11 +3,11 @@ import { z } from "zod";
 import { assertionOpSchema, requestSchema } from "./test";
 
 /**
- * The single canonical execution result (research §14, ADR-006). One typed value
- * feeds every P5 renderer — markdown, html, junit, trace.json, and `llm_summary` —
+ * The single canonical execution result. One typed value
+ * feeds every renderer — markdown, html, junit, trace.json, and `llm_summary` —
  * so the shape must carry: per-step status, redacted request/response snapshots,
  * assertion detail (expected/actual for diagnostics), timings, attempts, and the
- * `manifestHash` + `gitSha` every run records (§21).
+ * `manifestHash` + `gitSha` every run records.
  */
 
 /** Terminal statuses for a finished run. In-flight task states live at the MCP layer. */
@@ -28,7 +28,7 @@ export const assertionResultSchema = z.object({
 });
 export type AssertionResult = z.infer<typeof assertionResultSchema>;
 
-/** A redacted response snapshot (secrets removed before persistence — §21). */
+/** A redacted response snapshot (secrets removed before persistence — ). */
 export const responseSnapshotSchema = z.object({
   status: z.number().int(),
   headers: z.record(z.string(), z.string()).default({}),
@@ -73,7 +73,7 @@ export const executionResultSchema = z.object({
   finishedAt: z.iso.datetime({ offset: true }).optional(),
   durationMs: z.number().nonnegative().optional(),
   metrics: runMetricsSchema,
-  /** Reproducibility: every run records the manifest + commit it ran against (§21). */
+  /** Reproducibility: every run records the manifest + commit it ran against. */
   manifestHash: z.string().optional(),
   gitSha: z.string().optional(),
   /** Run-level error (e.g. timeout, cancellation reason). */

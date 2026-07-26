@@ -2,7 +2,7 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from "jose";
 
 /**
- * OAuth 2.1 authn/authz for the MCP surface (research §15, ADR-007). This module is the pure
+ * OAuth 2.1 authn/authz for the MCP surface. This module is the pure
  * core: bearer-token parsing, the two-scope authorization model, RFC 9728 protected-resource
  * metadata, and JWT verification via `jose`. The HTTP layer (`http.ts`) verifies the token and
  * threads the resulting {@link AuthInfo} into every request; the tool handlers enforce scope.
@@ -11,7 +11,7 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } 
  * authenticator is configured with), so it unit-tests without an authorization server.
  */
 
-/** The two authorization scopes (§8.2): read-only catalog/report access vs. invoking runs. */
+/** The two authorization scopes: read-only catalog/report access vs. invoking runs. */
 export const SCOPES = {
   /** Catalog + report reads: `list_tests`, `describe_test`, `get_report`, `list_runs`, resources. */
   READ: "test:read",
@@ -22,7 +22,7 @@ export const SCOPES = {
 export type Scope = (typeof SCOPES)[keyof typeof SCOPES];
 
 /** The RFC 9728 well-known path the server serves its protected-resource metadata at, and the
- *  target of the `WWW-Authenticate` challenge on a 401. */
+ * target of the `WWW-Authenticate` challenge on a 401. */
 export const PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
 
 /**
@@ -44,8 +44,8 @@ export const TASK_METHOD_SCOPES: Readonly<Record<string, Scope>> = {
 };
 
 /** The scopes a JSON-RPC payload requires at the HTTP layer, deduped. Accepts a single message
- *  or a batch array; methods with no HTTP-layer requirement (`tools/call` etc., gated in their
- *  handlers instead) contribute nothing. */
+ * or a batch array; methods with no HTTP-layer requirement (`tools/call` etc., gated in their
+ * handlers instead) contribute nothing. */
 export function requiredScopesFor(body: unknown): Scope[] {
   const messages = Array.isArray(body) ? body : [body];
   const required = new Set<Scope>();
@@ -64,7 +64,7 @@ export function insufficientScopeChallenge(scope: Scope): string {
 }
 
 /** Extract the token from an `Authorization: Bearer <token>` header, or null if absent/other
- *  scheme. Case-insensitive on the scheme; a scheme with no token is treated as absent. */
+ * scheme. Case-insensitive on the scheme; a scheme with no token is treated as absent. */
 export function parseBearerToken(header: string | null | undefined): string | null {
   if (!header) return null;
   const match = /^Bearer[ \t]+(\S.*)$/i.exec(header.trim());
@@ -72,7 +72,7 @@ export function parseBearerToken(header: string | null | undefined): string | nu
 }
 
 /** Thrown when a validated principal lacks the scope a handler requires. Carries the missing
- *  scope so callers can map it to an authorization error; the message is client-facing. */
+ * scope so callers can map it to an authorization error; the message is client-facing. */
 export class ScopeError extends Error {
   constructor(public readonly requiredScope: string) {
     super(`insufficient scope: this call requires "${requiredScope}"`);
@@ -86,7 +86,7 @@ export function assertScope(granted: string[] | undefined, required: Scope): voi
 }
 
 /** OAuth access tokens carry scopes in the space-delimited `scope` claim (RFC 8693); tolerate a
- *  non-standard `scopes` array too. */
+ * non-standard `scopes` array too. */
 export function parseScopes(payload: JWTPayload): string[] {
   if (typeof payload.scope === "string") return payload.scope.split(/\s+/).filter(Boolean);
   if (Array.isArray(payload.scopes))
@@ -95,7 +95,7 @@ export function parseScopes(payload: JWTPayload): string[] {
 }
 
 /** The RFC 9728 protected-resource metadata document: which authorization server issues tokens
- *  for this resource and which scopes it supports. Served at {@link PROTECTED_RESOURCE_PATH}. */
+ * for this resource and which scopes it supports. Served at {@link PROTECTED_RESOURCE_PATH}. */
 export interface ProtectedResourceMetadata {
   resource: string;
   authorization_servers: string[];
@@ -115,14 +115,14 @@ export function protectedResourceMetadata(opts: {
   };
 }
 
-/** The `WWW-Authenticate` challenge for a 401, pointing clients at the metadata doc (RFC 9728
- *  §5.1) so they can discover the authorization server. */
+/** The `WWW-Authenticate` challenge for a 401, pointing clients at the metadata doc
+ *  (RFC 9728 §5.1) so they can discover the authorization server. */
 export function wwwAuthenticate(resourceMetadataUrl: string): string {
   return `Bearer resource_metadata="${resourceMetadataUrl}"`;
 }
 
 /** Verifies access tokens against a configured key set + issuer + resource, returning the SDK's
- *  {@link AuthInfo}. Built once at boot (`createAuthenticator`) and shared per request. */
+ * {@link AuthInfo}. Built once at boot (`createAuthenticator`) and shared per request. */
 export interface Authenticator {
   verify(token: string): Promise<AuthInfo>;
 }
@@ -133,7 +133,7 @@ export interface AuthenticatorConfig {
   /** This server's RFC 8707 resource identifier — the required token `aud`. */
   resource: string;
   /** The signature key resolver — `createRemoteJWKSet(jwksUri)` in production, a local set in
-   *  tests. When omitted, {@link createAuthenticator} builds a remote set from `jwksUri`. */
+   * tests. When omitted, {@link createAuthenticator} builds a remote set from `jwksUri`. */
   keys?: JWTVerifyGetKey;
   /** JWKS endpoint (used when `keys` is not supplied). */
   jwksUri?: string;
@@ -195,7 +195,7 @@ function requireJwks(jwksUri: string | undefined): string {
 }
 
 /** The invoking principal for audit/attribution: the OAuth client, falling back through the
- *  authorized party and subject. */
+ * authorized party and subject. */
 function clientIdOf(payload: JWTPayload): string {
   const claim = payload.client_id ?? payload.azp ?? payload.sub;
   return typeof claim === "string" ? claim : "unknown";

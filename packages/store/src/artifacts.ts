@@ -3,11 +3,10 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /**
- * Artifact storage behind an interface (research §16.3, ADR-005): blobs (trace.json,
+ * Artifact storage behind an interface: blobs (trace.json,
  * report.html/md, logs) live here, only pointers live in Postgres. `LocalArtifactStore`
- * backs dev/tests; the `S3ArtifactStore` is deferred to P11 (the AWS phase) behind this
- * same interface, alongside the DynamoDB task-store adapter — nothing above the store
- * changes when it slots in.
+ * backs dev/tests; the `S3ArtifactStore` sits behind this same interface, alongside the
+ * DynamoDB task-store adapter — nothing above the store changes when one swaps in.
  */
 
 export interface PutResult {
@@ -25,7 +24,7 @@ export interface ArtifactStore {
   uri(key: string): string;
 }
 
-/** Canonical key layout `{env}/{yyyy}/{mm}/{dd}/{runId}/{name}` (§16.3). */
+/** Canonical key layout `{env}/{yyyy}/{mm}/{dd}/{runId}/{name}`. */
 export function artifactKey(params: {
   env: string;
   runId: string;

@@ -11,7 +11,7 @@ Drizzle over Postgres, plus the AWS adapters. `runs.ts` (history), `queue.ts`
 `db/url.ts` (`resolveDatabaseUrl` — prefers `DATABASE_URL`, else derives one from the RDS
 Secrets Manager JSON with percent-encoded credentials).
 
-`aws/` holds the P11 adapters behind those same two seams: `dynamo-tasks.ts`,
+`aws/` holds the AWS adapters behind those same two seams: `dynamo-tasks.ts`,
 `dynamo-idempotency.ts`, `s3-artifacts.ts`, and `select.ts` —
 `createTaskStoreProvider(config)` / `createArtifactStore(config, dir)`. **Only `select.ts`
 knows which backing is live**; callers ask the provider. `forDb(db)` exists because the

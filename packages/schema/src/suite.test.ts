@@ -26,7 +26,7 @@ describe("suiteNodeSchema", () => {
 });
 
 describe("suiteSchema", () => {
-  it("parses the §7.2 refund suite (normalized nodes)", () => {
+  it("parses the refund suite (normalized nodes)", () => {
     const parsed = suiteSchema.parse({
       id: "billing.e2e-refund",
       version: 3,

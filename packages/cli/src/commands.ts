@@ -9,7 +9,7 @@ import type { ExecutionResult, ManifestEntry, StepStatus } from "@atp/schema";
 import { startMockSut, type MockSut } from "./mock-sut";
 
 /**
- * The `atp` CLI's command layer (research §P4). `list`/`validate` are thin views over an
+ * The `atp` CLI's command layer. `list`/`validate` are thin views over an
  * in-memory `compile()` (always fresh — no stale `dist/manifest.json`). `run` locates an
  * entry's source by id, imports the authored definition (which carries the real functions
  * the manifest strips), and executes it in-process via the engine against the local mock
@@ -86,7 +86,7 @@ export async function runById(id: string, opts: RunOptions = {}): Promise<Execut
 }
 
 /**
- * Render `result` in the given format and write it as a local artifact (P5 CLI wiring).
+ * Render `result` in the given format and write it as a local artifact (CLI wiring).
  * Defaults the filename to `<sanitized-entryId>.<ext>` in `cwd`; `out` overrides the path.
  * Returns the path written so the caller can report it.
  */
@@ -117,7 +117,7 @@ function mark(status: StepStatus): string {
   return glyphs[status];
 }
 
-/** One line per entry: `id  kind  [tags]  owner`. */
+/** One line per entry: `id kind [tags] owner`. */
 export function formatList(entries: ManifestEntry[]): string {
   if (entries.length === 0) return "(no tests found)";
   return entries

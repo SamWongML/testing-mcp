@@ -9,7 +9,7 @@ function promptText(result: unknown): string {
   return messages.map((m) => m.content.text ?? "").join("\n");
 }
 
-describe("MCP prompts (research §8.3, §13)", () => {
+describe("MCP prompts", () => {
   let conn: ConnectedClient;
   beforeEach(async () => {
     conn = await connectClient(await makeTestContext());

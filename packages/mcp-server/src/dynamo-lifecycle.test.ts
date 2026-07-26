@@ -10,7 +10,7 @@ import { makeTestContext, makeTestDb, pgAvailable, startTestSut, type TestSut } 
 import { claimAndRun } from "./worker";
 
 /**
- * P11 store selection (plan exit criterion 3): the *same* async surface, with hot task state
+ * store selection: the *same* async surface, with hot task state
  * on DynamoDB instead of Postgres. Nothing in `tasks.ts`/`worker.ts` is dynamo-aware — the
  * only difference from `async-lifecycle.test.ts` is the `taskStore` provider on the context.
  * Needs both backing services, so it gates on both env vars.
@@ -64,7 +64,7 @@ describe.skipIf(!pgAvailable || !dynamoAvailable)("async lifecycle on DynamoDB t
     expect(result.ready).toBe(true);
     expect(result.result?.status).toBe("passed");
 
-    // The system of record is still Postgres (ADR-005: record in pg, poll in Dynamo).
+    // The system of record is still Postgres (: record in pg, poll in Dynamo).
     expect((await listRuns(store.db, {})).map((r) => r.id)).toContain(runId);
   });
 

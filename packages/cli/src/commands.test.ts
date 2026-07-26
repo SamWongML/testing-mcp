@@ -47,7 +47,7 @@ describe("runById", () => {
     expect(result.status).toBe("passed");
     expect(result.entryId).toBe("identity.login");
     expect(result.metrics.failedAssertions).toBe(0);
-    // The run records provenance (research §21).
+    // The run records provenance.
     expect(result.manifestHash).toMatch(/^sha256:/);
   });
 

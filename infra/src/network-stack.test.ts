@@ -7,7 +7,7 @@ import { NetworkStack } from "./network-stack";
 /**
  * The synthesized CloudFormation template is the public interface of a stack — it is what
  * actually gets deployed — so that is the seam these tests assert against (`cdk synth` in
- * CI is the same operation). They encode the §17.2 deployment properties, not CDK's own
+ * CI is the same operation). They encode the deployment properties, not CDK's own
  * behaviour.
  */
 function synth(): Template {
@@ -25,7 +25,7 @@ describe("NetworkStack", () => {
 
   it("reaches DynamoDB and S3 through gateway endpoints, not the NAT", () => {
     const template = synth();
-    // §17.2: "DynamoDB/S3 via Gateway VPC Endpoints (no NAT cost, private)".
+    //: "DynamoDB/S3 via Gateway VPC Endpoints (no NAT cost, private)".
     const endpoints = Object.values(template.findResources("AWS::EC2::VPCEndpoint"));
     expect(endpoints).toHaveLength(2);
     expect(endpoints.every((e) => e.Properties?.VpcEndpointType === "Gateway")).toBe(true);

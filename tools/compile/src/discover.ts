@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
- * Filesystem discovery (research §9): find every authored test/suite file under a
+ * Filesystem discovery: find every authored test/suite file under a
  * directory. The convention is the whole mechanism — every executable test is
  * `*.test.ts`, every composition is `*.suite.ts`, so discovery never guesses and adding
  * a test is just dropping a conforming file. Results are sorted for a deterministic
@@ -15,7 +15,7 @@ function isTestFile(name: string): boolean {
 }
 
 /** Recursively list absolute paths of authored test/suite files under `dir`, sorted. A
- *  missing directory yields an empty list (an empty corpus is not an error). */
+ * missing directory yields an empty list (an empty corpus is not an error). */
 export async function discover(dir: string): Promise<string[]> {
   let entries;
   try {

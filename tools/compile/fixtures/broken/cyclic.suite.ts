@@ -1,6 +1,6 @@
 import { defineSuite } from "@atp/engine";
 
-// A dependency cycle: normalize() must reject this at compile time (research §12).
+// A dependency cycle: normalize() must reject this at compile time.
 export default defineSuite({
   id: "fix.cyclic",
   version: 1,
