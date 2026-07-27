@@ -21,6 +21,7 @@ import {
   launchIsolatedRun,
   getRun,
   getRunResult,
+  isTerminalState as isTerminal,
   requireDb,
   type RunSpec,
   taskStoreFor,
@@ -174,6 +175,13 @@ function toSdkTask(rec: TaskRecord): Task {
     pollInterval: POLL_INTERVAL_MS,
   };
   if (rec.error) task.statusMessage = rec.error;
+  // A cancel is a *request*: the worker still has to notice it and finalize. The SEP-1686
+  // `Task` shape has no field for that, and `tasks/cancel` re-reads the task immediately —
+  // so without this a client sees plain `working` and cannot tell "cancel not processed yet"
+  // from "cancel lost". `statusMessage` is the only carrier the shape offers.
+  else if (rec.cancelRequested && !isTerminal(rec.state)) {
+    task.statusMessage = "cancellation requested — waiting for the worker to stop this run";
+  }
   return task;
 }
 

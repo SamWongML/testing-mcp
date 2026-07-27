@@ -10,6 +10,7 @@ import {
   queueDepth,
   reapExpired,
   requestCancel,
+  sweepTerminalJobs,
 } from "./queue";
 
 describe.skipIf(!pgAvailable)("queue", () => {
@@ -65,6 +66,72 @@ describe.skipIf(!pgAvailable)("queue", () => {
     expect(ids.length).toBe(N); // every job claimed
     expect(new Set(ids).size).toBe(N); // and each exactly once
     expect(results.filter((r) => r === null).length).toBe(4); // surplus claimers got nothing
+  });
+
+  it("counts each lease expiry and backs off before the job is claimable again", async () => {
+    await enqueue(tdb.db, { runId: "flaky" });
+    await claim(tdb.db, "worker-a");
+    await tdb.pool.query(`UPDATE jobs SET claimed_at = now() - interval '1 hour'`);
+
+    // First expiry: counted, but retried immediately — a single crash is usually a one-off.
+    const first = await reapExpired(tdb.db, 60_000);
+    expect(first[0]?.attempts).toBe(1);
+    expect(await claim(tdb.db, "worker-b")).not.toBeNull();
+
+    // Second expiry: counted again, and now spaced out.
+    await tdb.pool.query(`UPDATE jobs SET claimed_at = now() - interval '1 hour'`);
+    const second = await reapExpired(tdb.db, 60_000);
+    expect(second[0]?.attempts).toBe(2);
+    expect(second[0]?.status).toBe("queued");
+    expect(second[0]?.runAfter.getTime()).toBeGreaterThan(Date.now());
+    // Not claimable until the backoff elapses.
+    expect(await claim(tdb.db, "worker-c")).toBeNull();
+  });
+
+  it("dead-letters a job that exhausts its attempts instead of requeuing it forever", async () => {
+    await enqueue(tdb.db, { runId: "poison", maxAttempts: 1 });
+    const claimed = await claim(tdb.db, "worker-a");
+    expect(claimed?.maxAttempts).toBe(1);
+    await tdb.pool.query(`UPDATE jobs SET claimed_at = now() - interval '1 hour'`);
+
+    const [reaped] = await reapExpired(tdb.db, 60_000);
+    expect(reaped?.status).toBe("dead_letter");
+    expect(reaped?.attempts).toBe(1);
+    expect(reaped?.lastError).toContain("dead-lettered");
+    // Frozen for forensics: the worker that lost it is still recorded.
+    expect(reaped?.workerId).toBe("worker-a");
+
+    // Terminal: never claimable again, so it stops consuming worker slots.
+    expect(await claim(tdb.db, "worker-b")).toBeNull();
+    expect(await claim(tdb.db, "worker-b", { runId: "poison" })).toBeNull();
+  });
+
+  it("stamps first_claimed_at once and preserves it across a reap and re-claim", async () => {
+    await enqueue(tdb.db, { runId: "resumed" });
+    const first = await claim(tdb.db, "worker-a");
+    expect(first?.firstClaimedAt).toBeInstanceOf(Date);
+
+    await tdb.pool.query(`UPDATE jobs SET claimed_at = now() - interval '1 hour'`);
+    await reapExpired(tdb.db, 60_000);
+    const second = await claim(tdb.db, "worker-b");
+
+    // The re-claim refreshes the lease but not the run's original start.
+    expect(second?.firstClaimedAt?.getTime()).toBe(first?.firstClaimedAt?.getTime());
+    expect(second?.claimedAt?.getTime()).not.toBe(first?.claimedAt?.getTime());
+  });
+
+  it("sweeps settled jobs past their retention window, never live ones", async () => {
+    // Nothing removed a settled row before, so every job's `spec` payload accumulated in the
+    // table the claim path scans. History and traces are elsewhere and untouched.
+    await enqueue(tdb.db, { runId: "old-done" });
+    const claimed = await claim(tdb.db, "worker-a");
+    await markDone(tdb.db, claimed!.id, "worker-a", "done");
+    await tdb.pool.query(`UPDATE jobs SET created_at = now() - interval '30 days'`);
+    await enqueue(tdb.db, { runId: "still-queued" });
+
+    expect(await sweepTerminalJobs(tdb.db, 7 * 24 * 60 * 60 * 1000)).toBe(1);
+    const { rows } = await tdb.pool.query<{ run_id: string }>(`SELECT run_id FROM jobs`);
+    expect(rows.map((r) => r.run_id)).toEqual(["still-queued"]);
   });
 
   it("reaper requeues a job whose lease expired, and it can be re-claimed", async () => {

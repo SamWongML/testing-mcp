@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { claim, type StoreClient } from "@atp/store";
+import { claim, getCheckpoints, putCheckpoint, type StoreClient } from "@atp/store";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ServerContext } from "./context";
+import { executeEntry } from "./execute";
 import { cancelRun, getRun, getRunResult, submitRun } from "./tasks";
 import {
   connectClient,
@@ -140,6 +141,76 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
     }
   });
 
+  it("crash mid-suite → resume runs only the remainder, re-firing nothing", async () => {
+    const { runId } = await submitRun(ctx, {
+      entryId: "alpha.widget-lifecycle",
+      env: { baseUrl: sut.url },
+    });
+    const entry = ctx.manifest.entries.find((e) => e.id === "alpha.widget-lifecycle")!;
+
+    // Attempt 1: worker A claims and gets through `create` and `capture` — both durably
+    // checkpointed — then dies before `verify`. Driving executeEntry directly is how the
+    // "died mid-run" moment is made deterministic; the checkpoint writes are the real ones.
+    expect((await claim(store.db, "worker-A"))?.runId).toBe(runId);
+    const crash = new AbortController();
+    await executeEntry(ctx, entry, {
+      runId,
+      env: { baseUrl: sut.url },
+      signal: crash.signal,
+      onNodeSettled: async (result) => {
+        await putCheckpoint(store.db, { runId, nodeId: result.id, payload: result });
+        if (result.id === "capture") crash.abort();
+      },
+    });
+    expect(Object.keys(await getCheckpoints(store.db, runId)).sort()).toEqual([
+      "capture",
+      "create",
+    ]);
+    expect(sut.calls["POST /orders"]).toBe(1);
+    expect(sut.calls["POST /payments/pay-1/capture"]).toBe(1);
+
+    // The lease lapses and worker B takes over.
+    expect(await reapOnce(ctx, 0)).toBe(1);
+    expect(await claimAndRun(ctx, "worker-B")).toBe(true);
+
+    const result = await getRunResult(ctx, runId);
+    expect(result.result?.status).toBe("passed");
+    // Second attempt, and the seeded nodes say so.
+    expect(result.result?.runAttempt).toBe(2);
+    const byId = Object.fromEntries((result.result?.steps ?? []).map((s) => [s.id, s]));
+    expect(byId.create?.resumed).toBe(true);
+    expect(byId.capture?.resumed).toBe(true);
+    expect(byId.verify?.resumed).toBeUndefined();
+
+    // The point of the whole feature: the side-effecting requests happened exactly once
+    // across both attempts, and only the unfinished node ran on the second.
+    expect(sut.calls["POST /orders"]).toBe(1);
+    expect(sut.calls["POST /payments/pay-1/capture"]).toBe(1);
+    expect(sut.calls["GET /ledger/refunds/pay-1"]).toBeGreaterThanOrEqual(1);
+
+    // A settled run keeps no checkpoints.
+    expect(await getCheckpoints(store.db, runId)).toEqual({});
+  });
+
+  it("a job that exhausts its attempts dead-letters into a reportable failure", async () => {
+    const { runId } = await submitRun(ctx, {
+      entryId: "alpha.widget-lifecycle",
+      env: { baseUrl: sut.url },
+      maxAttempts: 1,
+    });
+
+    // Claimed, then the worker dies — with no budget left for another attempt.
+    expect((await claim(store.db, "worker-A"))?.runId).toBe(runId);
+    expect(await reapOnce(ctx, 0)).toBe(1);
+
+    // Terminal and reportable, rather than a `working` task nobody will ever finish.
+    const task = await getRun(ctx, runId);
+    expect(task?.state).toBe("failed");
+    expect(task?.error).toContain("attempt");
+    // And genuinely off the queue: no worker can pick it up again.
+    expect(await claimAndRun(ctx, "worker-B")).toBe(false);
+  });
+
   it("crash mid-run → the reaper requeues the lease and a second worker completes it", async () => {
     const { runId } = await submitRun(ctx, {
       entryId: "alpha.widget-lifecycle",
@@ -156,6 +227,38 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
     // Worker B picks up the requeued job and finishes it.
     expect(await claimAndRun(ctx, "worker-B")).toBe(true);
     expect((await getRun(ctx, runId))?.state).toBe("completed");
+  });
+
+  it("cancel_run tool: stops a running suite and reports the pending cancel meanwhile", async () => {
+    // The tool had no coverage at all: every cancellation test drove the internal helper, so
+    // the tool's own wiring (scope guard → audit → cancelRun → worker abort) never ran.
+    // A ledger that never settles holds the polling `verify` node in flight meanwhile.
+    const slowSut = await startTestSut({ ledgerSettles: false });
+    let conn: ConnectedClient | undefined;
+    const worker = startWorker(ctx, { pollMs: 20, heartbeatMs: 50 });
+    try {
+      conn = await connectClient(ctx);
+      const { runId } = await submitRun(ctx, {
+        entryId: "alpha.widget-lifecycle",
+        env: { baseUrl: slowSut.url },
+      });
+      // 2 of 3 nodes settled ⇒ the worker is inside the polling `verify` node.
+      await waitFor(async () => ((await getRun(ctx, runId))?.progressPct ?? 0) >= 60);
+
+      const res = (await conn.client.callTool({
+        name: "cancel_run",
+        arguments: { runId },
+      })) as unknown as { structuredContent: { runId: string; cancelRequested: boolean } };
+      expect(res.structuredContent).toMatchObject({ runId, cancelRequested: true });
+
+      // The flag is durable immediately; the terminal state follows once the worker notices.
+      expect((await getRun(ctx, runId))?.cancelRequested).toBe(true);
+      await waitFor(async () => (await getRun(ctx, runId))?.state === "cancelled");
+    } finally {
+      await worker.stop();
+      await conn?.close();
+      await slowSut.close();
+    }
   });
 
   it("non-Task client path: run_selection + get_run + get_run_result via the MCP tools", async () => {
@@ -240,6 +343,26 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
     expect(await sweepExpiredTasks(ctx)).toBe(1);
     expect(await getRun(ctx, expired.runId)).toBeNull();
     expect(await getRun(ctx, live.runId)).not.toBeNull();
+  });
+
+  it("keeps the task mirrors answering for a completed run after its TTL sweep", async () => {
+    // The hot task row expires in ~24h; the trace artifact and history live far longer. Before
+    // the history fallback, `get_run`/`get_run_result`/`tasks/get` began reporting "no such
+    // run" for runs whose report `get_report` and the `run://` resources still render — the
+    // documented "mirrors observe the same durable state" contract held for a day.
+    const { runId } = await submitRun(ctx, {
+      entryId: "alpha.create-widget",
+      env: { baseUrl: sut.url },
+      ttlMs: -1000,
+    });
+    expect(await claimAndRun(ctx, "worker-1")).toBe(true);
+    expect(await sweepExpiredTasks(ctx)).toBe(1);
+
+    const task = await getRun(ctx, runId);
+    expect(task?.state).toBe("completed");
+    const result = await getRunResult(ctx, runId);
+    expect(result.ready).toBe(true);
+    expect(result.result?.status).toBe("passed");
   });
 
   it("a one-shot worker drains exactly one job and exits (the RunTask escape hatch)", async () => {

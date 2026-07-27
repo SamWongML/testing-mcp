@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 
 import type { Db } from "./db/client";
 import { jobs } from "./db/schema";
@@ -13,7 +13,9 @@ import { jobs } from "./db/schema";
  */
 
 export type Job = typeof jobs.$inferSelect;
-export type JobStatus = "queued" | "running" | "done" | "failed";
+/** `dead_letter` is terminal like `done`/`failed`: the job exhausted `max_attempts` and is
+ * never claimable again, so a job that reliably kills its worker stops looping. */
+export type JobStatus = "queued" | "running" | "done" | "failed" | "dead_letter";
 
 export interface EnqueueInput {
   /** The run this job will execute (the row the worker records history under). */
@@ -24,6 +26,8 @@ export interface EnqueueInput {
   priority?: number;
   /** Delay availability until this time (retry/backoff); defaults to now. */
   runAfter?: Date;
+  /** Lease expiries tolerated before dead-lettering; defaults to the column default (5). */
+  maxAttempts?: number;
 }
 
 export async function enqueue(db: Db, input: EnqueueInput = {}): Promise<Job> {
@@ -36,6 +40,7 @@ export async function enqueue(db: Db, input: EnqueueInput = {}): Promise<Job> {
       priority: input.priority ?? 0,
       status: "queued",
       runAfter: input.runAfter, // undefined → DB default now()
+      maxAttempts: input.maxAttempts, // undefined → DB default
     })
     .returning();
   return row!;
@@ -74,7 +79,14 @@ export async function claim(
     if (!id) return null;
     const [row] = await tx
       .update(jobs)
-      .set({ status: "running", workerId, claimedAt: sql`now()` })
+      .set({
+        status: "running",
+        workerId,
+        claimedAt: sql`now()`,
+        // Sticky: set on the first claim and preserved across every reap/reclaim, so a
+        // resumed run can report when it *originally* started.
+        firstClaimedAt: sql`COALESCE(${jobs.firstClaimedAt}, now())`,
+      })
       .where(eq(jobs.id, id))
       .returning();
     return row ?? null;
@@ -112,13 +124,48 @@ export async function markDone(
 }
 
 /**
- * Requeue jobs whose lease expired (worker crashed mid-run): any `running` job last
- * heartbeated more than `leaseMs` ago goes back to `queued`. Returns the requeued jobs.
+ * Backoff before a requeued job becomes claimable again: `5 * (2^attempts - 1)` seconds,
+ * capped at 5 minutes — 0s, 5s, 15s, 35s, …
+ *
+ * The first retry is deliberately immediate: a single lease expiry is usually a one-off
+ * (a deploy, an OOM, a lost node) and delaying it would just add latency. It is the
+ * *repeat* crash that needs spacing, or a job that kills its worker instantly would burn
+ * its whole attempt budget in a fraction of a second and dead-letter before anyone could
+ * observe it.
+ */
+const BACKOFF_BASE_SECONDS = 5;
+const BACKOFF_CAP_SECONDS = 300;
+
+/**
+ * Requeue jobs whose lease expired (worker crashed mid-run), counting the crash.
+ *
+ * Below `max_attempts` the job returns to `queued` behind an exponential backoff — the first
+ * production use of the long-modelled `run_after` column. At the ceiling it is
+ * **dead-lettered** instead: `worker_id`/`claimed_at` are frozen for forensics and the job is
+ * never claimable again, so a poison job stops consuming a worker slot forever while its
+ * client polls a `working` task that will never settle. The caller finalizes the task row for
+ * any returned job whose status came back `dead_letter`.
+ *
+ * Returns every job it touched, requeued and dead-lettered alike.
  */
 export async function reapExpired(db: Db, leaseMs: number): Promise<Job[]> {
+  // `attempts + 1` is this reap's count; every branch below keys off it, so the CASEs stay
+  // consistent with the single increment.
+  const exhausted = sql`${jobs.attempts} + 1 >= ${jobs.maxAttempts}`;
   return db
     .update(jobs)
-    .set({ status: "queued", workerId: null, claimedAt: null })
+    .set({
+      attempts: sql`${jobs.attempts} + 1`,
+      status: sql`CASE WHEN ${exhausted} THEN 'dead_letter' ELSE 'queued' END`,
+      workerId: sql`CASE WHEN ${exhausted} THEN ${jobs.workerId} ELSE NULL END`,
+      claimedAt: sql`CASE WHEN ${exhausted} THEN ${jobs.claimedAt} ELSE NULL END`,
+      runAfter: sql`CASE WHEN ${exhausted} THEN ${jobs.runAfter} ELSE now() + make_interval(
+        secs => LEAST(${BACKOFF_BASE_SECONDS} * (power(2, ${jobs.attempts}) - 1), ${BACKOFF_CAP_SECONDS})
+      ) END`,
+      lastError: sql`CASE WHEN ${exhausted}
+        THEN 'lease expired after ' || (${jobs.attempts} + 1) || ' attempt(s) — dead-lettered'
+        ELSE 'lease expired (attempt ' || (${jobs.attempts} + 1) || ')' END`,
+    })
     .where(
       and(
         eq(jobs.status, "running"),
@@ -126,6 +173,25 @@ export async function reapExpired(db: Db, leaseMs: number): Promise<Job[]> {
       ),
     )
     .returning();
+}
+
+/** Terminal statuses a job never leaves — the sweep's deletion set. */
+const TERMINAL_STATUSES = ["done", "failed", "dead_letter"];
+
+/**
+ * Delete terminal jobs older than `maxAgeMs`. The queue is operational state, but nothing
+ * ever removed a settled row, so every job's `spec` jsonb (params, env, trace context)
+ * accumulated forever in the table on the hot claim path. The run's history (`runs`,
+ * `step_results`) and its trace artifact are untouched — those are the record; this is the
+ * envelope work arrived in.
+ */
+export async function sweepTerminalJobs(db: Db, maxAgeMs: number): Promise<number> {
+  const cutoff = new Date(Date.now() - maxAgeMs);
+  const rows = await db
+    .delete(jobs)
+    .where(and(inArray(jobs.status, TERMINAL_STATUSES), lt(jobs.createdAt, cutoff)))
+    .returning({ id: jobs.id });
+  return rows.length;
 }
 
 /** Flag every non-terminal job for this run as cancel-requested. */

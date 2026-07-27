@@ -5,6 +5,7 @@ export { createStore, type Db, type StoreClient } from "./db/client";
 export { migrate } from "./db/migrate";
 export { resolveDatabaseUrl, type DatabaseUrlConfig } from "./db/url";
 export * from "./queue";
+export * from "./checkpoints";
 export * from "./tasks";
 export * from "./artifacts";
 export * from "./runs";

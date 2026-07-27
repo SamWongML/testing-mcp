@@ -5,12 +5,17 @@ import type { Config, ManifestEntry } from "@atp/schema";
 import type { ExecutionResult } from "@atp/schema";
 import {
   claim,
+  getCheckpoints,
   heartbeat,
   isCancelRequested,
   type Job,
   markDone,
+  pruneCheckpoints,
+  putCheckpoint,
   queueDepth,
   reapExpired,
+  sweepExpiredCheckpoints,
+  sweepTerminalJobs,
   type Db,
   type TaskState,
 } from "@atp/store";
@@ -108,6 +113,9 @@ export async function runClaimedJob(
   if (job.cancelRequested) {
     await tasks.update(runId, { state: "cancelled" });
     await markDone(db, job.id, workerId, "done");
+    // Defensive: covers checkpoints orphaned by an earlier attempt that was abandoned
+    // before this claim.
+    await pruneRunCheckpoints(db, runId, log);
     log?.info("run cancelled while queued");
     return { runId, state: "cancelled" };
   }
@@ -123,6 +131,23 @@ export async function runClaimedJob(
     return finalizeError(ctx, job, workerId, runId, `unknown entry "${spec.entryId}"`);
   }
   log?.info({ entryId: entry.id, kind: entry.kind }, "claimed run");
+
+  // What a prior attempt of this run already executed. Fail-closed: a read error finalizes
+  // the job rather than being treated as "nothing to resume", which would silently re-fire
+  // every side effect the earlier attempt already made.
+  let checkpoints;
+  try {
+    checkpoints = await getCheckpoints(db, runId);
+  } catch (err) {
+    return finalizeError(ctx, job, workerId, runId, `could not load checkpoints: ${errorMessage(err)}`);
+  }
+  const runAttempt = (job.attempts ?? 0) + 1;
+  if (runAttempt > 1) {
+    log?.info(
+      { runAttempt, resumedNodes: Object.keys(checkpoints).length },
+      "resuming run from checkpoints",
+    );
+  }
 
   const controller = new AbortController();
   // Serialize progress writes and keep the terminal write strictly after the last one, so a
@@ -158,6 +183,15 @@ export async function runClaimedJob(
           tasks.setProgress(runId, pct, u.nodeId).catch(() => {}),
         );
       },
+      resumeFrom: {
+        completed: checkpoints,
+        runAttempt,
+        firstStartedAt: job.firstClaimedAt?.toISOString(),
+      },
+      // Deliberately not chained/best-effort like onProgress: the engine awaits this before
+      // starting any dependent, and treats a rejection as fatal. That is the contract that
+      // lets the next attempt trust "checkpointed ⇒ definitely ran".
+      onNodeSettled: (result) => putCheckpoint(db, { runId, nodeId: result.id, payload: result }),
     });
 
   try {
@@ -184,6 +218,7 @@ export async function runClaimedJob(
     log?.info({ state, durationMs: result.durationMs }, "run terminal");
     // A cancelled/completed job is terminal (never requeue); only a failed run is 'failed'.
     await markDone(db, job.id, workerId, state === "failed" ? "failed" : "done");
+    await pruneRunCheckpoints(db, runId, log);
     return { runId, state };
   } catch (err) {
     clearInterval(beat);
@@ -200,6 +235,17 @@ export interface TaskStateResult {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Drop a finished run's checkpoints. Best-effort: a terminal run is never resumed, so
+ * leftovers are inert and the TTL sweep collects them anyway — never fail a settled run over
+ * its own cleanup. */
+async function pruneRunCheckpoints(db: Db, runId: string, log?: ServerContext["logger"]) {
+  try {
+    await pruneCheckpoints(db, runId);
+  } catch (err) {
+    log?.warn({ runId, err: errorMessage(err) }, "could not prune run checkpoints");
+  }
 }
 
 /** Publish the per-run metrics: the terminal-count/duration + one assertion-failure tick
@@ -228,6 +274,7 @@ async function finalizeError(
   const db = requireDb(ctx);
   await taskStoreFor(ctx, db).update(runId, { state: "failed", error });
   await markDone(db, job.id, workerId, "failed");
+  await pruneRunCheckpoints(db, runId, ctx.logger);
   return { runId, state: "failed" };
 }
 
@@ -256,10 +303,50 @@ export async function sweepExpiredTasks(ctx: ServerContext): Promise<number> {
   return taskStoreFor(ctx, requireDb(ctx)).deleteExpired();
 }
 
-/** Requeue jobs whose lease expired (crashed workers). Returns the count requeued. */
+/**
+ * Requeue jobs whose lease expired (crashed workers), and finalize any that exhausted their
+ * attempt budget. Returns the number of jobs touched.
+ *
+ * The dead-letter half is what stops a job that reliably kills its worker from looping
+ * forever while its client polls a `working` task that will never settle: the task row is
+ * driven to a terminal, reportable state and the run's checkpoints are dropped. A pending
+ * cancel wins over "we gave up retrying" — the flag survives the reap, and reporting it as
+ * `failed` would misattribute a deliberate stop.
+ */
 export async function reapOnce(ctx: ServerContext, leaseMs: number): Promise<number> {
-  const requeued = await reapExpired(requireDb(ctx), leaseMs);
-  return requeued.length;
+  const db = requireDb(ctx);
+  const reaped = await reapExpired(db, leaseMs);
+  for (const job of reaped) {
+    if (job.status !== "dead_letter") continue;
+    const runId = job.runId ?? job.id;
+    await taskStoreFor(ctx, db).update(runId, {
+      state: job.cancelRequested ? "cancelled" : "failed",
+      error: job.cancelRequested
+        ? undefined
+        : (job.lastError ??
+          `job exhausted ${job.maxAttempts} attempt(s) — its worker died repeatedly`),
+    });
+    await pruneRunCheckpoints(db, runId, ctx.logger);
+    ctx.logger?.warn(
+      { runId, attempts: job.attempts, maxAttempts: job.maxAttempts },
+      "job dead-lettered: exhausted its attempt budget",
+    );
+  }
+  return reaped.length;
+}
+
+/** TTL backstop for checkpoints orphaned by a process that died before pruning its own. */
+export async function sweepExpiredCheckpointsOnce(ctx: ServerContext): Promise<number> {
+  return sweepExpiredCheckpoints(requireDb(ctx));
+}
+
+/** How long a settled job's row (and its `spec` payload) is kept before the sweep removes
+ * it. Long enough to investigate a bad run; the run's history and trace are unaffected. */
+export const TERMINAL_JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Drop terminal job rows past their retention window. */
+export async function sweepTerminalJobsOnce(ctx: ServerContext): Promise<number> {
+  return sweepTerminalJobs(requireDb(ctx), TERMINAL_JOB_RETENTION_MS);
 }
 
 export interface WorkerHandle {
@@ -291,13 +378,20 @@ export function startWorker(ctx: ServerContext, opts: WorkerOptions = {}): Worke
     while (running) {
       try {
         if (Date.now() - lastReap >= reapMs) {
-          await reapOnce(ctx, leaseMs);
+          // Log it: a silent reap loop is how a crashing job stays invisible while it
+          // consumes a worker slot every cycle.
+          const reaped = await reapOnce(ctx, leaseMs);
           lastReap = Date.now();
+          if (reaped > 0) ctx.logger?.warn({ reaped }, "reaped jobs with expired leases");
         }
         if (Date.now() - lastSweep >= sweepMs) {
           const swept = await sweepExpiredTasks(ctx);
+          const sweptCheckpoints = await sweepExpiredCheckpointsOnce(ctx).catch(() => 0);
+          const sweptJobs = await sweepTerminalJobsOnce(ctx).catch(() => 0);
           lastSweep = Date.now();
-          if (swept > 0) ctx.logger?.debug({ swept }, "swept expired task rows");
+          if (swept > 0 || sweptCheckpoints > 0 || sweptJobs > 0) {
+            ctx.logger?.debug({ swept, sweptCheckpoints, sweptJobs }, "swept expired rows");
+          }
         }
         const ran = await claimAndRun(ctx, workerId, opts);
         if (ran) {
