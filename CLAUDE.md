@@ -82,4 +82,8 @@ supporting detail after it.
 - `.claude/rules/*.md` — per-package detail.
 - `docs/research.md` — architecture rationale and the ADRs. Large; it opens with a topic index.
 - `docs/deploy.md` — the deployment runbook.
+- `docs/production-readiness.md` — the hardening plan (approved, kept unedited) and
+  `docs/production-readiness-status.md` — what has landed, what hasn't, and the deviations.
+  **Read the status file before starting work in this area**; it records which gaps are already
+  closed and which of the audits' claims turned out to be wrong.
 - `README.md` — the package-responsibility map.

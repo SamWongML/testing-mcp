@@ -6,6 +6,8 @@ and executed by a pure in-house DAG engine.
 
 - **Architecture:** [docs/research.md](./docs/research.md)
 - **Deployment runbook:** [docs/deploy.md](./docs/deploy.md)
+- **Production readiness:** [plan](./docs/production-readiness.md) ·
+  [status](./docs/production-readiness-status.md)
 - **Agent guide:** [CLAUDE.md](./CLAUDE.md)
 
 ## Package map
