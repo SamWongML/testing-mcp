@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { connectClient, makeTestContext, type ConnectedClient } from "./testkit";
+import {
+  connectClient,
+  makeTestContext,
+  makeTestDb,
+  pgAvailable,
+  startTestSut,
+  type ConnectedClient,
+} from "./testkit";
 
 /** Concatenate the text of a prompt's rendered messages. */
 function promptText(result: unknown): string {
@@ -67,6 +74,42 @@ describe("MCP prompts", () => {
     expect(text).toContain("get_report");
   });
 
+  it("completes prompt arguments from the live catalog and the format list", async () => {
+    // Prompt args were free text, so a caller had to already know a valid entry id or format
+    // to fill one in. These complete from the same sources the tools validate against, so a
+    // completion can never suggest something the tool would then reject.
+    const entryId = await conn.client.complete({
+      ref: { type: "ref/prompt", name: "regenerate_reports" },
+      argument: { name: "entryId", value: "alpha" },
+    });
+    expect(entryId.completion.values).toEqual(["alpha.create-widget", "alpha.widget-lifecycle"]);
+
+    // Prefix-filtered, not the whole list dumped back.
+    const format = await conn.client.complete({
+      ref: { type: "ref/prompt", name: "regenerate_reports" },
+      argument: { name: "format", value: "j" },
+    });
+    expect(format.completion.values.sort()).toEqual(["json", "junit"]);
+
+    // Suite composition starts from a tag search, so the tags in the live corpus complete too.
+    const tags = await conn.client.complete({
+      ref: { type: "ref/prompt", name: "generate_suite" },
+      argument: { name: "tags", value: "" },
+    });
+    expect(tags.completion.values).toContain("alpha");
+    expect(tags.completion.values).toContain("beta");
+  });
+
+  it("completes triage_failure's runId from recorded history", async () => {
+    // The one argument an agent is least able to guess. Empty without a run database, which
+    // is the offline case — the prompt still renders, it just cannot suggest.
+    const offline = await conn.client.complete({
+      ref: { type: "ref/prompt", name: "triage_failure" },
+      argument: { name: "runId", value: "" },
+    });
+    expect(offline.completion.values).toEqual([]);
+  });
+
   it("renders regenerate_reports driving list_runs → get_report in the target format", async () => {
     const res = await conn.client.getPrompt({
       name: "regenerate_reports",
@@ -76,5 +119,31 @@ describe("MCP prompts", () => {
     expect(text).toContain("html");
     expect(text).toContain("list_runs");
     expect(text).toContain("get_report");
+  });
+});
+
+describe.skipIf(!pgAvailable)("prompt completions (db-backed)", () => {
+  it("suggests the ids of runs actually recorded in history", async () => {
+    const tdb = await makeTestDb();
+    const sut = await startTestSut();
+    const conn = await connectClient(await makeTestContext({ db: tdb.db }));
+    try {
+      const res = await conn.client.callTool({
+        name: "run_test",
+        arguments: { id: "alpha.create-widget", env: { baseUrl: sut.url } },
+      });
+      const { runId } = (res as unknown as { structuredContent: { run: { runId: string } } })
+        .structuredContent.run;
+
+      const completion = await conn.client.complete({
+        ref: { type: "ref/prompt", name: "triage_failure" },
+        argument: { name: "runId", value: "" },
+      });
+      expect(completion.completion.values).toContain(runId);
+    } finally {
+      await conn.close();
+      await sut.close();
+      await tdb.close();
+    }
   });
 });

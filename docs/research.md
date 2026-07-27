@@ -736,7 +736,7 @@ RETURNING *;
 
 **Hot state (fast polling):** DynamoDB item per run — `state`, `progressPct`, `currentNode`, `resultRef`, and a **TTL** attribute implementing SEP‑1686's "results retained for a server‑defined duration." Polling `tasks/get` hits DynamoDB (single‑digit‑ms, cheap at high volume) instead of hammering Postgres.
 
-**Progress & logs:** the worker updates the DynamoDB item and emits MCP **progress notifications**; step logs stream to CloudWatch (awslogs); large artifacts go to S3.
+**Progress & logs:** the worker updates the DynamoDB item (`progressPct`/`currentNode`), which a client observes by polling `tasks/get` — it is a separate process with no MCP connection, so it emits no notifications itself. MCP **progress notifications** are sent only by the request path, for a synchronous `run_test` whose caller supplied a `progressToken`; they ride that request's own stream. Step logs stream to CloudWatch (awslogs); large artifacts go to S3.
 
 **Cancellation:** `tasks/cancel` sets a cancel flag (DynamoDB + a `jobs.cancel_requested` column); the worker checks it between nodes and aborts the in‑flight undici request via `AbortSignal`.
 
@@ -976,7 +976,7 @@ flowchart TB
 
 - **Stateless MCP service** behind ALB → target‑tracking autoscaling on request count/CPU; rolling deploys with connection draining are safe (no session pinning).
 - **Separate worker service** so long runs never block the request path; scales independently on **queue depth**.
-- **Health checks:** ALB → `/healthz` (liveness) and `/readyz` (reports stateless mode + dependency reachability). `tini`/proper signal handling in the container for graceful shutdown (finish/park in‑flight work, release job leases).
+- **Health checks:** ALB → `/healthz` (liveness) and `/readyz` (readiness). `tini`/proper signal handling in the container for graceful shutdown (finish/park in‑flight work, release job leases). **As shipped, `/readyz` reports only that the manifest loaded — it does not check dependency reachability, so a task with an unreachable database still reports ready. The ALB is wired to `/healthz`.**
 - **Least‑privilege IAM task roles:** MCP role (read/write DynamoDB, read Postgres, presign S3, `ecs:RunTask` optional); worker role (claim/write Postgres, write DynamoDB/S3). Secrets via Secrets Manager injected at task start.
 - **Networking:** tasks in private subnets; egress to the systems‑under‑test via NAT/VPC endpoints; DynamoDB/S3 via **Gateway VPC Endpoints** (no NAT cost, private).
 - **IaC:** AWS **CDK** stacks — `network`, `data` (RDS/DynamoDB/S3), `ecs` (services + autoscaling), `observability` (dashboards/alarms).

@@ -49,6 +49,10 @@ export const stepResultSchema = z.object({
   attempts: z.number().int().nonnegative().default(1),
   /** Populated for `errored`/`failed` steps — feeds the likely-cause heuristic. */
   error: z.string().optional(),
+  /** True when this step was seeded from a prior attempt's checkpoint rather than executed
+   * this attempt — the request was never re-sent. `timingMs`/`response` still describe the
+   * attempt that actually ran it, not this one. */
+  resumed: z.boolean().optional(),
 });
 export type StepResult = z.infer<typeof stepResultSchema>;
 
@@ -78,5 +82,14 @@ export const executionResultSchema = z.object({
   gitSha: z.string().optional(),
   /** Run-level error (e.g. timeout, cancellation reason). */
   error: z.string().optional(),
+  /** 1-based attempt count for this run, including this one. `1` for every run that never
+   * lost its worker, so a normal result is byte-identical to before; `> 1` is the "this run
+   * was resumed" marker. Distinct from `StepResult.attempts`, which counts transport retries
+   * *within* one step. */
+  runAttempt: z.number().int().positive().default(1),
+  /** When the first attempt began; equal to `startedAt` when `runAttempt` is 1. On a resumed
+   * run `finishedAt - firstStartedAt` is the true end-to-end span (including the crash and
+   * requeue gap), while `durationMs` stays this-attempt-only. */
+  firstStartedAt: z.iso.datetime({ offset: true }).optional(),
 });
 export type ExecutionResult = z.infer<typeof executionResultSchema>;

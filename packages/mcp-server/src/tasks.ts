@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 
+import { executionStatusSchema } from "@atp/schema";
 import type { ExecutionResult, ExecutionStatus } from "@atp/schema";
 import {
   type Db,
   enqueue,
+  getRun as getRunHistory,
   PostgresTaskStore,
   requestCancel as requestJobCancel,
   type TaskRecord,
@@ -12,6 +14,7 @@ import {
 } from "@atp/store";
 
 import type { ServerContext } from "./context";
+import { notFound, unavailable } from "./errors";
 import { loadTrace } from "./run-store";
 import { injectTraceContext, type TraceCarrier } from "./telemetry";
 
@@ -75,7 +78,7 @@ export function requireDb(
   ctx: ServerContext,
   message = "asynchronous runs require a configured run database (set DATABASE_URL)",
 ): Db {
-  if (!ctx.db) throw new Error(message);
+  if (!ctx.db) throw unavailable(message);
   return ctx.db;
 }
 
@@ -100,6 +103,9 @@ export interface SubmitRunInput extends RunSpec {
    * For very long or resource-hungry runs that would otherwise monopolise a pooled worker.
    * Requires the escape hatch to be configured; ignored (with a log) when it is not. */
   isolated?: boolean;
+  /** Lease expiries tolerated before the job is dead-lettered; defaults to the column
+   * default. Lower it for a run whose repeated re-execution would be costly. */
+  maxAttempts?: number;
 }
 
 export interface SubmittedRun {
@@ -142,7 +148,7 @@ export async function submitRun(ctx: ServerContext, input: SubmitRunInput): Prom
         const existing = await tasks.get(runId);
         return { runId, state: existing?.state ?? "working", deduped: true };
       }
-      await enqueue(tx, { runId, spec, priority: input.priority });
+      await enqueue(tx, { runId, spec, priority: input.priority, maxAttempts: input.maxAttempts });
       return { runId, state: created.state, deduped: false };
     });
     // Enqueue first, launch second: the durable job is the safety net for a failed launch.
@@ -178,7 +184,7 @@ export async function submitRun(ctx: ServerContext, input: SubmitRunInput): Prom
     return { runId, state: existing?.state ?? "working", deduped: true };
   }
   try {
-    await enqueue(db, { runId, spec, priority: input.priority });
+    await enqueue(db, { runId, spec, priority: input.priority, maxAttempts: input.maxAttempts });
   } catch (err) {
     await tasks.update(runId, { state: "failed", error: "failed to enqueue run" });
     throw err;
@@ -209,9 +215,38 @@ export async function launchIsolatedRun(ctx: ServerContext, runId: string): Prom
   }
 }
 
-/** Fetch a run's hot task state (status + progress), or null if unknown. */
+/**
+ * Fetch a run's hot task state (status + progress), or null if unknown.
+ *
+ * Falls back to run *history* when the hot row is gone. The task row is swept at its TTL
+ * (24h by default) while the trace artifact lives far longer — S3 lifecycle, or forever on
+ * local disk — so without this fallback `get_run`/`get_run_result` and `tasks/get` start
+ * reporting "no such run" for runs whose report `get_report` and the `run://` resources
+ * still render happily. The mirror tools are documented as observing the same durable state
+ * as the Task, and that has to keep holding past the TTL.
+ */
 export async function getRun(ctx: ServerContext, runId: string): Promise<TaskRecord | null> {
-  return taskStoreFor(ctx, requireDb(ctx)).get(runId);
+  const db = requireDb(ctx);
+  const hot = await taskStoreFor(ctx, db).get(runId);
+  if (hot) return hot;
+
+  const history = await getRunHistory(db, runId);
+  if (!history) return null;
+  const { run } = history;
+  return {
+    runId,
+    state: resultStateFor(executionStatusSchema.catch("errored").parse(run.status)),
+    progressPct: 100,
+    currentNode: null,
+    resultRef: run.artifactUri,
+    // A history row has no separate diagnostic column; the trace carries the detail.
+    error: null,
+    cancelRequested: false,
+    // Already swept — there is nothing left to expire.
+    expiresAt: null,
+    createdAt: run.firstStartedAt ?? run.startedAt ?? new Date(0),
+    updatedAt: run.finishedAt ?? run.startedAt ?? new Date(0),
+  };
 }
 
 const TERMINAL: ReadonlySet<TaskState> = new Set(["completed", "failed", "cancelled"]);
@@ -241,7 +276,7 @@ export interface RunResult {
  */
 export async function getRunResult(ctx: ServerContext, runId: string): Promise<RunResult> {
   const task = await getRun(ctx, runId);
-  if (!task) throw new Error(`No run with id "${runId}"`);
+  if (!task) throw notFound(`No run with id "${runId}"`);
   if (!isTerminalState(task.state)) return { runId, state: task.state, ready: false };
   if (!task.resultRef) {
     return { runId, state: task.state, ready: true, error: task.error ?? undefined };

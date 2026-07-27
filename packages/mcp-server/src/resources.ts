@@ -5,9 +5,10 @@ import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { SCOPES } from "./auth";
 import type { ServerContext } from "./context";
+import { resourceErrors } from "./errors";
 import { guardScope } from "./guard";
 import { loadTrace } from "./run-store";
-import { findEntry } from "./tools";
+import { DEFAULT_PAGE_SIZE, findEntry, paginate } from "./tools";
 
 /**
  * The read-only resource surface. Resources mirror the tools as addressable,
@@ -30,18 +31,43 @@ function jsonContents(uri: URL, payload: unknown): ReadResourceResult {
 }
 
 export function registerResources(server: McpServer, ctx: ServerContext): void {
+  /** One id-sorted page of the manifest, plus the cursor for the next. Shared by the fixed
+   * first-page URI and the cursor template so both answer the same shape. */
+  const catalogPage = (cursor?: string): Record<string, unknown> => {
+    const sorted = [...ctx.manifest.entries].sort((a, b) => a.id.localeCompare(b.id));
+    const { page, nextCursor } = paginate(sorted, { cursor });
+    return { entries: page, ...(nextCursor ? { nextCursor } : {}) };
+  };
+
   server.registerResource(
     "catalog",
     "test://catalog",
     {
       title: "Test catalog",
-      description: "Every test and suite in the loaded manifest.",
+      description:
+        `The first page of the loaded manifest (${DEFAULT_PAGE_SIZE} entries), id-sorted, ` +
+        "with a nextCursor when more remain — read test://catalog/{cursor} for the rest. " +
+        "Paged because the corpus is designed to grow to thousands of entries.",
       mimeType: "application/json",
     },
-    (uri, extra) => {
+    resourceErrors((uri, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
-      return jsonContents(uri, { entries: ctx.manifest.entries });
+      return jsonContents(uri, catalogPage());
+    }),
+  );
+
+  server.registerResource(
+    "catalog-page",
+    new ResourceTemplate("test://catalog/{cursor}", { list: undefined }),
+    {
+      title: "Test catalog (page)",
+      description: "A further page of the manifest, addressed by an opaque nextCursor.",
+      mimeType: "application/json",
     },
+    resourceErrors((uri, variables, extra) => {
+      guardScope(ctx, extra, SCOPES.READ);
+      return jsonContents(uri, catalogPage(scalar(variables.cursor)));
+    }),
   );
 
   server.registerResource(
@@ -52,11 +78,11 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "The full manifest entry for a single test or suite id.",
       mimeType: "application/json",
     },
-    (uri, variables, extra) => {
+    resourceErrors((uri, variables, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       const entry = findEntry(ctx, scalar(variables.id));
       return jsonContents(uri, { entry });
-    },
+    }),
   );
 
   server.registerResource(
@@ -67,11 +93,11 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "The rendered markdown report for a completed run.",
       mimeType: "text/markdown",
     },
-    async (uri, variables, extra) => {
+    resourceErrors(async (uri, variables, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       const trace = await loadTrace(ctx, scalar(variables.runId));
       return textContents(uri, renderReport(trace, "md"), "text/markdown");
-    },
+    }),
   );
 
   server.registerResource(
@@ -82,10 +108,10 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "The canonical ExecutionResult trace everything else renders from.",
       mimeType: "application/json",
     },
-    async (uri, variables, extra) => {
+    resourceErrors(async (uri, variables, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       const trace = await loadTrace(ctx, scalar(variables.runId));
       return jsonContents(uri, trace);
-    },
+    }),
   );
 }

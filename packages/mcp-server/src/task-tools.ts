@@ -5,9 +5,17 @@ import { z } from "zod";
 
 import { SCOPES } from "./auth";
 import type { ServerContext } from "./context";
+import { invalidArgument, notFound, toolErrors } from "./errors";
 import { auditRun, guardScope } from "./guard";
 import { cancelRun, DEFAULT_TASK_TTL_MS, getRun, getRunResult, submitRun } from "./tasks";
-import { findEntry, jsonResult, selectEntries, textResult } from "./tools";
+import {
+  findEntry,
+  jsonResult,
+  READ_ONLY,
+  selectEntries,
+  textResult,
+  withTraceLink,
+} from "./tools";
 
 /**
  * The asynchronous run surface. `run_suite` is task-augmented
@@ -25,11 +33,11 @@ const idArg = z.string().describe('The test or suite id, e.g. "billing.e2e-refun
 const paramsArg = z
   .record(z.string(), z.unknown())
   .optional()
-.describe("Values for the entry's params schema (see describe_test).");
+  .describe("Values for the entry's params schema (see describe_test).");
 const envArg = z
   .record(z.string(), z.string())
   .optional()
-.describe("Env overrides merged over the entry's baked-in env, e.g. { baseUrl }.");
+  .describe("Env overrides merged over the entry's baked-in env, e.g. { baseUrl }.");
 const isolatedArg = z
   .boolean()
   .optional()
@@ -57,7 +65,7 @@ export function registerRunSuite(server: McpServer, ctx: ServerContext): void {
         // message rather than as a worker-side run error.
         const entry = findEntry(ctx, args.id);
         if (entry.kind !== "suite") {
-          throw new Error(`"${args.id}" is a test; use run_test. run_suite executes suites.`);
+          throw invalidArgument(`"${args.id}" is a test; use run_test. run_suite executes suites.`);
         }
         await auditRun(ctx, extra, { action: "run_suite", entryId: args.id, params: args.params });
         // The store's createTask atomically creates the task row and enqueues the job,
@@ -104,10 +112,10 @@ export function registerRunSelection(server: McpServer, ctx: ServerContext): voi
         isolated: isolatedArg,
       },
     },
-    async ({ tags, owner, kind, query, params, env, isolated }, extra) => {
+    toolErrors(async ({ tags, owner, kind, query, params, env, isolated }, extra) => {
       guardScope(ctx, extra, SCOPES.RUN);
       const entries = selectEntries(ctx, { tags, owner, kind, query });
-      if (entries.length === 0) throw new Error("selection matched no tests or suites");
+      if (entries.length === 0) throw invalidArgument("selection matched no tests or suites");
       await auditRun(ctx, extra, { action: "run_selection", params });
       // Each submit is an independent transaction with a fresh runId — fan them out; the
       // ordered result mirrors `entries`.
@@ -118,7 +126,7 @@ export function registerRunSelection(server: McpServer, ctx: ServerContext): voi
         }),
       );
       return jsonResult({ runs });
-    },
+    }),
   );
 }
 
@@ -128,16 +136,17 @@ export function registerGetRun(server: McpServer, ctx: ServerContext): void {
     "get_run",
     {
       title: "Get run",
+      annotations: READ_ONLY,
       description:
         "Return the status and progress of an asynchronous run by id (mirrors tasks/get for non-Task clients).",
       inputSchema: {
         runId: z.string().describe("The run id returned by run_suite/run_selection."),
       },
     },
-    async ({ runId }, extra) => {
+    toolErrors(async ({ runId }, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       const task = await getRun(ctx, runId);
-      if (!task) throw new Error(`No run with id "${runId}"`);
+      if (!task) throw notFound(`No run with id "${runId}"`);
       return jsonResult({
         run: {
           runId: task.runId,
@@ -148,7 +157,7 @@ export function registerGetRun(server: McpServer, ctx: ServerContext): void {
           cancelRequested: task.cancelRequested,
         },
       });
-    },
+    }),
   );
 }
 
@@ -159,6 +168,7 @@ export function registerGetRunResult(server: McpServer, ctx: ServerContext): voi
     "get_run_result",
     {
       title: "Get run result",
+      annotations: READ_ONLY,
       description:
         "Return an asynchronous run's report once it has reached a terminal state (mirrors tasks/result). Formats: markdown (default), html, junit, json, summary.",
       inputSchema: {
@@ -166,10 +176,10 @@ export function registerGetRunResult(server: McpServer, ctx: ServerContext): voi
         format: z
           .enum(REPORT_FORMATS as [ReportFormat, ...ReportFormat[]])
           .optional()
-.describe("Report format; defaults to markdown."),
+          .describe("Report format; defaults to markdown."),
       },
     },
-    async ({ runId, format }, extra) => {
+    toolErrors(async ({ runId, format }, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       const fmt: ReportFormat = format ?? "md";
       const res = await getRunResult(ctx, runId);
@@ -181,13 +191,16 @@ export function registerGetRunResult(server: McpServer, ctx: ServerContext): voi
         // execution) — report the state + diagnostic rather than a missing-report error.
         return jsonResult({ runId, state: res.state, ready: true, error: res.error ?? null });
       }
-      return textResult(renderReport(res.result, fmt), {
+      return withTraceLink(
+        textResult(renderReport(res.result, fmt), {
+          runId,
+          state: res.state,
+          ready: true,
+          format: fmt,
+        }),
         runId,
-        state: res.state,
-        ready: true,
-        format: fmt,
-      });
-    },
+      );
+    }),
   );
 }
 
@@ -197,15 +210,18 @@ export function registerCancelRun(server: McpServer, ctx: ServerContext): void {
     "cancel_run",
     {
       title: "Cancel run",
+      // Repeatable without additional effect, and it destroys no data — it asks a run
+      // to stop. Both differ from the pessimistic protocol defaults.
+      annotations: { idempotentHint: true, destructiveHint: false, openWorldHint: false },
       description:
         "Request cancellation of an in-flight asynchronous run (mirrors tasks/cancel). The worker aborts between nodes and finalizes the run as cancelled.",
       inputSchema: { runId: z.string().describe("The run id to cancel.") },
     },
-    async ({ runId }, extra) => {
+    toolErrors(async ({ runId }, extra) => {
       guardScope(ctx, extra, SCOPES.RUN);
       await auditRun(ctx, extra, { action: "cancel_run", entryId: runId });
       const cancelRequested = await cancelRun(ctx, runId);
       return jsonResult({ runId, cancelRequested });
-    },
+    }),
   );
 }

@@ -24,6 +24,9 @@ export function makeResult(over: Partial<ExecutionResult> = {}): ExecutionResult
     startedAt: AT,
     finishedAt: AT,
     durationMs: 0,
+    // Defaulted by the schema, so parsed results always carry it; a hand-built literal has
+    // to fill it like the rest of the scaffolding. `1` = never resumed, the normal case.
+    runAttempt: 1,
     metrics: {
       totalSteps: steps.length,
       passedSteps: steps.filter((s) => s.status === "passed").length,

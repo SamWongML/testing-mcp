@@ -1,0 +1,307 @@
+# Mockmart — an Insomnia v5 export (type: collection.insomnia.rest/5.0) used as the *source*
+# for the `tests/mockmart/` corpus. Insomnia YAML is never wired into MCP directly: it is
+# scaffolded into typed `defineTest`/`defineSuite` drafts by `atp import`, finished by an
+# agent, and retired once the namespace reaches parity.
+#
+# It is deliberately shaped to hit every branch of the importer and, once finished, every
+# capability the engine can test:
+#
+#   importer branches   top-level request → defineTest · folder → defineSuite · nested folder
+#                       flattened into its parent suite · empty folder skipped · environment →
+#                       tests/_shared/env · two *distinct* bearer tokens → two providers ·
+#                       non-bearer auth (basic · apiKey header · apiKey query · oauth2) → a
+#                       TODO note · `{{ _.var }}` → `{{env.*}}` · `{% response %}` chaining
+#                       tags → `__TODO_CHAIN__` placeholders
+#   engine capability   every HTTP method the schema allows · JSON and non-JSON bodies ·
+#                       response chaining across a DAG · a flaky endpoint (retry) · an
+#                       eventually-consistent one (poll) · a slow one (per-step timeout) ·
+#                       region/tier variants (matrix) · 204-no-body · every auth provider type
+#
+# The requests point at the Mockmart fixture service (`fixtures/sut/mockmart-sut.ts`).
+type: collection.insomnia.rest/5.0
+name: Mockmart
+meta:
+  id: wrk_mockmart
+  created: 1774000000000
+  modified: 1774000000000
+collection:
+  # --- top-level requests → one defineTest each -------------------------------------------
+  - name: Health Check
+    url: "{{ _.baseUrl }}/health"
+    method: GET
+    meta:
+      id: req_health
+      sortKey: -1000
+
+  - name: Login
+    url: "{{ _.baseUrl }}/auth/login"
+    method: POST
+    meta:
+      id: req_login
+      sortKey: -990
+    headers:
+      - name: Content-Type
+        value: application/json
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "email": "{{ _.email }}",
+          "password": "{{ _.password }}"
+        }
+
+  - name: Get Product
+    url: "{{ _.baseUrl }}/catalog/products/{{ _.productId }}"
+    method: GET
+    meta:
+      id: req_get_product
+      sortKey: -980
+    authentication:
+      type: bearer
+      token: "{{ _.apiToken }}"
+
+  # apiKey auth in a header — the importer can't map it, so it leaves a TODO note.
+  - name: Search Catalog
+    url: "{{ _.baseUrl }}/catalog/search?q={{ _.searchTerm }}"
+    method: GET
+    meta:
+      id: req_search
+      sortKey: -970
+    authentication:
+      type: apikey
+      key: x-api-key
+      value: "{{ _.searchKey }}"
+      addTo: header
+
+  # apiKey auth in the query string — same TODO, different `in`.
+  - name: Featured Products
+    url: "{{ _.baseUrl }}/catalog/featured"
+    method: GET
+    meta:
+      id: req_featured
+      sortKey: -960
+    authentication:
+      type: apikey
+      key: api_key
+      value: "{{ _.featuredKey }}"
+      addTo: queryParams
+
+  # Basic auth + the collection's only non-JSON response (text/plain).
+  - name: Legacy Ping
+    url: "{{ _.baseUrl }}/legacy/ping"
+    method: GET
+    meta:
+      id: req_legacy_ping
+      sortKey: -950
+    authentication:
+      type: basic
+      username: "{{ _.legacyUser }}"
+      password: "{{ _.legacyPassword }}"
+
+  # OAuth2 client-credentials — the token is fetched per run, never stored.
+  - name: Daily Report
+    url: "{{ _.baseUrl }}/reports/daily"
+    method: GET
+    meta:
+      id: req_daily_report
+      sortKey: -940
+    authentication:
+      type: oauth2
+      grantType: client_credentials
+      accessTokenUrl: "{{ _.baseUrl }}/oauth/token"
+      clientId: reporting-bot
+      clientSecret: "{{ _.oauthClientSecret }}"
+      scope: reports:read
+
+  # Warms up with two 503s per sku — the retry axis.
+  - name: Inventory Lookup
+    url: "{{ _.baseUrl }}/inventory/{{ _.productId }}"
+    method: GET
+    meta:
+      id: req_inventory
+      sortKey: -930
+    authentication:
+      type: bearer
+      token: "{{ _.apiToken }}"
+
+  # Deliberately slow — something real for a per-step timeout to bound.
+  - name: Slow Endpoint
+    url: "{{ _.baseUrl }}/slow?ms={{ _.slowMs }}"
+    method: GET
+    meta:
+      id: req_slow
+      sortKey: -920
+
+  # --- folders → one defineSuite each ------------------------------------------------------
+  # Every write method, chained off the created order's id.
+  - name: Order Lifecycle
+    meta:
+      id: fld_order_lifecycle
+      sortKey: -900
+    children:
+      - name: Create Order
+        url: "{{ _.baseUrl }}/orders"
+        method: POST
+        meta:
+          id: req_create_order
+        authentication:
+          type: bearer
+          token: "{{ _.adminToken }}"
+        headers:
+          - name: Content-Type
+            value: application/json
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "sku": "{{ _.productId }}",
+              "quantity": 2
+            }
+
+      - name: Get Order
+        url: "{{ _.baseUrl }}/orders/{% response 'body', 'req_create_order', 'b64::JC5vcmRlcklk::46b', 'never' %}"
+        method: GET
+        meta:
+          id: req_get_order
+        authentication:
+          type: bearer
+          token: "{{ _.adminToken }}"
+
+      - name: Confirm Order
+        url: "{{ _.baseUrl }}/orders/{% response 'body', 'req_create_order', 'b64::JC5vcmRlcklk::46b', 'never' %}"
+        method: PATCH
+        meta:
+          id: req_confirm_order
+        authentication:
+          type: bearer
+          token: "{{ _.adminToken }}"
+        headers:
+          - name: Content-Type
+            value: application/json
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "status": "confirmed"
+            }
+
+      - name: Set Shipping Address
+        url: "{{ _.baseUrl }}/orders/{% response 'body', 'req_create_order', 'b64::JC5vcmRlcklk::46b', 'never' %}/address"
+        method: PUT
+        meta:
+          id: req_set_address
+        authentication:
+          type: bearer
+          token: "{{ _.adminToken }}"
+        headers:
+          - name: Content-Type
+            value: application/json
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "line1": "12 Fixture Way",
+              "city": "Testville",
+              "postcode": "TE5 7ER"
+            }
+
+      - name: Cancel Order
+        url: "{{ _.baseUrl }}/orders/{% response 'body', 'req_create_order', 'b64::JC5vcmRlcklk::46b', 'never' %}"
+        method: DELETE
+        meta:
+          id: req_cancel_order
+        authentication:
+          type: bearer
+          token: "{{ _.adminToken }}"
+
+  # A cart → checkout → capture → track chain, with a nested folder the importer flattens.
+  - name: Checkout
+    meta:
+      id: fld_checkout
+      sortKey: -890
+    children:
+      - name: Create Cart
+        url: "{{ _.baseUrl }}/carts"
+        method: POST
+        meta:
+          id: req_create_cart
+        authentication:
+          type: bearer
+          token: "{{ _.apiToken }}"
+
+      - name: Add Item
+        url: "{{ _.baseUrl }}/carts/{% response 'body', 'req_create_cart', 'b64::JC5jYXJ0SWQ=::46b', 'never' %}/items"
+        method: POST
+        meta:
+          id: req_add_item
+        authentication:
+          type: bearer
+          token: "{{ _.apiToken }}"
+        headers:
+          - name: Content-Type
+            value: application/json
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "sku": "{{ _.productId }}",
+              "quantity": 2
+            }
+
+      - name: Checkout Cart
+        url: "{{ _.baseUrl }}/carts/{% response 'body', 'req_create_cart', 'b64::JC5jYXJ0SWQ=::46b', 'never' %}/checkout"
+        method: POST
+        meta:
+          id: req_checkout_cart
+        authentication:
+          type: bearer
+          token: "{{ _.apiToken }}"
+
+      - name: Capture Payment
+        url: "{{ _.baseUrl }}/payments/{% response 'body', 'req_checkout_cart', 'b64::JC5wYXltZW50SWQ=::46b', 'never' %}/capture"
+        method: POST
+        meta:
+          id: req_capture_payment
+        authentication:
+          type: bearer
+          token: "{{ _.adminToken }}"
+
+      # A nested folder: the importer flattens it into the parent suite.
+      - name: Fulfilment
+        meta:
+          id: fld_fulfilment
+        children:
+          - name: Track Shipment
+            url: "{{ _.baseUrl }}/shipments/{% response 'body', 'req_checkout_cart', 'b64::JC5vcmRlcklk::46b', 'never' %}"
+            method: GET
+            meta:
+              id: req_track_shipment
+            authentication:
+              type: bearer
+              token: "{{ _.adminToken }}"
+
+  # No requests anywhere under it — the importer skips it rather than emitting an empty suite.
+  - name: Archive
+    meta:
+      id: fld_archive
+      sortKey: -880
+    children:
+      - name: Retired 2025
+        meta:
+          id: fld_archive_2025
+        children: []
+
+environments:
+  name: Base Environment
+  meta:
+    id: env_base
+  data:
+    baseUrl: http://127.0.0.1:8899
+    email: qa@example.com
+    password: qa-password
+    productId: sku-1001
+    searchTerm: widget
+    region: us
+    tier: free
+    legacyUser: qa-bot
+    slowMs: 250

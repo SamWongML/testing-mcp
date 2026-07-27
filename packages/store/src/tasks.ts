@@ -1,6 +1,7 @@
-import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, lt, sql } from "drizzle-orm";
 
 import type { Db } from "./db/client";
+import { decodeKeysetCursor, encodeKeysetCursor, isoSortKey } from "./keyset";
 import { tasks } from "./db/schema";
 
 /**
@@ -51,6 +52,24 @@ export interface TaskPatch {
   expiresAt?: Date;
 }
 
+export interface ListTasksOptions {
+  /** Max rows per page; defaults to {@link DEFAULT_TASK_PAGE_SIZE}. */
+  limit?: number;
+  /** Opaque cursor from a previous page's `nextCursor`; omit for the first page. */
+  cursor?: string;
+}
+
+export interface TaskPage {
+  tasks: TaskRecord[];
+  /** Absent means "end of results" — the protocol's own signal. */
+  nextCursor?: string;
+}
+
+/** Rows per `list` page when the caller doesn't say. Bounded because the result is
+ * marshaled straight into a calling agent's context window. */
+export const DEFAULT_TASK_PAGE_SIZE = 100;
+export const MAX_TASK_PAGE_SIZE = 500;
+
 export interface TaskStateStore {
   /** Create or fully replace a task row. */
   put(input: PutTaskInput): Promise<TaskRecord>;
@@ -61,6 +80,14 @@ export interface TaskStateStore {
   get(runId: string): Promise<TaskRecord | null>;
   /** Patch the provided fields; returns the new row, or null if the task is absent. */
   update(runId: string, patch: TaskPatch): Promise<TaskRecord | null>;
+  /**
+   * One page of tasks plus the cursor for the next. The contract both backends honour is
+   * **complete traversal**: following `nextCursor` to exhaustion yields every stored task
+   * exactly once. Ordering is backend-specific and deliberately not part of the contract —
+   * Postgres pages newest-first over a `(created_at, run_id)` keyset; DynamoDB's `Scan`
+   * order is arbitrary. Callers that need an order must sort.
+   */
+  list(opts?: ListTasksOptions): Promise<TaskPage>;
   /** Worker progress heartbeat (k/n nodes). */
   setProgress(runId: string, progressPct: number, currentNode?: string): Promise<void>;
   /** Set the cancel flag the worker polls; returns whether a row was flagged. */
@@ -144,6 +171,33 @@ export class PostgresTaskStore implements TaskStateStore {
       .where(eq(tasks.runId, runId))
       .returning();
     return row ? toRecord(row) : null;
+  }
+
+  async list(opts: ListTasksOptions = {}): Promise<TaskPage> {
+    const limit = Math.min(opts.limit ?? DEFAULT_TASK_PAGE_SIZE, MAX_TASK_PAGE_SIZE);
+    const after = decodeKeysetCursor(opts.cursor);
+    // `created_at` is NOT NULL, so the ordering is already total without a fallback.
+    const sortKey = isoSortKey(tasks.createdAt);
+    // Row-wise comparison is the keyset predicate for the composite `(sortKey DESC,
+    // run_id DESC)` ordering — one condition, and total because `run_id` is unique.
+    const where = after
+      ? sql`(${sortKey}, ${tasks.runId}) < (${after.sortKey}, ${after.tiebreaker})`
+      : undefined;
+    // Over-fetch by one: the extra row is how we know more remain without a second query.
+    const rows = await this.db
+      .select({ task: tasks, sortKey })
+      .from(tasks)
+      .where(where)
+      .orderBy(desc(sortKey), desc(tasks.runId))
+      .limit(limit + 1);
+
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    const more = rows.length > limit && last !== undefined;
+    return {
+      tasks: page.map((r) => toRecord(r.task)),
+      ...(more ? { nextCursor: encodeKeysetCursor(last.sortKey, last.task.runId) } : {}),
+    };
   }
 
   async setProgress(runId: string, progressPct: number, currentNode?: string): Promise<void> {

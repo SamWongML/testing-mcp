@@ -1,3 +1,4 @@
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -38,6 +39,15 @@ describe("catalog + test resources", () => {
     ]);
   });
 
+  it("pages the catalog at test://catalog/{cursor} without colliding with test://{id}", async () => {
+    // The fixture corpus fits in one page, so drive the template directly with a cursor
+    // pointing past the first entry — the same shape a real nextCursor has.
+    const cursor = Buffer.from("alpha.create-widget", "utf8").toString("base64url");
+    const res = await conn.client.readResource({ uri: `test://catalog/${cursor}` });
+    const parsed = JSON.parse(first(res).text) as { entries: { id: string }[] };
+    expect(parsed.entries.map((e) => e.id)).toEqual(["alpha.widget-lifecycle", "beta.read-widget"]);
+  });
+
   it("serves one entry's detail at test://{id}", async () => {
     const res = await conn.client.readResource({ uri: "test://alpha.create-widget" });
     const parsed = JSON.parse(first(res).text) as {
@@ -51,6 +61,21 @@ describe("catalog + test resources", () => {
     await expect(conn.client.readResource({ uri: "test://nope.missing" })).rejects.toThrow(
       /nope\.missing/,
     );
+  });
+
+  it("reports an unknown id as InvalidParams, not a blanket InternalError", async () => {
+    // The identical `findEntry` throw reaches a client two ways: as an `isError` result from
+    // describe_test, and as a JSON-RPC error here. It used to arrive as -32603 InternalError,
+    // which tells a client "the server is broken" about its own bad id — and is
+    // indistinguishable from a genuine fault.
+    const err = await conn.client
+      .readResource({ uri: "test://nope.missing" })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(McpError);
+    expect((err as McpError).code).toBe(ErrorCode.InvalidParams);
+    // The taxonomy code rides in `data`, so a structured client gets the same machine code
+    // it would get from the tool surface.
+    expect((err as McpError).data).toMatchObject({ code: "not_found" });
   });
 });
 

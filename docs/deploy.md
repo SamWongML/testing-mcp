@@ -165,8 +165,22 @@ released rather than abandoned.
 **The worker's drain is unbounded by design** — SIGTERM stops it claiming *new* work and then
 waits for the current run to finish naturally; it does not abort the in-flight HTTP request
 (only a cancel request does that). So `stopTimeout` must exceed your longest expected run, or
-ECS will SIGKILL mid-run. A killed run isn't lost — its lease expires and the reaper requeues
-it — but it does re-execute from the start. Raise `stopTimeout` if your suites run long.
+ECS will SIGKILL mid-run. A killed run isn't lost: its lease expires, the reaper requeues it,
+and the replacement worker **resumes from the DAG frontier** — every node whose checkpoint was
+recorded is seeded rather than re-executed. Raise `stopTimeout` if your suites run long.
+
+**What resume does and does not guarantee.** The engine records each node before any dependent
+starts, so a recorded node never runs twice. The nodes *in flight* when the worker died are
+another matter: they may have reached the system under test, and they will run again. With the
+default concurrency of 8 that is at most 8 nodes, and for a sequential test exactly one. This
+is bounded at-least-once, **not** exactly-once — a suite whose steps are not idempotent should
+be given a low `maxAttempts` on submission, or the SUT should be handed an idempotency key.
+
+**Repeatedly-crashing jobs stop.** Each lease expiry increments the job's `attempts` and
+spaces the next retry (immediate, then 5s/15s/35s…, capped at 5min). At `max_attempts`
+(default 5) the job is dead-lettered: it leaves the queue for good and its task is finalized
+as failed with a diagnostic, so the client stops polling a run nobody will ever finish. Look
+for `job dead-lettered: exhausted its attempt budget` in the worker logs.
 
 ## Rollback
 

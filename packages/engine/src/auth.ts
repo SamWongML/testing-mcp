@@ -43,12 +43,25 @@ function bearerAuth(opts: { id: string; token: string }): AuthProvider {
   };
 }
 
-/** HTTP basic auth: `Authorization: Basic base64(user:pass)`. */
+/**
+ * HTTP basic auth: `Authorization: Basic base64(user:pass)`.
+ *
+ * The credentials are resolved against the run context *here*, not by the re-resolve pass
+ * `applyAuth` runs over the returned request: base64 encoding happens inside this provider,
+ * so a `{{secrets.*}}` password left as a template would be encoded verbatim and reach the
+ * SUT as the literal template text — an unauthenticated request that looks authenticated.
+ */
 function basicAuth(opts: { id: string; username: string; password: string }): AuthProvider {
-  const encoded = Buffer.from(`${opts.username}:${opts.password}`).toString("base64");
   return {
     id: opts.id,
-    apply: (request) => withHeaders(request, { authorization: `Basic ${encoded}` }),
+    apply: (request, ctx) => {
+      const { username, password } = resolveTemplates(
+        { username: opts.username, password: opts.password },
+        ctx,
+      );
+      const encoded = Buffer.from(`${username}:${password}`).toString("base64");
+      return withHeaders(request, { authorization: `Basic ${encoded}` });
+    },
   };
 }
 
@@ -86,7 +99,9 @@ function oauth2ClientCredentials(opts: {
     apply: async (request, ctx) => {
       let pending = ctx.authCache.get(opts.id);
       if (!pending) {
-        pending = fetchClientCredentialsToken(opts, ctx.signal);
+        // Same reason as `basicAuth`: the grant fields are consumed by the *token* request,
+        // never injected into `request`, so nothing downstream would resolve them.
+        pending = fetchClientCredentialsToken(resolveTemplates(opts, ctx), ctx.signal);
         // Cache only successes: a rejected fetch (transient token-endpoint failure or a
         // cancellation) is evicted so a later node retries instead of reusing the error.
         pending.catch(() => ctx.authCache.delete(opts.id));

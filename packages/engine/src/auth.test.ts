@@ -93,6 +93,19 @@ describe("applyAuth", () => {
     );
   });
 
+  it("basic resolves templated credentials before encoding them", async () => {
+    // The encoding happens inside the provider, so an unresolved template would be
+    // base64-encoded verbatim — a request that looks authenticated and is not.
+    const ctx = ctxWith(
+      [{ id: "b", type: "basic", username: "{{env.user}}", password: "{{secrets.PW}}" }],
+      { env: { user: "alice" }, secrets: { PW: "s3cr3t" } },
+    );
+    const out = await applyAuth({ ...BASE, authRef: "b" }, ctx);
+    expect(header(out, "authorization")).toBe(
+      `Basic ${Buffer.from("alice:s3cr3t").toString("base64")}`,
+    );
+  });
+
   it("api-key sets a header by default", async () => {
     const ctx = ctxWith([
       { id: "k", type: "apiKey", name: "x-api-key", value: "abc", in: "header" },
@@ -144,6 +157,38 @@ describe("oauth2ClientCredentials", () => {
     expect(header(first, "authorization")).toBe("Bearer fetched-tok");
     expect(header(second, "authorization")).toBe("Bearer fetched-tok");
     agent.assertNoPendingInterceptors();
+  });
+
+  it("resolves a templated token url and client secret before fetching", async () => {
+    let form = "";
+    agent
+      .get("https://auth.example.com")
+      .intercept({ path: "/token", method: "POST" })
+      .reply((opts) => {
+        form = String(opts.body);
+        return {
+          statusCode: 200,
+          data: JSON.stringify({ access_token: "tok" }),
+          responseOptions: JSON_HEADERS,
+        };
+      });
+
+    const ctx = ctxWith(
+      [
+        {
+          id: "cc",
+          type: "oauth2ClientCredentials",
+          tokenUrl: "{{env.authUrl}}/token",
+          clientId: "id",
+          clientSecret: "{{secrets.CLIENT_SECRET}}",
+        },
+      ],
+      { env: { authUrl: "https://auth.example.com" }, secrets: { CLIENT_SECRET: "sh-h" } },
+    );
+
+    const out = await applyAuth({ ...BASE, authRef: "cc" }, ctx);
+    expect(header(out, "authorization")).toBe("Bearer tok");
+    expect(new URLSearchParams(form).get("client_secret")).toBe("sh-h");
   });
 
   it("errors when the token endpoint returns no access_token", async () => {

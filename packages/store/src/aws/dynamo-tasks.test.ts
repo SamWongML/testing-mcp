@@ -107,6 +107,25 @@ describe.skipIf(!dynamoAvailable)("DynamoTaskStore", () => {
     expect(await store.get("no-ttl")).not.toBeNull();
   });
 
+  it("lists every task exactly once across cursor pages", async () => {
+    // The same traversal contract `PostgresTaskStore.list` honours: a full cursored walk
+    // returns everything `get` can return, once. Ordering is deliberately not asserted —
+    // a Scan's order is arbitrary, which is why the contract only promises traversal.
+    const ids = ["r1", "r2", "r3", "r4", "r5"];
+    for (const runId of ids) await store.create({ runId, state: "working" });
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await store.list({ limit: 2, cursor });
+      expect(page.tasks.length).toBeLessThanOrEqual(2);
+      seen.push(...page.tasks.map((t) => t.runId));
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    expect(seen.slice().sort()).toEqual(ids);
+  });
+
   it("reaps across Scan pages, not just the first one", async () => {
     // `deleteExpired` paginates on `LastEvaluatedKey`. With a handful of small items a Scan
     // returns everything in one page, so the loop's second iteration never runs and the

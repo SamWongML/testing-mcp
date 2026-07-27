@@ -113,4 +113,37 @@ describe("executionResultSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("defaults runAttempt to 1, so a never-resumed run looks exactly as it did before", () => {
+    const parsed = executionResultSchema.parse({
+      runId: "r1",
+      entryId: "identity.login",
+      status: "passed",
+      startedAt: "2026-07-23T00:00:00Z",
+      steps: [{ id: "s1", status: "passed" }],
+      metrics: { totalSteps: 1, passedSteps: 1, failedSteps: 0 },
+    });
+    expect(parsed.runAttempt).toBe(1);
+    expect(parsed.firstStartedAt).toBeUndefined();
+    expect(parsed.steps[0]?.resumed).toBeUndefined();
+  });
+
+  it("carries the resume provenance a re-claimed run reports", () => {
+    const parsed = executionResultSchema.parse({
+      runId: "r1",
+      entryId: "billing.e2e-refund",
+      status: "passed",
+      startedAt: "2026-07-23T00:05:00Z",
+      firstStartedAt: "2026-07-23T00:00:00Z",
+      runAttempt: 2,
+      steps: [
+        { id: "order", status: "passed", resumed: true },
+        { id: "capture", status: "passed" },
+      ],
+      metrics: { totalSteps: 2, passedSteps: 2, failedSteps: 0 },
+    });
+    expect(parsed.runAttempt).toBe(2);
+    expect(parsed.firstStartedAt).toBe("2026-07-23T00:00:00Z");
+    expect(parsed.steps.map((s) => s.resumed)).toEqual([true, undefined]);
+  });
 });

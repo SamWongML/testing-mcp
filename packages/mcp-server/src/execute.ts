@@ -1,8 +1,15 @@
 import { resolve } from "node:path";
 
 import { importDef } from "@atp/compile";
-import { expandUnits, isSuite, type ProgressUpdate, runSuite, runTest } from "@atp/engine";
-import type { ExecutionResult, ManifestEntry } from "@atp/schema";
+import {
+  expandUnits,
+  isSuite,
+  type ProgressUpdate,
+  type ResumeState,
+  runSuite,
+  runTest,
+} from "@atp/engine";
+import type { ExecutionResult, ManifestEntry, StepResult } from "@atp/schema";
 
 import type { ServerContext } from "./context";
 
@@ -23,6 +30,11 @@ export interface ExecuteOptions {
   runId?: string;
   /** Node-settled progress ticks (the worker forwards them to the task store + MCP). */
   onProgress?: (update: ProgressUpdate) => void;
+  /** Nodes a prior attempt of this run already executed — seeded rather than re-sent. */
+  resumeFrom?: ResumeState;
+  /** Durable per-node hook the engine awaits before starting dependents; the worker wires
+   * it to a checkpoint write, which is what makes `resumeFrom` trustworthy next attempt. */
+  onNodeSettled?: (result: StepResult) => Promise<void>;
 }
 
 /** Execute one manifest entry (test or suite) end-to-end and return its `ExecutionResult`. */
@@ -47,6 +59,8 @@ export async function executeEntry(
     signal: opts.signal,
     runId: opts.runId,
     onProgress: opts.onProgress,
+    resumeFrom: opts.resumeFrom,
+    onNodeSettled: opts.onNodeSettled,
   };
 
   if (isSuite(def)) {

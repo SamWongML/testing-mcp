@@ -54,7 +54,31 @@ export const jobs = pgTable("jobs", {
   claimedAt: timestamp("claimed_at", { withTimezone: true }),
   cancelRequested: boolean("cancel_requested").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Crash count: incremented by the reaper each time this job's lease expires. */
+  attempts: integer("attempts").notNull().default(0),
+  /** Ceiling before the job is dead-lettered instead of requeued. */
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  lastError: text("last_error"),
+  /** First claim, preserved across reaps — a resumed run's true start. */
+  firstClaimedAt: timestamp("first_claimed_at", { withTimezone: true }),
 });
+
+/**
+ * Per-node execution checkpoints — operational state, not history. Written as each node
+ * settles (before any dependent starts) so a re-claimed run resumes from the frontier rather
+ * than re-firing requests that already went out; pruned on every terminal write, with a TTL
+ * sweep as the backstop. `payload` is a redacted `StepResult`.
+ */
+export const runCheckpoints = pgTable(
+  "run_checkpoints",
+  {
+    runId: text("run_id").notNull(),
+    nodeId: text("node_id").notNull(),
+    payload: jsonb("payload").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.nodeId] })],
+);
 
 /** Run history — the record. */
 export const runs = pgTable("runs", {
@@ -73,6 +97,9 @@ export const runs = pgTable("runs", {
   durationMs: integer("duration_ms"),
   artifactUri: text("artifact_s3"),
   invokedBy: text("invoked_by"),
+  /** 1 unless the run was resumed after a worker loss; mirrors `ExecutionResult.runAttempt`. */
+  attempt: integer("attempt").notNull().default(1),
+  firstStartedAt: timestamp("first_started_at", { withTimezone: true }),
 });
 
 export const stepResults = pgTable(

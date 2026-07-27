@@ -172,6 +172,11 @@ export function startHttpServer(ctx: ServerContext): Promise<HttpHandle> {
 export interface TestSut {
   url: string;
   close: () => Promise<void>;
+  /** `"METHOD /pathname"` → how many times the SUT received it. The canned responses are
+   * identical no matter how often a route is called, so without a counter a test cannot
+   * tell "ran once" from "ran again after a crash" — which is exactly what resumability
+   * has to prove. */
+  calls: Record<string, number>;
 }
 
 export interface TestSutOptions {
@@ -185,11 +190,13 @@ export interface TestSutOptions {
  *  `{{env.baseUrl}}`. */
 export function startTestSut(opts: TestSutOptions = {}): Promise<TestSut> {
   const ledgerSettles = opts.ledgerSettles ?? true;
+  const calls: Record<string, number> = {};
   const server: Server = createServer((req, res) => {
     req.resume();
     req.on("end", () => {
       const method = req.method ?? "GET";
       const { pathname } = new URL(req.url ?? "/", "http://127.0.0.1");
+      calls[`${method} ${pathname}`] = (calls[`${method} ${pathname}`] ?? 0) + 1;
       const send = (status: number, body: unknown): void => {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(JSON.stringify(body));
@@ -217,6 +224,7 @@ export function startTestSut(opts: TestSutOptions = {}): Promise<TestSut> {
       const { port } = server.address() as AddressInfo;
       res({
         url: `http://127.0.0.1:${port}`,
+        calls,
         close: () => new Promise<void>((done) => server.close(() => done())),
       });
     });

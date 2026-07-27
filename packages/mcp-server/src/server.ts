@@ -48,7 +48,7 @@ export function buildMcpServer(ctx: ServerContext): McpServer {
   registerGetReport(server, ctx);
   registerListRuns(server, ctx);
   registerResources(server, ctx);
-  registerPrompts(server);
+  registerPrompts(server, ctx);
   if (asyncEnabled) {
     registerRunSuite(server, ctx);
     registerRunSelection(server, ctx);

@@ -53,6 +53,7 @@
   "startedAt": "2026-07-23T10:00:00.000Z",
   "finishedAt": "2026-07-23T10:00:00.045Z",
   "durationMs": 45,
+  "runAttempt": 1,
   "metrics": {
     "totalSteps": 1,
     "passedSteps": 1,

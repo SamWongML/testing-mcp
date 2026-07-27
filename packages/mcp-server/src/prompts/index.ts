@@ -1,6 +1,11 @@
+import { REPORT_FORMATS } from "@atp/reporting";
+import { listRunsPage } from "@atp/store";
+import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { GetPromptResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+
+import type { ServerContext } from "../context";
 
 /**
  * MCP prompts — the agent workflows encoded once so behavior is reusable, not re-prompted
@@ -12,6 +17,56 @@ import { z } from "zod";
  * Prompts are pure guidance and carry no run state, so they are always registered — on the
  * sync surface as well as the async one.
  */
+
+/**
+ * Argument completion (`completions/complete`). Prompt arguments were free text, so filling
+ * one in required already knowing a valid entry id or format — exactly the knowledge an agent
+ * calls the prompt to acquire. Each completer draws from the same source the tools validate
+ * against (the live manifest, `REPORT_FORMATS`), so a suggestion can never be something the
+ * tool would then reject.
+ *
+ * The spec caps a completion response at 100 values; these are prefix-filtered and sliced.
+ */
+const MAX_COMPLETIONS = 100;
+
+/** An optional prompt argument reaches the completer as `undefined` before the user has
+ * typed anything, which must mean "everything" rather than crash. */
+const prefixMatches = (values: string[], value: string | undefined): string[] => {
+  const prefix = (value ?? "").toLowerCase();
+  return values.filter((v) => v.toLowerCase().startsWith(prefix)).slice(0, MAX_COMPLETIONS);
+};
+
+/** Completer over the catalog's entry ids, read from the injected context at call time so it
+ * tracks the manifest the server actually booted with. */
+const entryIdCompleter =
+  (ctx: ServerContext) =>
+  (value: string | undefined): string[] =>
+    prefixMatches(ctx.manifest.entries.map((e) => e.id).sort(), value);
+
+/** Completer over the distinct tags the live corpus carries — the search key
+ * `generate_suite` tells the agent to start its reuse hunt from. */
+const tagCompleter =
+  (ctx: ServerContext) =>
+  (value: string | undefined): string[] => {
+    const tags = new Set(ctx.manifest.entries.flatMap((e) => e.tags));
+    return prefixMatches([...tags].sort(), value);
+  };
+
+/**
+ * Completer over recent run ids. Async because it reads history; empty without a run
+ * database, which is the offline/dev case — the prompt still renders, it just cannot
+ * suggest. Bounded by the page size so a large history cannot be dragged into a completion.
+ */
+const runIdCompleter =
+  (ctx: ServerContext) =>
+  async (value: string | undefined): Promise<string[]> => {
+    if (!ctx.db) return [];
+    const { runs } = await listRunsPage(ctx.db, { limit: MAX_COMPLETIONS });
+    return prefixMatches(
+      runs.map((r) => r.id),
+      value,
+    );
+  };
 
 /** Wrap instruction text as a single user message (the SEP prompt shape the SDK expects). */
 function userPrompt(text: string): GetPromptResult {
@@ -91,7 +146,7 @@ Follow the repo conventions:
 }
 
 /** `triage_failure` — from a failed runId to a root-cause hypothesis + a fix or quarantine. */
-function registerTriageFailure(server: McpServer): void {
+function registerTriageFailure(server: McpServer, ctx: ServerContext): void {
   server.registerPrompt(
     "triage_failure",
     {
@@ -99,7 +154,10 @@ function registerTriageFailure(server: McpServer): void {
       description:
         "Given a failed runId, fetch the report + trace, hypothesize a root cause, and propose a fix or a quarantine.",
       argsSchema: {
-        runId: z.string().describe("The failed run id to triage."),
+        runId: completable(
+          z.string().describe("The failed run id to triage."),
+          runIdCompleter(ctx),
+        ),
       },
     },
     ({ runId }) =>
@@ -118,7 +176,7 @@ function registerTriageFailure(server: McpServer): void {
 }
 
 /** `generate_suite` — compose existing tests into a new suite; reuse first, forbid duplication. */
-function registerGenerateSuite(server: McpServer): void {
+function registerGenerateSuite(server: McpServer, ctx: ServerContext): void {
   server.registerPrompt(
     "generate_suite",
     {
@@ -127,10 +185,13 @@ function registerGenerateSuite(server: McpServer): void {
         "Compose existing tests/steps into a new suite (defineSuite), reusing by reference and forbidding duplication.",
       argsSchema: {
         goal: z.string().describe("The end-to-end scenario the suite should cover."),
-        tags: z
-          .string()
-          .optional()
-          .describe("Optional comma-separated tags to seed the search for reusable tests."),
+        tags: completable(
+          z
+            .string()
+            .optional()
+            .describe("Optional comma-separated tags to seed the search for reusable tests."),
+          tagCompleter(ctx),
+        ),
       },
     },
     ({ goal, tags }) =>
@@ -146,7 +207,7 @@ function registerGenerateSuite(server: McpServer): void {
 }
 
 /** `regenerate_reports` — re-render stored ExecutionResults into a new format. */
-function registerRegenerateReports(server: McpServer): void {
+function registerRegenerateReports(server: McpServer, ctx: ServerContext): void {
   server.registerPrompt(
     "regenerate_reports",
     {
@@ -154,8 +215,14 @@ function registerRegenerateReports(server: McpServer): void {
       description:
         "Re-render stored run history into a new report format via list_runs + get_report.",
       argsSchema: {
-        format: z.string().describe("Target format: md, html, junit, json, or summary."),
-        entryId: z.string().optional().describe("Optional: only runs of this test/suite id."),
+        format: completable(
+          z.string().describe("Target format: md, html, junit, json, or summary."),
+          (value) => prefixMatches([...REPORT_FORMATS], value),
+        ),
+        entryId: completable(
+          z.string().optional().describe("Optional: only runs of this test/suite id."),
+          entryIdCompleter(ctx),
+        ),
         since: z
           .string()
           .optional()
@@ -180,10 +247,10 @@ function registerRegenerateReports(server: McpServer): void {
 }
 
 /** Register all five workflow prompts on the server. */
-export function registerPrompts(server: McpServer): void {
+export function registerPrompts(server: McpServer, ctx: ServerContext): void {
   registerImportInsomnia(server);
   registerAuthorNewTest(server);
-  registerTriageFailure(server);
-  registerGenerateSuite(server);
-  registerRegenerateReports(server);
+  registerTriageFailure(server, ctx);
+  registerGenerateSuite(server, ctx);
+  registerRegenerateReports(server, ctx);
 }
