@@ -2,7 +2,7 @@ import { type ExecutionResult, executionResultSchema } from "@atp/schema";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { makeTestDb, pgAvailable, type TestDb } from "./db/test-db";
-import { getRun, listRuns, recordRun } from "./runs";
+import { getRun, listRuns, listRunsPage, recordRun } from "./runs";
 
 function makeResult(over: Partial<ExecutionResult> = {}): ExecutionResult {
   return executionResultSchema.parse({
@@ -146,5 +146,42 @@ describe.skipIf(!pgAvailable)("runs", () => {
 
     // Limit.
     expect((await listRuns(tdb.db, { limit: 1 })).map((r) => r.id)).toEqual(["r-other"]);
+  });
+
+  it("pages the whole history with a cursor, carrying filters across pages", async () => {
+    // `limit` alone made history beyond the newest N unreachable — there was no offset and no
+    // cursor — which undercuts any workflow that re-renders older reports.
+    const ids = ["r1", "r2", "r3", "r4", "r5"];
+    for (const [i, runId] of ids.entries()) {
+      await recordRun(
+        tdb.db,
+        makeResult({
+          runId,
+          entryId: i % 2 === 0 ? "identity.login" : "billing.refund",
+          startedAt: `2026-07-0${i + 1}T00:00:00.000Z`,
+        }),
+      );
+    }
+
+    const walked: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await listRunsPage(tdb.db, { limit: 2, cursor });
+      walked.push(...page.runs.map((r) => r.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    // Newest-first, every row reachable, none repeated.
+    expect(walked).toEqual(["r5", "r4", "r3", "r2", "r1"]);
+
+    // A filter has to survive paging, or page 2 answers a different question than page 1.
+    const first = await listRunsPage(tdb.db, { entryId: "identity.login", limit: 2 });
+    expect(first.runs.map((r) => r.id)).toEqual(["r5", "r3"]);
+    const second = await listRunsPage(tdb.db, {
+      entryId: "identity.login",
+      limit: 2,
+      cursor: first.nextCursor,
+    });
+    expect(second.runs.map((r) => r.id)).toEqual(["r1"]);
+    expect(second.nextCursor).toBeUndefined();
   });
 });

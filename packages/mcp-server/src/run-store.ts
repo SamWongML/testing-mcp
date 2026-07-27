@@ -2,6 +2,7 @@ import type { ExecutionResult } from "@atp/schema";
 import { artifactKey, recordRun } from "@atp/store";
 
 import type { ServerContext } from "./context";
+import { notFound } from "./errors";
 
 /**
  * Inline-run persistence. A completed run's canonical `trace.json` is the
@@ -55,7 +56,7 @@ export async function loadTrace(ctx: ServerContext, runId: string): Promise<Exec
   try {
     traceKey = (await ctx.artifacts.get(pointerKey(ctx, runId))).toString("utf8");
   } catch {
-    throw new Error(`No run with id "${runId}"`);
+    throw notFound(`No run with id "${runId}"`);
   }
   const raw = await ctx.artifacts.get(traceKey);
   return JSON.parse(raw.toString("utf8")) as ExecutionResult;

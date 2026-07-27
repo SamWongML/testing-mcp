@@ -91,6 +91,22 @@ describe("list_tests", () => {
     expect(byName.run_test?.annotations?.readOnlyHint).toBeUndefined();
   });
 
+  it("declares an outputSchema for the tools with a stable result shape", async () => {
+    // Without one a client can only discover the payload shape by calling the tool and
+    // inspecting what comes back. The SDK also validates every non-error result against it,
+    // so the declaration is enforced rather than documentation that can drift.
+    const { tools } = await conn.client.listTools();
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+    for (const name of ["list_tests", "describe_test", "run_test", "list_runs"]) {
+      expect(byName[name]?.outputSchema, `${name} must declare an outputSchema`).toMatchObject({
+        type: "object",
+      });
+    }
+    // The declared shape names the field a caller actually reads.
+    expect(Object.keys(byName.list_tests?.outputSchema?.properties ?? {})).toContain("entries");
+    expect(Object.keys(byName.run_test?.outputSchema?.properties ?? {})).toContain("run");
+  });
+
   it("filters by tag", async () => {
     const res = await conn.client.callTool({
       name: "list_tests",
@@ -157,6 +173,19 @@ describe("describe_test", () => {
     expect(res.isError).toBe(true);
     expect(JSON.stringify(res.content)).toContain("nope.missing");
   });
+
+  it("distinguishes a not-found from an internal fault with a machine-readable code", async () => {
+    // Every throw used to be a plain Error, so a caller could only tell "unknown id" from
+    // "the server broke" by pattern-matching prose. The code is the stable contract; the
+    // message text stays exactly as it was for clients that only read `content`.
+    const res = await conn.client.callTool({
+      name: "describe_test",
+      arguments: { id: "nope.missing" },
+    });
+    expect(res.structuredContent).toMatchObject({
+      error: { code: "not_found", message: expect.stringContaining("nope.missing") },
+    });
+  });
 });
 
 describe("run_test", () => {
@@ -191,6 +220,42 @@ describe("run_test", () => {
     expect(run.metrics).toMatchObject({ totalSteps: 1, passedSteps: 1 });
     // The canonical trace was persisted; its uri points at the run's trace.json.
     expect(run.artifactUri).toContain(`${run.runId}/trace.json`);
+  });
+
+  it("forwards the engine's progress ticks when the caller supplies a progressToken", async () => {
+    // A sync run blocks the request for its whole duration with no feedback. The engine
+    // already emits k/n ticks; without this they stop at the tool boundary and a caller has
+    // no way to tell a slow run from a hung one.
+    const seen: { progress: number; total?: number }[] = [];
+    await conn.client.callTool(
+      { name: "run_test", arguments: { id: "alpha.create-widget", env: { baseUrl: sut.url } } },
+      undefined,
+      { onprogress: (p) => seen.push({ progress: p.progress, total: p.total }) },
+    );
+    // One node in this fixture, so exactly one tick — and it must carry the plan total, or a
+    // client cannot render a proportion.
+    expect(seen).toEqual([{ progress: 1, total: 1 }]);
+  });
+
+  it("links the run's trace as a readable resource, not just an opaque uri", async () => {
+    // `artifactUri` is a storage pointer (file:// / s3://) the client has no way to fetch.
+    // A resource_link names a uri this server actually serves, so an agent can follow it
+    // instead of guessing the `run://` template. Additive: `artifactUri` is untouched.
+    const res = await conn.client.callTool({
+      name: "run_test",
+      arguments: { id: "alpha.create-widget", env: { baseUrl: sut.url } },
+    });
+    const { run } = payload<{ run: { runId: string; artifactUri: string } }>(res);
+    const links = (
+      res as { content: { type: string; uri?: string; name?: string }[] }
+    ).content.filter((b) => b.type === "resource_link");
+    expect(links.map((l) => l.uri)).toEqual([`run://${run.runId}/trace.json`]);
+    expect(run.artifactUri).toContain(`${run.runId}/trace.json`);
+
+    // The link resolves — following it returns this run's trace.
+    const read = await conn.client.readResource({ uri: links[0]!.uri! });
+    const trace = JSON.parse((read.contents[0] as { text: string }).text) as { runId: string };
+    expect(trace.runId).toBe(run.runId);
   });
 
   it("rejects suites — inline run_test is for a single test (async suites go through run_suite)", async () => {
@@ -298,6 +363,19 @@ describe.skipIf(!pgAvailable)("list_runs (db-backed)", () => {
     await tdb.close();
   });
 
+  it("reports a malformed cursor as a client error, not an internal fault", async () => {
+    // The taxonomy's own docstring names "bad cursor" as the canonical invalid_argument.
+    // The catalog cursor already reported it that way; a store-backed cursor threw a plain
+    // Error, which classify() can only bucket as `internal` — telling the caller the server
+    // broke when in fact the caller sent garbage.
+    const res = await conn.client.callTool({
+      name: "list_runs",
+      arguments: { cursor: "not-a-real-cursor" },
+    });
+    expect(res.isError).toBe(true);
+    expect(res.structuredContent).toMatchObject({ error: { code: "invalid_argument" } });
+  });
+
   it("records inline runs and lists them, filterable by entry", async () => {
     const r1 = await runCreateWidget(conn, sut.url);
     const r2 = await runCreateWidget(conn, sut.url);
@@ -325,5 +403,29 @@ describe.skipIf(!pgAvailable)("list_runs (db-backed)", () => {
       await conn.client.callTool({ name: "list_runs", arguments: { entryId: "nope.absent" } }),
     );
     expect(runs).toEqual([]);
+  });
+
+  it("pages history with a cursor, reaching runs past the first page", async () => {
+    // With only `limit` and no cursor, anything older than the newest N was unreachable
+    // through the surface entirely.
+    const recorded = [
+      await runCreateWidget(conn, sut.url),
+      await runCreateWidget(conn, sut.url),
+      await runCreateWidget(conn, sut.url),
+    ];
+
+    const walked: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = payload<{ runs: { runId: string }[]; nextCursor?: string }>(
+        await conn.client.callTool({ name: "list_runs", arguments: { limit: 2, cursor } }),
+      );
+      expect(page.runs.length).toBeLessThanOrEqual(2);
+      walked.push(...page.runs.map((r) => r.runId));
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    for (const runId of recorded) expect(walked).toContain(runId);
+    expect(new Set(walked).size).toBe(walked.length); // no row served twice
   });
 });

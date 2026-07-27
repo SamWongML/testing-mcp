@@ -31,14 +31,21 @@ Tests are *data*, so authoring a new test never needs a new tool. The surface is
 - **Resources** (`resources.ts`). `test://catalog` (the manifest) · `test://{id}` (one normalized
   entry) · `run://{runId}/report.md` · `run://{runId}/trace.json`.
 
-**Known gaps in that surface — don't mistake them for finished work.** `SdkTaskStore.listTasks`
-returns `{ tasks: [] }` unconditionally, so `tasks/list` answers 200-with-nothing while `tasks/get`
-returns real tasks — the spec requires anything gettable to also be listable. `list_tests` and
-`test://catalog` take no `limit`/`cursor` and return the whole corpus. And **server→client
-notifications are architecturally foreclosed**, not merely unimplemented: `http.ts` builds a fresh
-server + transport per request and discards both, so nothing (progress, `resources/subscribe`,
-`notifications/message`) can be pushed outside the response to the request that triggered it.
-Adopting any of them means adopting sessions + an `EventStore`, which is a separate decision.
+**Everything is paginated, and the cursors are keysets.** `list_tests`/`test://catalog` page over
+the id-sorted catalog; `list_runs` and `tasks/list` page over the store. Cursors are opaque per
+spec (base64url) and a missing `nextCursor` means "end". Two traps encoded in the store cursors:
+the sort key is `to_char(...)` **text**, not the raw timestamp column, because `started_at`/
+`created_at` hold microseconds while a rendered cursor holds milliseconds — a truncated cursor
+lands *before* the row it came from, so same-millisecond rows fall through the boundary and are
+returned by no page at all; and a DynamoDB `Scan` may return an empty page while still having more
+to walk, so `nextCursor` tracks `LastEvaluatedKey`, never the page length.
+
+**Server→client notifications: only *within* a request.** Progress works — `progressReporter` in
+`tools.ts` reads `extra._meta.progressToken` and pushes onto the SSE stream of the request being
+handled, which is open for exactly that handler's duration. Anything *outside* a request
+(`resources/subscribe`, `notifications/message`, task-status pushes) is **architecturally
+foreclosed**, not merely unimplemented: `http.ts` builds a fresh server + transport per request and
+discards both. Adopting those means adopting sessions + an `EventStore`, a separate decision.
 
 ## Authorization has two layers — know which one covers your code
 
@@ -58,6 +65,13 @@ regression tests.
 ## Files whose design is not obvious from reading them
 
 - `context.ts` — `ServerContext`, the composition root. Injected at boot, never per-request.
+- `errors.ts` — one taxonomy, **two renderings**, because the protocol allows no single one.
+  `McpServer` catches whatever a tool handler throws — `McpError` included — and flattens it to
+  `{ content, isError: true }`, discarding the JSON-RPC code; so tools carry the machine code in
+  `structuredContent.error.code` (via the `toolErrors` wrapper at registration) while resources
+  throw a real `McpError` (via `resourceErrors`). Throw an `AtpError` from anywhere — including
+  down inside `@atp/engine` — and both renderings follow. Never rewrite the message text: it is
+  what non-structured clients read, and tests assert on it.
 - `guard.ts` — both the scope check and the audit write **no-op** off the auth/db path, so
   handlers run unchanged in dev/test. `redactAuditParams` masks secret-shaped **keys** because
   the engine's `redact()` is value-based and cannot cover a caller-supplied params bag.

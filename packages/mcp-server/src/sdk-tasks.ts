@@ -15,6 +15,7 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ServerContext } from "./context";
+import { invalidArgument } from "./errors";
 import {
   cancelRun,
   DEFAULT_TASK_TTL_MS,
@@ -100,7 +101,7 @@ export class SdkTaskStore implements TaskStore {
 
   async getTaskResult(taskId: string, _sessionId?: string): Promise<Result> {
     const res = await getRunResult(this.ctx, taskId);
-    if (!res.ready) throw new Error(`Task "${taskId}" has no result yet (${res.state})`);
+    if (!res.ready) throw invalidArgument(`Task "${taskId}" has no result yet (${res.state})`);
     if (!res.result) {
       // Terminal but no trace (cancelled while queued, or an error before execution): return
       // the terminal state + diagnostic rather than failing to load an absent trace.
@@ -149,13 +150,18 @@ export class SdkTaskStore implements TaskStore {
   }
 
   async listTasks(
-    _cursor?: string,
+    cursor?: string,
     _sessionId?: string,
   ): Promise<{ tasks: Task[]; nextCursor?: string }> {
-    // `tasks/list` is registered by the SDK whenever a task store is configured (regardless of
-    // the advertised `list` capability), so a client can reach this directly; we don't back a
-    // real listing in stage-1 (deferred), so it returns empty rather than erroring.
-    return { tasks: [] };
+    // SEP-1686 requires that anything `tasks/get` can return, `tasks/list` can return too.
+    // Paged straight off the durable task rows `getTask` reads, so the two cannot disagree.
+    // Not filtered by session: the server is stateless and a run is addressed by `runId`
+    // alone, so a task has no owning session to scope the listing to.
+    const page = await this.store().list({ cursor });
+    return {
+      tasks: page.tasks.map(toSdkTask),
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+    };
   }
 }
 
@@ -199,7 +205,7 @@ function runSpecFromRequest(request: Request): RunSpec {
     isolated?: boolean;
   };
   if (typeof args.id !== "string") {
-    throw new Error("task-augmented run requires a string `id` argument");
+    throw invalidArgument("task-augmented run requires a string `id` argument");
   }
   return { entryId: args.id, params: args.params, env: args.env, trace: injectTraceContext() };
 }

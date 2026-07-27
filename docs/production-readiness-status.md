@@ -10,7 +10,7 @@ unedited). Update this file as work lands; keep the plan as the record of what w
 | Step 0 | Clean up contexts, commit the baseline | ✅ Done |
 | Phase 0 | The four smoke-test defects | ✅ Done |
 | Phase 1 | Async durability — resume, dead-letter, retention, cancel | ✅ Done, verified against real services |
-| Phase 2 | MCP surface conformance | 🟡 Partial — catalog paging + annotations landed |
+| Phase 2 | MCP surface conformance | ✅ Done, verified against real services |
 | Phase 3 | Request-path operability | ⬜ Not started |
 | Phase 4 | AWS wiring and supply chain | ⬜ Not started |
 
@@ -18,7 +18,7 @@ unedited). Update this file as work lands; keep the plan as the record of what w
 
 The service-gated suites (`@atp/store`, the async lifecycle) `describe.skipIf` out when their
 backing service is absent, so **a green offline run proves nothing about the store paths** —
-86 of 592 tests skip. Everything below marked verified was run with real services:
+93 of 606 tests skip. Everything below marked verified was run with real services:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
@@ -28,8 +28,8 @@ ATP_TEST_S3_ENDPOINT=http://localhost:9000 \
   pnpm test
 ```
 
-Last full run: **592 passed, 0 skipped** (75 files) against Postgres 16, dynamodb-local and
-MinIO. Offline: 506 passed, 86 skipped.
+Last full run: **606 passed, 0 skipped** (75 files) against Postgres 16, dynamodb-local and
+MinIO.
 
 ---
 
@@ -96,36 +96,71 @@ single-use `MockAgent` interceptors, so a re-sent request fails the test outrigh
 await-ordering test was checked by removing the await and confirming it fails. `cancel_run`,
 which had **zero** coverage, is now driven through the tool against a live worker.
 
-## Phase 2 — MCP surface conformance 🟡
+## Phase 2 — MCP surface conformance ✅
 
-`53d6ec7` — landed so far:
+`53d6ec7` (paging + annotations) · this phase's remainder below.
 
-- **Catalog paging (the blocker).** `list_tests` takes `limit`/`cursor` and returns
-  `nextCursor`; further catalog pages read at `test://catalog/{cursor}`. Keyset cursor over the
-  id-sorted catalog — opaque per spec, and stable as entries come and go, unlike an offset.
-  Checked against the SDK's own URI matcher that `test://{id}` cannot swallow the page template.
-- **Tool annotations.** `destructiveHint` and `openWorldHint` both default to *true*, so an
-  unannotated reader was indistinguishable from a mutating tool. The six read-only tools now
-  declare themselves; `cancel_run` is idempotent and non-destructive; the run tools keep the
-  pessimistic defaults, which are correct — they reach a live SUT.
+**Catalog paging (the blocker).** `list_tests` takes `limit`/`cursor` and returns `nextCursor`;
+further catalog pages read at `test://catalog/{cursor}`. Keyset cursor over the id-sorted
+catalog — opaque per spec, and stable as entries come and go, unlike an offset. Checked against
+the SDK's own URI matcher that `test://{id}` cannot swallow the page template.
 
-Verified over Streamable-HTTP against a running server, not only in-process.
+**Tool annotations.** `destructiveHint` and `openWorldHint` both default to *true*, so an
+unannotated reader was indistinguishable from a mutating tool. The six read-only tools now
+declare themselves; `cancel_run` is idempotent and non-destructive; the run tools keep the
+pessimistic defaults, which are correct — they reach a live SUT.
 
-**Remaining in this phase**, roughly in value order:
+**`tasks/list` is backed.** `TaskStateStore` gained `list({ limit, cursor })`, implemented on
+both backends, and `SdkTaskStore.listTasks` pages straight off the same rows `tasks/get` reads,
+so the two cannot disagree. The contract both backends honour is **complete traversal** — follow
+`nextCursor` to exhaustion and you see every task exactly once. Ordering is deliberately *not*
+in the contract: Postgres pages newest-first over a `(created_at, run_id)` keyset, a DynamoDB
+`Scan` walks in hash-key order, and promising an order both could keep would mean adding a GSI.
 
-1. **Back `tasks/list`** — `SdkTaskStore.listTasks` returns `{ tasks: [] }` while `tasks/get`
-   returns real tasks. The spec says anything gettable MUST be listable, so this is a
-   conformance violation, not a stub. Needs a `list` on `TaskStateStore` plus both backends.
-2. **Error taxonomy** — every throw is a plain `Error`, so "unknown id" and "internal fault"
-   are indistinguishable; worse, the same throw surfaces as `isError: true` from a tool but as
-   JSON-RPC `-32603` from a resource. Wants `McpError` with real codes plus a stable machine
-   code in `structuredContent` (existing tests assert on message substrings — keep the text).
-3. **Progress notifications** — read `extra._meta.progressToken` and forward the engine's
-   existing `onProgress` ticks; `executeEntry` already accepts the callback.
-4. **`list_runs` cursor** — needs keyset paging in `@atp/store`'s `listRuns`, which today has
-   `limit` but no offset, making history beyond the newest N unreachable.
-5. Polish: `outputSchema` for the tools with a stable shape, `resource_link` for `artifactUri`,
-   `completions/complete` for prompt args.
+**Error taxonomy.** `errors.ts` — `AtpError` with a stable `code` (`not_found`,
+`invalid_argument`, `forbidden`, `unavailable`, `internal`), rendered two ways because the
+protocol permits no single one: `McpServer` flattens *any* throw from a tool handler — `McpError`
+included — into `{ content, isError: true }` and discards the JSON-RPC code, so tools carry the
+code in `structuredContent.error` while resources throw a real `McpError` (`InvalidParams` for an
+unknown id, not the blanket `-32603` they returned before). Message text is unchanged throughout.
+
+**Progress notifications.** `run_test` forwards the engine's existing k/n ticks when the caller
+sends a `progressToken`. This is the one server→client message the stateless design permits: it
+rides the SSE stream of the request being handled. Delivery is fire-and-forget — a closed stream
+must not fail a healthy run.
+
+**`list_runs` cursor.** `listRunsPage` in `@atp/store` keysets over `(started_at, id)` with
+filters carried across pages; `listRuns` is now a thin wrapper, so its single existing caller and
+its tests were unaffected. History past the newest N is reachable for the first time.
+
+**Polish.** `outputSchema` on `list_tests`/`describe_test`/`run_test`/`list_runs` — the SDK
+validates every non-error result against it, so these are enforced rather than documentation
+(error results are exempt from that validation, which is what lets the taxonomy's payload
+coexist). A `resource_link` block on `run_test` and `get_run_result` pointing at
+`run://{runId}/trace.json` — a uri this server actually serves, unlike the `file://`/`s3://`
+`artifactUri`, which is untouched beside it. `completions/complete` for prompt args: entry ids
+and tags from the live manifest, formats from `REPORT_FORMATS`, and `triage_failure`'s `runId`
+from recorded history (empty without a db).
+
+### The bug the paging tests caught
+
+The first `tasks/list` traversal test failed about one run in four. It was not flaky — the
+cursor encoded `created_at` at **millisecond** precision while the column stores
+**microseconds**, so a cursor built from a row at `.004917` read `.004`, and every row sharing
+that millisecond compared as *after* the boundary and was skipped by every page. Three of five
+tasks silently vanished from a listing whose entire purpose is "anything gettable is listable".
+
+The fix makes the sort key fixed-width ISO-8601 UTC **text** — selected, ordered by, and
+compared against as one expression, so the cursor is provably the value the predicate uses and
+no driver type-parsing sits in between. Zero-padded UTC ISO sorts lexicographically in
+chronological order, so newest-first is preserved. `tasks.test.ts` pins it with rows written at
+hand-set sub-millisecond offsets, which fails deterministically against the old cursor rather
+than 25% of the time.
+
+Both stores share one construction — `isoSortKey` in `packages/store/src/keyset.ts`, alongside
+the cursor codec. `to_char(…, 'MS')` **truncates** rather than rounds (checked against Postgres
+16: `.004999` → `004`, `.999999` → `999`), so no separate `date_trunc` is needed and there is no
+overflow-to-`1000` hazard.
 
 ## Phase 3 — Request-path operability ⬜
 
@@ -152,6 +187,12 @@ in `infra/`, so every authenticated test would fail at run time in a deployed st
 | Advertise `execution.taskSupport` — "the repo sets it nowhere" | No change | The audit was wrong: `run_suite` already declares `taskSupport: "required"`. And `registerTool`'s config type doesn't accept `execution` at all — only `registerToolTask` does — so the non-task tools cannot declare it through the high-level API. Omission already means unsupported. |
 | — | `migrate.test.ts` now reads the migrations directory instead of hardcoding filenames | It asserted `["0000_init.sql"]` exactly, so it failed on the new migration while testing nothing extra. The invariant is "every migration applies and re-running is a no-op". |
 | — | Added a test for the `getRun` history fallback | The existing TTL-sweep test never *executes* its runs, so no history row exists and the fallback was never exercised. The claim needed its own test. |
+| `tasks/list` "cursor-paginated" | Paginated, but **ordering is not part of the contract** | Postgres pages newest-first; a DynamoDB `Scan` walks in hash-key order and cannot be ordered without adding a GSI. Promising an order the DynamoDB backend could not keep would be a lie in the interface both implement, so the contract promises complete traversal and the Postgres ordering is documented as a superset. |
+| Error taxonomy: "introduce `McpError` with proper `ErrorCode`" | `McpError` on resources; a machine code in `structuredContent` on tools | Not a choice: `McpServer` catches `McpError` from a tool handler and flattens it to `isError: true` + message, discarding the code (`server/mcp.js:136`). Only `UrlElicitationRequired` escapes. So the code *cannot* reach a tool caller over JSON-RPC, and `structuredContent` is the only carrier the tool surface offers. |
+| `list_runs` "add `.offset()`/keyset paging" | Keyset only, via a new `listRunsPage` | An offset drifts as runs are recorded mid-traversal — the same reason the catalog cursor is a keyset. `listRuns` kept its old signature as a wrapper so the change is additive for its caller. |
+| Polish: "either stop advertising `resources.listChanged` or accept it as inert" | Accepted as inert, and stated in the rules file | Nothing subscribes today, so removing it changes no behaviour while risking a client that branches on the capability. The rules file now says plainly that progress works *within* a request and everything outside one is foreclosed. |
+| — | A shared `packages/store/src/keyset.ts` (`isoSortKey` + the cursor codec + `InvalidCursorError`) | Review caught that the `tasks` and `runs` cursor codecs were byte-identical and their SQL sort keys had *already* drifted apart. Worse, both threw a plain `Error`, so a malformed cursor on `list_runs` was classified `internal` — reporting a caller's typo as a server fault, in the exact case the taxonomy's own docstring names as `invalid_argument`. One shared module plus one `classify()` branch closed the duplication and the misclassification together; regression test in `tools.test.ts`. |
+| — | Corrected `docs/research.md`'s "the worker … emits MCP progress notifications" | False, and the same class of defect Step 0 existed to fix: the worker is a separate process with no MCP connection. It writes `progressPct`/`currentNode` to the task store, which clients observe by polling `tasks/get`. MCP progress notifications come only from the request path. |
 
 Two Drizzle shapes the design flagged as unverifiable without a database — the composite-target
 `onConflictDoUpdate` and the `CASE`-based `.set()` in `reapExpired` — both typecheck and pass
@@ -166,3 +207,13 @@ against real Postgres. No raw-SQL fallback was needed.
   `firstStartedAt`; `StepResult` gains `resumed`. Additive — stored traces still parse.
 - `jobs.status` gains `dead_letter`, a terminal state that is never re-claimed.
 - `get_run` / `get_run_result` now answer for runs whose hot task row has been TTL-swept.
+- **`list_runs` now paginates** (default 100) and returns `nextCursor`. Same shape of change as
+  `list_tests`: a caller that took the whole first page and stopped still works, it just now
+  knows there is more.
+- **`tasks/list` returns real tasks** where it used to return `{ tasks: [] }`. A client that
+  treated the empty list as "this server has no tasks" will now see them.
+- An errored tool result gains `structuredContent.error = { code, message }`. Additive — `content`
+  and `isError` are unchanged, so a client reading only those sees no difference.
+- `run_test` and `get_run_result` gain a trailing `resource_link` content block. A client that
+  reads `content[0].text` is unaffected; one that assumed a single block should index, not assume.
+- `TaskStateStore` gains `list()`. Any out-of-tree implementation of that interface must add it.

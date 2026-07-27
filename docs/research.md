@@ -736,7 +736,7 @@ RETURNING *;
 
 **Hot state (fast polling):** DynamoDB item per run — `state`, `progressPct`, `currentNode`, `resultRef`, and a **TTL** attribute implementing SEP‑1686's "results retained for a server‑defined duration." Polling `tasks/get` hits DynamoDB (single‑digit‑ms, cheap at high volume) instead of hammering Postgres.
 
-**Progress & logs:** the worker updates the DynamoDB item and emits MCP **progress notifications**; step logs stream to CloudWatch (awslogs); large artifacts go to S3.
+**Progress & logs:** the worker updates the DynamoDB item (`progressPct`/`currentNode`), which a client observes by polling `tasks/get` — it is a separate process with no MCP connection, so it emits no notifications itself. MCP **progress notifications** are sent only by the request path, for a synchronous `run_test` whose caller supplied a `progressToken`; they ride that request's own stream. Step logs stream to CloudWatch (awslogs); large artifacts go to S3.
 
 **Cancellation:** `tasks/cancel` sets a cancel flag (DynamoDB + a `jobs.cancel_requested` column); the worker checks it between nodes and aborts the in‑flight undici request via `AbortSignal`.
 

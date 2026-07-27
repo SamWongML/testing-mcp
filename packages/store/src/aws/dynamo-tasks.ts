@@ -8,8 +8,16 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 
-import type { PutTaskInput, TaskPatch, TaskRecord, TaskState, TaskStateStore } from "../tasks";
-import { resolveExpiry } from "../tasks";
+import type {
+  ListTasksOptions,
+  PutTaskInput,
+  TaskPage,
+  TaskPatch,
+  TaskRecord,
+  TaskState,
+  TaskStateStore,
+} from "../tasks";
+import { DEFAULT_TASK_PAGE_SIZE, MAX_TASK_PAGE_SIZE, resolveExpiry } from "../tasks";
 import { TASK_ATTRS, TASK_KEY_ATTR, fromEpochSeconds, toEpochSeconds } from "./attributes";
 
 /**
@@ -96,6 +104,28 @@ function buildUpdate(values: Item, rawSets: Record<string, string> = {}): Update
     ExpressionAttributeNames: names,
     ...(Object.keys(attrValues).length ? { ExpressionAttributeValues: attrValues } : {}),
   };
+}
+
+/** The `Scan` pagination token, base64url-encoded because the protocol requires an opaque
+ * cursor — a client must not parse or construct one. */
+function encodeScanCursor(key: Item): string {
+  return Buffer.from(JSON.stringify(key), "utf8").toString("base64url");
+}
+
+function decodeScanCursor(cursor?: string): Item | undefined {
+  if (cursor === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+  } catch {
+    throw new Error(`Invalid task cursor "${cursor}"`);
+  }
+  // A cursor we did not mint is a client error worth naming, not a silent restart from the
+  // top — which would make a paging client loop forever over the first page.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Invalid task cursor "${cursor}"`);
+  }
+  return parsed as Item;
 }
 
 export class DynamoTaskStore implements TaskStateStore {
@@ -222,6 +252,32 @@ export class DynamoTaskStore implements TaskStateStore {
     // backends observably different, which the store-selection contract forbids.
     // Absent task ⇒ null, matching the Postgres store's "no row updated" result.
     return this.write(runId, values, { condition: `attribute_exists(#${TASK_KEY_ATTR})` });
+  }
+
+  /**
+   * One page of tasks via `Scan`. DynamoDB has no ordering to offer here — a `Scan` walks
+   * the table in hash-key order — so this honours the traversal half of the contract only:
+   * follow `nextCursor` to exhaustion and you see every task exactly once. The cursor is the
+   * `LastEvaluatedKey`, base64url-encoded to keep it opaque per spec.
+   *
+   * A `Scan` may return fewer items than `Limit` (or none) while still having more to walk,
+   * so `nextCursor` tracks `LastEvaluatedKey` rather than the page's own length — a page
+   * that comes back empty with a cursor is normal, and a caller that stopped on `length === 0`
+   * would truncate the listing.
+   */
+  async list(opts: ListTasksOptions = {}): Promise<TaskPage> {
+    const limit = Math.min(opts.limit ?? DEFAULT_TASK_PAGE_SIZE, MAX_TASK_PAGE_SIZE);
+    const page = await this.client.send(
+      new ScanCommand({
+        TableName: this.tableName,
+        Limit: limit,
+        ExclusiveStartKey: decodeScanCursor(opts.cursor),
+      }),
+    );
+    return {
+      tasks: (page.Items ?? []).map(toRecord),
+      ...(page.LastEvaluatedKey ? { nextCursor: encodeScanCursor(page.LastEvaluatedKey) } : {}),
+    };
   }
 
   async setProgress(runId: string, progressPct: number, currentNode?: string): Promise<void> {

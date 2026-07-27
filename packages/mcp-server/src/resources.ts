@@ -5,6 +5,7 @@ import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { SCOPES } from "./auth";
 import type { ServerContext } from "./context";
+import { resourceErrors } from "./errors";
 import { guardScope } from "./guard";
 import { loadTrace } from "./run-store";
 import { DEFAULT_PAGE_SIZE, findEntry, paginate } from "./tools";
@@ -49,10 +50,10 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
         "Paged because the corpus is designed to grow to thousands of entries.",
       mimeType: "application/json",
     },
-    (uri, extra) => {
+    resourceErrors((uri, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       return jsonContents(uri, catalogPage());
-    },
+    }),
   );
 
   server.registerResource(
@@ -63,10 +64,10 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "A further page of the manifest, addressed by an opaque nextCursor.",
       mimeType: "application/json",
     },
-    (uri, variables, extra) => {
+    resourceErrors((uri, variables, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       return jsonContents(uri, catalogPage(scalar(variables.cursor)));
-    },
+    }),
   );
 
   server.registerResource(
@@ -77,11 +78,11 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "The full manifest entry for a single test or suite id.",
       mimeType: "application/json",
     },
-    (uri, variables, extra) => {
+    resourceErrors((uri, variables, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       const entry = findEntry(ctx, scalar(variables.id));
       return jsonContents(uri, { entry });
-    },
+    }),
   );
 
   server.registerResource(
@@ -92,11 +93,11 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "The rendered markdown report for a completed run.",
       mimeType: "text/markdown",
     },
-    async (uri, variables, extra) => {
+    resourceErrors(async (uri, variables, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       const trace = await loadTrace(ctx, scalar(variables.runId));
       return textContents(uri, renderReport(trace, "md"), "text/markdown");
-    },
+    }),
   );
 
   server.registerResource(
@@ -107,10 +108,10 @@ export function registerResources(server: McpServer, ctx: ServerContext): void {
       description: "The canonical ExecutionResult trace everything else renders from.",
       mimeType: "application/json",
     },
-    async (uri, variables, extra) => {
+    resourceErrors(async (uri, variables, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
       const trace = await loadTrace(ctx, scalar(variables.runId));
       return jsonContents(uri, trace);
-    },
+    }),
   );
 }

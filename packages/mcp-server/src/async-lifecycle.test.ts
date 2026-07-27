@@ -284,9 +284,17 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
       const report = (await conn.client.callTool({
         name: "get_run_result",
         arguments: { runId, format: "md" },
-      })) as unknown as { content: { text?: string }[]; structuredContent: { ready: boolean } };
+      })) as unknown as {
+        content: { type: string; text?: string; uri?: string }[];
+        structuredContent: { ready: boolean };
+      };
       expect(report.structuredContent.ready).toBe(true);
       expect(report.content.map((c) => c.text ?? "").join("")).toContain("alpha.create-widget");
+      // The async mirror links its trace the same way the sync run_test does — a caller
+      // shouldn't have to know which path produced the run to find the trace.
+      expect(report.content.filter((c) => c.type === "resource_link").map((c) => c.uri)).toEqual([
+        `run://${runId}/trace.json`,
+      ]);
     } finally {
       await worker.stop();
       await conn?.close();
@@ -324,6 +332,35 @@ describe.skipIf(!pgAvailable)("async run lifecycle", () => {
     } finally {
       await worker.stop();
       await conn?.close();
+    }
+  });
+
+  it("lists via tasks/list every task that tasks/get can return", async () => {
+    // SEP-1686: anything retrievable via `tasks/get` MUST be retrievable via `tasks/list`.
+    // `listTasks` used to answer `{ tasks: [] }` unconditionally, so the two disagreed —
+    // a conformance violation, not a stub.
+    const submitted = await Promise.all(
+      ["alpha.create-widget", "beta.read-widget", "alpha.widget-lifecycle"].map((entryId) =>
+        submitRun(ctx, { entryId, env: { baseUrl: sut.url } }),
+      ),
+    );
+    const conn = await connectClient(ctx);
+    try {
+      for (const { runId } of submitted) {
+        expect((await conn.client.experimental.tasks.getTask(runId)).taskId).toBe(runId);
+      }
+
+      const listed: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await conn.client.experimental.tasks.listTasks(cursor);
+        listed.push(...page.tasks.map((t) => t.taskId));
+        cursor = page.nextCursor;
+      } while (cursor);
+
+      for (const { runId } of submitted) expect(listed).toContain(runId);
+    } finally {
+      await conn.close();
     }
   });
 

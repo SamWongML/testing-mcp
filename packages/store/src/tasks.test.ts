@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { makeTestDb, pgAvailable, type TestDb } from "./db/test-db";
@@ -86,6 +87,49 @@ describe.skipIf(!pgAvailable)("PostgresTaskStore", () => {
     expect(await store.requestCancel("r1")).toBe(true);
     expect((await store.get("r1"))?.cancelRequested).toBe(true);
     expect(await store.requestCancel("missing")).toBe(false);
+  });
+
+  it("lists every task exactly once across cursor pages", async () => {
+    // The traversal contract `tasks/list` rests on: anything `get` can return, a full
+    // cursored walk must return — once. Five rows, pages of two, so the walk needs three
+    // pages and the last one is short.
+    const ids = ["r1", "r2", "r3", "r4", "r5"];
+    for (const runId of ids) await store.create({ runId, state: "working" });
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await store.list({ limit: 2, cursor });
+      expect(page.tasks.length).toBeLessThanOrEqual(2);
+      seen.push(...page.tasks.map((t) => t.runId));
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    expect(seen.slice().sort()).toEqual(ids);
+  });
+
+  it("does not skip tasks created within the same millisecond", async () => {
+    // `created_at` is timestamptz — microseconds — while a cursor round-trips through a JS
+    // Date, which is milliseconds. A keyset that encodes the truncated value lands *before*
+    // the row it came from, so same-millisecond rows fall through the boundary and are never
+    // returned by any page. Arranged by hand because natural timestamps only collide by luck.
+    const micros = ["111", "222", "333", "444", "555"];
+    for (const i of micros.keys()) await store.create({ runId: `r${i}`, state: "working" });
+    for (const [i, us] of micros.entries()) {
+      await tdb.db.execute(
+        sql`UPDATE tasks SET created_at = ${`2026-07-27T01:00:00.004${us}+00`}::timestamptz WHERE run_id = ${`r${i}`}`,
+      );
+    }
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await store.list({ limit: 2, cursor });
+      seen.push(...page.tasks.map((t) => t.runId));
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    expect(seen.slice().sort()).toEqual(["r0", "r1", "r2", "r3", "r4"]);
   });
 
   it("honors ttlMs and reaps only expired rows", async () => {

@@ -7,6 +7,7 @@ export { resolveDatabaseUrl, type DatabaseUrlConfig } from "./db/url";
 export * from "./queue";
 export * from "./checkpoints";
 export * from "./tasks";
+export * from "./keyset";
 export * from "./artifacts";
 export * from "./runs";
 export * from "./manifests";

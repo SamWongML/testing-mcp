@@ -14,6 +14,7 @@ import {
 } from "@atp/store";
 
 import type { ServerContext } from "./context";
+import { notFound, unavailable } from "./errors";
 import { loadTrace } from "./run-store";
 import { injectTraceContext, type TraceCarrier } from "./telemetry";
 
@@ -77,7 +78,7 @@ export function requireDb(
   ctx: ServerContext,
   message = "asynchronous runs require a configured run database (set DATABASE_URL)",
 ): Db {
-  if (!ctx.db) throw new Error(message);
+  if (!ctx.db) throw unavailable(message);
   return ctx.db;
 }
 
@@ -275,7 +276,7 @@ export interface RunResult {
  */
 export async function getRunResult(ctx: ServerContext, runId: string): Promise<RunResult> {
   const task = await getRun(ctx, runId);
-  if (!task) throw new Error(`No run with id "${runId}"`);
+  if (!task) throw notFound(`No run with id "${runId}"`);
   if (!isTerminalState(task.state)) return { runId, state: task.state, ready: false };
   if (!task.resultRef) {
     return { runId, state: task.state, ready: true, error: task.error ?? undefined };
