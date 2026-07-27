@@ -2,7 +2,7 @@ import { renderReport, REPORT_FORMATS, type ReportFormat } from "@atp/reporting"
 import { executionStatusSchema, type ExecutionResult, type ManifestEntry } from "@atp/schema";
 import { listRuns, type Run } from "@atp/store";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import { SCOPES } from "./auth";
@@ -51,6 +51,53 @@ function catalogView(entry: ManifestEntry): Record<string, unknown> {
   };
 }
 
+/**
+ * Annotations for the tools that only ever read. The protocol's defaults are deliberately
+ * pessimistic — `destructiveHint` and `openWorldHint` both default to **true** — so an
+ * unannotated `list_tests` is indistinguishable to a client from one that mutates a remote
+ * system. Declaring the read-only set is what lets a caller treat them as safe; the
+ * run tools keep the conservative defaults, which are already correct for them.
+ */
+export const READ_ONLY: ToolAnnotations = { readOnlyHint: true, openWorldHint: false };
+
+/** Default page size for catalog listings. The corpus is designed to grow to thousands of
+ * entries, and an unbounded array here is marshaled per request straight into a calling
+ * agent's context window. */
+export const DEFAULT_PAGE_SIZE = 200;
+export const MAX_PAGE_SIZE = 1000;
+
+/**
+ * Cursors are opaque by spec — a client must not parse, modify, or persist them. Ours is a
+ * keyset over the id-sorted catalog (base64 of the last id returned), which stays correct as
+ * entries are added or removed, unlike an offset.
+ */
+export function encodeCursor(lastId: string): string {
+  return Buffer.from(lastId, "utf8").toString("base64url");
+}
+
+function decodeCursor(cursor: string | undefined): string | undefined {
+  if (cursor === undefined) return undefined;
+  const decoded = Buffer.from(cursor, "base64url").toString("utf8");
+  // An unparseable cursor is a client error worth naming, not a silent reset to page 1.
+  if (!decoded) throw new Error(`Invalid cursor "${cursor}"`);
+  return decoded;
+}
+
+/** Take one page after `cursor` from an id-sorted list, plus the cursor for the next. */
+export function paginate<T extends { id: string }>(
+  sorted: T[],
+  opts: { limit?: number; cursor?: string } = {},
+): { page: T[]; nextCursor?: string } {
+  const after = decodeCursor(opts.cursor);
+  const start = after === undefined ? 0 : sorted.findIndex((e) => e.id > after);
+  if (start < 0) return { page: [] };
+  const limit = Math.min(opts.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+  const page = sorted.slice(start, start + limit);
+  const last = page[page.length - 1];
+  const more = last !== undefined && start + page.length < sorted.length;
+  return { page, nextCursor: more ? encodeCursor(last.id) : undefined };
+}
+
 /** The catalog filter shared by `list_tests` and `run_selection`: tag/owner/kind plus a
  * free-text `query` over id+title. Returns matching entries, id-sorted. */
 export interface EntryFilter {
@@ -82,6 +129,7 @@ export function registerListTests(server: McpServer, ctx: ServerContext): void {
       title: "List tests",
       description:
         "List the catalog of available tests and suites, filterable by tags, owner, kind, or a free-text query over id and title.",
+      annotations: READ_ONLY,
       inputSchema: {
         tags: z.array(z.string()).optional().describe("Only entries carrying all of these tags."),
         owner: z.string().optional().describe("Only entries owned by this team/owner."),
@@ -89,13 +137,27 @@ export function registerListTests(server: McpServer, ctx: ServerContext): void {
         query: z
           .string()
           .optional()
-.describe("Case-insensitive substring match over id and title."),
+          .describe("Case-insensitive substring match over id and title."),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(MAX_PAGE_SIZE)
+          .optional()
+          .describe(`Max entries per page (default ${DEFAULT_PAGE_SIZE}).`),
+        cursor: z
+          .string()
+          .optional()
+          .describe("Opaque cursor from a previous call's nextCursor; omit for the first page."),
       },
     },
-    ({ tags, owner, kind, query }, extra) => {
+    ({ tags, owner, kind, query, limit, cursor }, extra) => {
       guardScope(ctx, extra, SCOPES.READ);
-      const entries = selectEntries(ctx, { tags, owner, kind, query }).map(catalogView);
-      return jsonResult({ entries });
+      const matched = selectEntries(ctx, { tags, owner, kind, query });
+      const { page, nextCursor } = paginate(matched, { limit, cursor });
+      // `nextCursor` absent means "end of results" — that is the protocol's signal, so it is
+      // omitted rather than sent as null.
+      return jsonResult({ entries: page.map(catalogView), ...(nextCursor ? { nextCursor } : {}) });
     },
   );
 }
@@ -107,6 +169,7 @@ export function registerDescribeTest(server: McpServer, ctx: ServerContext): voi
     "describe_test",
     {
       title: "Describe test",
+      annotations: READ_ONLY,
       description:
         "Return the full manifest entry for a test or suite by id: its executable node graph, params JSON Schema, env, matrix, and authored source path.",
       inputSchema: { id: z.string().describe('The test or suite id, e.g. "identity.login".') },
@@ -192,6 +255,7 @@ export function registerGetReport(server: McpServer, ctx: ServerContext): void {
     "get_report",
     {
       title: "Get report",
+      annotations: READ_ONLY,
       description:
         "Render a stored run's report by run id, in markdown (default), html, junit, json, or summary.",
       inputSchema: {
@@ -235,6 +299,7 @@ export function registerListRuns(server: McpServer, ctx: ServerContext): void {
     "list_runs",
     {
       title: "List runs",
+      annotations: READ_ONLY,
       description:
         "List recorded run history, newest first, filterable by entry id, status, recency, and count. Empty when no run database is configured.",
       inputSchema: {

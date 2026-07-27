@@ -7,7 +7,7 @@ import { SCOPES } from "./auth";
 import type { ServerContext } from "./context";
 import { auditRun, guardScope } from "./guard";
 import { cancelRun, DEFAULT_TASK_TTL_MS, getRun, getRunResult, submitRun } from "./tasks";
-import { findEntry, jsonResult, selectEntries, textResult } from "./tools";
+import { findEntry, jsonResult, READ_ONLY, selectEntries, textResult } from "./tools";
 
 /**
  * The asynchronous run surface. `run_suite` is task-augmented
@@ -128,6 +128,7 @@ export function registerGetRun(server: McpServer, ctx: ServerContext): void {
     "get_run",
     {
       title: "Get run",
+      annotations: READ_ONLY,
       description:
         "Return the status and progress of an asynchronous run by id (mirrors tasks/get for non-Task clients).",
       inputSchema: {
@@ -159,6 +160,7 @@ export function registerGetRunResult(server: McpServer, ctx: ServerContext): voi
     "get_run_result",
     {
       title: "Get run result",
+      annotations: READ_ONLY,
       description:
         "Return an asynchronous run's report once it has reached a terminal state (mirrors tasks/result). Formats: markdown (default), html, junit, json, summary.",
       inputSchema: {
@@ -197,6 +199,9 @@ export function registerCancelRun(server: McpServer, ctx: ServerContext): void {
     "cancel_run",
     {
       title: "Cancel run",
+      // Repeatable without additional effect, and it destroys no data — it asks a run
+      // to stop. Both differ from the pessimistic protocol defaults.
+      annotations: { idempotentHint: true, destructiveHint: false, openWorldHint: false },
       description:
         "Request cancellation of an in-flight asynchronous run (mirrors tasks/cancel). The worker aborts between nodes and finalizes the run as cancelled.",
       inputSchema: { runId: z.string().describe("The run id to cancel.") },

@@ -56,6 +56,41 @@ describe("list_tests", () => {
     expect(widget).toMatchObject({ kind: "test", isLongRunning: false });
   });
 
+  it("pages the catalog with an opaque cursor and stops when exhausted", async () => {
+    // The corpus is documented to grow to thousands of entries; an unbounded array lands
+    // whole in a calling agent's context window.
+    const first = await conn.client.callTool({ name: "list_tests", arguments: { limit: 2 } });
+    const page1 = payload<{ entries: { id: string }[]; nextCursor?: string }>(first);
+    expect(page1.entries.map((e) => e.id)).toEqual([
+      "alpha.create-widget",
+      "alpha.widget-lifecycle",
+    ]);
+    expect(page1.nextCursor).toBeTruthy();
+
+    const second = await conn.client.callTool({
+      name: "list_tests",
+      arguments: { limit: 2, cursor: page1.nextCursor },
+    });
+    const page2 = payload<{ entries: { id: string }[]; nextCursor?: string }>(second);
+    expect(page2.entries.map((e) => e.id)).toEqual(["beta.read-widget"]);
+    // Absent nextCursor is the protocol's "end of results".
+    expect(page2.nextCursor).toBeUndefined();
+  });
+
+  it("advertises the read-only tools as read-only", async () => {
+    // Both destructiveHint and openWorldHint default to *true*, so an unannotated reader is
+    // indistinguishable from a tool that mutates a remote system.
+    const { tools } = await conn.client.listTools();
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+    expect(byName.list_tests?.annotations).toMatchObject({
+      readOnlyHint: true,
+      openWorldHint: false,
+    });
+    expect(byName.get_report?.annotations).toMatchObject({ readOnlyHint: true });
+    // The run tools keep the conservative defaults — they really do reach a live SUT.
+    expect(byName.run_test?.annotations?.readOnlyHint).toBeUndefined();
+  });
+
   it("filters by tag", async () => {
     const res = await conn.client.callTool({
       name: "list_tests",

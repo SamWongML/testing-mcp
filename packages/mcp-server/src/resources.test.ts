@@ -38,6 +38,15 @@ describe("catalog + test resources", () => {
     ]);
   });
 
+  it("pages the catalog at test://catalog/{cursor} without colliding with test://{id}", async () => {
+    // The fixture corpus fits in one page, so drive the template directly with a cursor
+    // pointing past the first entry — the same shape a real nextCursor has.
+    const cursor = Buffer.from("alpha.create-widget", "utf8").toString("base64url");
+    const res = await conn.client.readResource({ uri: `test://catalog/${cursor}` });
+    const parsed = JSON.parse(first(res).text) as { entries: { id: string }[] };
+    expect(parsed.entries.map((e) => e.id)).toEqual(["alpha.widget-lifecycle", "beta.read-widget"]);
+  });
+
   it("serves one entry's detail at test://{id}", async () => {
     const res = await conn.client.readResource({ uri: "test://alpha.create-widget" });
     const parsed = JSON.parse(first(res).text) as {
